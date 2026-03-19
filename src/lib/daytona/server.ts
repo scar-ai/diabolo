@@ -534,3 +534,15 @@ export const startRepoTaskJob = async (input: RepoTaskInput) => {
 };
 
 export const getRepoTaskJob = async (jobId: string) => requireJob(jobId);
+
+export const terminateRepoTaskJob = async (jobId: string) => {
+  const job = jobs.get(jobId);
+  if (!job) return;
+
+  updateJob(jobId, {
+    completedAt: new Date().toISOString(),
+    error: "Task was terminated by user.",
+    stage: "Terminated",
+    status: "failed",
+  });
+};

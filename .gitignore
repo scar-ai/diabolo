@@ -20,5 +20,7 @@ dist
 /api/
 /server/build
 /public/build
+/tmp/
+/tmp/ui
 
 .tanstack

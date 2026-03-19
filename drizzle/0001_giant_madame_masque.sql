@@ -1,0 +1,1 @@
+ALTER TABLE "project" ADD COLUMN "repo_id" text NOT NULL;
