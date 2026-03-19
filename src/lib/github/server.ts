@@ -1,4 +1,6 @@
 import "@tanstack/react-start/server-only";
+import { Octokit } from "octokit";
+
 import { _getUser } from "@/lib/auth/functions";
 import { db } from "@/lib/db";
 import type { GithubRepo } from "@/lib/github/types";
@@ -22,18 +24,13 @@ type GithubRepoApiItem = {
   };
 };
 
-type GithubViewerApiItem = {
-  login: string;
-  name: string | null;
-  email: string | null;
-};
+const getGithubOctokit = async () => {
+  const { accessToken } = await getGithubAccount();
 
-type GithubPullRequestApiItem = {
-  html_url: string;
-  number: number;
+  return new Octokit({
+    auth: accessToken,
+  });
 };
-
-const GITHUB_API_BASE_URL = "https://api.github.com";
 
 const getGithubAccount = async (): Promise<GithubAccount> => {
   const user = await _getUser({ disableCookieCache: true });
@@ -55,33 +52,6 @@ const getGithubAccount = async (): Promise<GithubAccount> => {
   };
 };
 
-const fetchGithub = async <T>(
-  path: string,
-  accessToken: string,
-  init?: {
-    body?: unknown;
-    method?: "GET" | "POST" | "PATCH";
-  },
-): Promise<T> => {
-  const response = await fetch(`${GITHUB_API_BASE_URL}${path}`, {
-    method: init?.method ?? "GET",
-    headers: {
-      Accept: "application/vnd.github+json",
-      Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
-      "X-GitHub-Api-Version": "2022-11-28",
-    },
-    body: init?.body ? JSON.stringify(init.body) : undefined,
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(errorText || `GitHub API request failed with status ${response.status}.`);
-  }
-
-  return response.json() as Promise<T>;
-};
-
 const mapGithubRepo = (repo: GithubRepoApiItem): GithubRepo => ({
   id: String(repo.id),
   name: repo.name,
@@ -96,26 +66,15 @@ const mapGithubRepo = (repo: GithubRepoApiItem): GithubRepo => ({
 });
 
 export const listSignedInGithubRepos = async (): Promise<GithubRepo[]> => {
-  const { accessToken } = await getGithubAccount();
-  const repos: GithubRepo[] = [];
-  let page = 1;
+  const octokit = await getGithubOctokit();
+  const repos = (await octokit.paginate(octokit.rest.repos.listForAuthenticatedUser, {
+    affiliation: "owner,collaborator,organization_member",
+    per_page: 100,
+    sort: "updated",
+    visibility: "all",
+  })) as GithubRepoApiItem[];
 
-  while (true) {
-    const pageItems = await fetchGithub<GithubRepoApiItem[]>(
-      `/user/repos?visibility=all&affiliation=owner,collaborator,organization_member&sort=updated&per_page=100&page=${page}`,
-      accessToken,
-    );
-
-    repos.push(...pageItems.map(mapGithubRepo));
-
-    if (pageItems.length < 100) {
-      break;
-    }
-
-    page += 1;
-  }
-
-  return repos;
+  return repos.map(mapGithubRepo);
 };
 
 export const getSignedInGithubRepo = async (repoId: string): Promise<GithubRepo | null> => {
@@ -129,8 +88,8 @@ export const getSignedInGithubAccessToken = async () => {
 };
 
 export const getSignedInGithubViewer = async () => {
-  const { accessToken } = await getGithubAccount();
-  const viewer = await fetchGithub<GithubViewerApiItem>("/user", accessToken);
+  const octokit = await getGithubOctokit();
+  const { data: viewer } = await octokit.rest.users.getAuthenticated();
 
   return {
     email: viewer.email || `${viewer.login}@users.noreply.github.com`,
@@ -167,28 +126,20 @@ export const createPullRequestForSignedInGithubRepo = async ({
   repoId: string;
   title: string;
 }) => {
-  const [repo, accessToken] = await Promise.all([
-    getSignedInGithubRepo(repoId),
-    getSignedInGithubAccessToken(),
-  ]);
+  const [repo, octokit] = await Promise.all([getSignedInGithubRepo(repoId), getGithubOctokit()]);
 
   if (!repo) {
     throw new Error("Unknown repository selection.");
   }
 
-  const pullRequest = await fetchGithub<GithubPullRequestApiItem>(
-    `/repos/${repo.fullName}/pulls`,
-    accessToken,
-    {
-      body: {
-        base,
-        body,
-        head,
-        title,
-      },
-      method: "POST",
-    },
-  );
+  const { data: pullRequest } = await octokit.rest.pulls.create({
+    base,
+    body,
+    head,
+    owner: repo.ownerLogin,
+    repo: repo.name,
+    title,
+  });
 
   return {
     number: pullRequest.number,

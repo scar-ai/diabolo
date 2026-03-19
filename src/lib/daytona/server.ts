@@ -35,6 +35,7 @@ export type RepoTaskJob = {
   repoId: string;
   repoName?: string;
   repoUrl?: string;
+  userId: string;
   sandboxId?: string;
   sandboxName?: string;
   stage: string;
@@ -186,10 +187,10 @@ const updateJob = (jobId: string, patch: Partial<RepoTaskJob>) => {
   });
 };
 
-const requireJob = (jobId: string) => {
+const requireJob = (jobId: string, userId: string) => {
   const job = jobs.get(jobId);
 
-  if (!job) {
+  if (!job || job.userId !== userId) {
     throw new Error("Task not found.");
   }
 
@@ -492,7 +493,7 @@ const runRepoTaskJob = async (jobId: string, input: RepoTaskInput) => {
   }
 };
 
-export const startRepoTaskJob = async (input: RepoTaskInput) => {
+export const startRepoTaskJob = async (input: RepoTaskInput, userId: string) => {
   const prompt = input.prompt.trim();
 
   if (!prompt) {
@@ -519,6 +520,7 @@ export const startRepoTaskJob = async (input: RepoTaskInput) => {
     stage: "Queued",
     startedAt,
     status: "queued",
+    userId,
   };
 
   jobs.set(jobId, job);
@@ -533,4 +535,4 @@ export const startRepoTaskJob = async (input: RepoTaskInput) => {
   return job;
 };
 
-export const getRepoTaskJob = async (jobId: string) => requireJob(jobId);
+export const getRepoTaskJob = async (jobId: string, userId: string) => requireJob(jobId, userId);
