@@ -249,10 +249,9 @@ function TaskDetailPage() {
         </div>
 
         {/* Metadata grid */}
-        {task.completedAt || task.clonePath || task.sandboxName ? (
+        {task.completedAt || task.sandboxName ? (
           <div className="grid gap-3 md:grid-cols-2">
             {task.sandboxName ? <MetaItem label="Sandbox name" value={task.sandboxName} /> : null}
-            {task.clonePath ? <MetaItem label="Clone path" value={task.clonePath} /> : null}
             {task.completedAt ? (
               <MetaItem label="Completed" value={new Date(task.completedAt).toLocaleString()} />
             ) : null}

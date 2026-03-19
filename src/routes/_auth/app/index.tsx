@@ -1,4 +1,4 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import {
@@ -30,6 +30,7 @@ export const Route = createFileRoute("/_auth/app/")({
 function AppHome() {
   const { user } = Route.useRouteContext();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const listGithubRepos = useServerFn($listGithubRepos);
   const listGithubBranches = useServerFn($listGithubBranches);
   const createProject = useServerFn($createProject);
@@ -76,7 +77,12 @@ function AppHome() {
   const recentTasksQuery = useQuery({
     queryFn: listAllUserTasks,
     queryKey: ["all-user-tasks", listAllUserTasks],
-    refetchInterval: 10_000,
+    refetchInterval: (query) => {
+      const tasks = query.state.data ?? [];
+      return tasks.some((task) => task.status === "queued" || task.status === "running")
+        ? 2_000
+        : 10_000;
+    },
   });
 
   const recentTasks = recentTasksQuery.data ?? [];
@@ -98,6 +104,7 @@ function AppHome() {
       return createTask({ data: { projectId: proj.id, prompt: data.prompt } });
     },
     onSuccess: (newTask) => {
+      queryClient.invalidateQueries({ queryKey: ["all-user-tasks"] });
       toast.success("Background task started.");
       setInputValue("");
       navigate({ to: "/app/tasks/$taskId", params: { taskId: newTask.id } });

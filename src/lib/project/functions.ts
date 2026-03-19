@@ -27,6 +27,8 @@ const getTaskInputSchema = z.object({
   taskId: z.string().min(1),
 });
 
+const RUNNING_TASK_STATUSES = new Set(["queued", "running"]);
+
 const requireUserProject = async (projectId: string, userId: string) => {
   const row = await db
     .select()
@@ -39,6 +41,34 @@ const requireUserProject = async (projectId: string, userId: string) => {
   }
 
   return row;
+};
+
+const syncTaskWithJob = async (row: typeof task.$inferSelect) => {
+  try {
+    const job = await getRepoTaskJob(row.id);
+
+    const [updated] = await db
+      .update(task)
+      .set({
+        status: job.status,
+        stage: job.stage,
+        logs: job.logs,
+        error: job.error,
+        completedAt: job.completedAt ? new Date(job.completedAt) : undefined,
+        branchName: job.branchName,
+        clonePath: job.clonePath,
+        sandboxId: job.sandboxId,
+        repoName: job.repoName,
+        prUrl: job.prUrl,
+        prNumber: job.prNumber,
+      })
+      .where(eq(task.id, row.id))
+      .returning();
+
+    return updated;
+  } catch {
+    return row;
+  }
 };
 
 export const $createProject = createServerFn({ method: "POST" })
@@ -136,31 +166,7 @@ export const $getTask = createServerFn({ method: "GET" })
       throw new Error("Task not found.");
     }
 
-    try {
-      const job = await getRepoTaskJob(row.id);
-
-      const [updated] = await db
-        .update(task)
-        .set({
-          status: job.status,
-          stage: job.stage,
-          logs: job.logs,
-          error: job.error,
-          completedAt: job.completedAt ? new Date(job.completedAt) : undefined,
-          branchName: job.branchName,
-          clonePath: job.clonePath,
-          sandboxId: job.sandboxId,
-          repoName: job.repoName,
-          prUrl: job.prUrl,
-          prNumber: job.prNumber,
-        })
-        .where(eq(task.id, row.id))
-        .returning();
-
-      return updated;
-    } catch {
-      return row;
-    }
+    return syncTaskWithJob(row);
   });
 
 export const $deleteProject = createServerFn({ method: "POST" })
@@ -232,31 +238,7 @@ export const $getTaskById = createServerFn({ method: "GET" })
       throw new Error("Task not found.");
     }
 
-    try {
-      const job = await getRepoTaskJob(row.task.id);
-
-      const [updated] = await db
-        .update(task)
-        .set({
-          status: job.status,
-          stage: job.stage,
-          logs: job.logs,
-          error: job.error,
-          completedAt: job.completedAt ? new Date(job.completedAt) : undefined,
-          branchName: job.branchName,
-          clonePath: job.clonePath,
-          sandboxId: job.sandboxId,
-          repoName: job.repoName,
-          prUrl: job.prUrl,
-          prNumber: job.prNumber,
-        })
-        .where(eq(task.id, row.task.id))
-        .returning();
-
-      return updated;
-    } catch {
-      return row.task;
-    }
+    return syncTaskWithJob(row.task);
   });
 
 export const $terminateTaskById = createServerFn({ method: "POST" })
@@ -304,7 +286,7 @@ export const $listAllUserTasks = createServerFn({ method: "GET" })
       return [];
     }
 
-    return db
+    const tasks = await db
       .select()
       .from(task)
       .where(
@@ -314,4 +296,8 @@ export const $listAllUserTasks = createServerFn({ method: "GET" })
         ),
       )
       .orderBy(desc(task.startedAt));
+
+    return Promise.all(
+      tasks.map((row) => (RUNNING_TASK_STATUSES.has(row.status) ? syncTaskWithJob(row) : row)),
+    );
   });
