@@ -7,6 +7,7 @@ import {
   CornerDownLeftIcon,
   ChevronDownIcon,
   ArrowRightIcon,
+  PlusIcon,
   LoaderIcon,
 } from "lucide-react";
 import { useState } from "react";
@@ -18,10 +19,16 @@ import {
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import { Separator } from "@/components/ui/separator";
 import { $listGithubBranches, $listGithubRepos } from "@/lib/github/functions";
-import { $createProject, $createTask, $listAllUserTasks } from "@/lib/project/functions";
+import {
+  $createProject,
+  $createTask,
+  $listAllUserTasks,
+  $listProjects,
+} from "@/lib/project/functions";
 
 export const Route = createFileRoute("/_auth/app/")({
   component: AppHome,
@@ -33,6 +40,7 @@ function AppHome() {
   const queryClient = useQueryClient();
   const listGithubRepos = useServerFn($listGithubRepos);
   const listGithubBranches = useServerFn($listGithubBranches);
+  const listProjects = useServerFn($listProjects);
   const createProject = useServerFn($createProject);
   const createTask = useServerFn($createTask);
 
@@ -47,7 +55,7 @@ function AppHome() {
   });
 
   const [inputValue, setInputValue] = useState("");
-  const [selectedRepoId, setSelectedRepoId] = useState("");
+  const [selectedProjectId, setSelectedProjectId] = useState("");
   const [selectedBranch, setSelectedBranch] = useState("");
 
   const reposQuery = useQuery({
@@ -56,7 +64,22 @@ function AppHome() {
   });
 
   const repos = reposQuery.data ?? [];
-  const currentRepo = repos.find((r) => r.id === selectedRepoId) ?? repos[0] ?? null;
+  const projectsQuery = useQuery({
+    queryFn: listProjects,
+    queryKey: ["projects", user.id, listProjects],
+  });
+
+  const projects = projectsQuery.data ?? [];
+  const currentProject = projects.find((p) => p.id === selectedProjectId) ?? projects[0] ?? null;
+  const currentRepoId = currentProject?.repoId ?? "";
+
+  const hiddenRepoForProjectCreation =
+    repos.find((repo) => repo.id === currentRepoId) ?? repos[0] ?? null;
+
+  const projectLabel =
+    currentProject?.name ?? (projectsQuery.isPending ? "Loading..." : "Select project");
+
+  const currentRepo = repos.find((r) => r.id === currentRepoId) ?? null;
 
   const branchesQuery = useQuery({
     enabled: Boolean(currentRepo),
@@ -71,6 +94,29 @@ function AppHome() {
     branches[0]?.name ||
     currentRepo?.defaultBranch ||
     "main";
+
+  const createProjectMutation = useMutation({
+    mutationFn: async () => {
+      if (!hiddenRepoForProjectCreation) {
+        throw new Error("Select a repository first.");
+      }
+
+      return createProject({
+        data: {
+          name: hiddenRepoForProjectCreation.fullName,
+          repoId: hiddenRepoForProjectCreation.id,
+        },
+      });
+    },
+    onSuccess: (project) => {
+      queryClient.invalidateQueries({ queryKey: ["projects"] });
+      toast.success("Project created.");
+      navigate({ to: "/app/projects/$projectId", params: { projectId: project.id } });
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Failed to create project.");
+    },
+  });
 
   const listAllUserTasks = useServerFn($listAllUserTasks);
 
@@ -206,21 +252,29 @@ function AppHome() {
               <DropdownMenu>
                 <DropdownMenuTrigger className="flex cursor-pointer items-center gap-1 rounded-md px-1.5 py-1 text-sm font-medium text-muted-foreground/60 transition-colors hover:bg-accent hover:text-muted-foreground">
                   <BookMarkedIcon className="size-3.5" aria-hidden="true" />
-                  {currentRepo?.fullName ?? (reposQuery.isPending ? "Loading..." : "Select repo")}
+                  {projectLabel}
                   <ChevronDownIcon className="size-3 opacity-50" aria-hidden="true" />
                 </DropdownMenuTrigger>
                 <DropdownMenuContent side="top" sideOffset={8}>
-                  {repos.map((repo) => (
+                  {projects.map((project) => (
                     <DropdownMenuItem
-                      key={repo.id}
+                      key={project.id}
                       onClick={() => {
-                        setSelectedRepoId(repo.id);
+                        setSelectedProjectId(project.id);
                         setSelectedBranch("");
                       }}
                     >
-                      {repo.fullName}
+                      {project.name}
                     </DropdownMenuItem>
                   ))}
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    onClick={() => createProjectMutation.mutate()}
+                    disabled={!hiddenRepoForProjectCreation || createProjectMutation.isPending}
+                  >
+                    <PlusIcon className="size-4" aria-hidden="true" />
+                    {createProjectMutation.isPending ? "Creating project..." : "Add project"}
+                  </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
 

@@ -14,6 +14,7 @@
     "check": "pnpm format && pnpm lint",
     "prepare": "husky",
     "db": "node ./scripts/db.mjs",
+    "db:studio": "pnpm drizzle-kit studio",
     "deps": "pnpm dlx taze@latest -Ilw",
     "deps:major": "pnpm dlx taze@latest major -Ilw",
     "tanstack": "pnpm dlx @tanstack/cli@latest",
