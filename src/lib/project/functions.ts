@@ -182,6 +182,21 @@ export const $deleteTask = createServerFn({ method: "POST" })
   .inputValidator((data) => getTaskInputSchema.parse(data))
   .handler(async ({ context, data }) => {
     await requireUserProject(data.projectId, context.user.id);
+
+    const row = await db
+      .select()
+      .from(task)
+      .where(and(eq(task.id, data.taskId), eq(task.projectId, data.projectId)))
+      .then((rows) => rows[0]);
+
+    if (!row) {
+      throw new Error("Task not found.");
+    }
+
+    if (RUNNING_TASK_STATUSES.has(row.status)) {
+      throw new Error("Running sessions cannot be removed.");
+    }
+
     await db.delete(task).where(and(eq(task.id, data.taskId), eq(task.projectId, data.projectId)));
   });
 
