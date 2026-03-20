@@ -167,6 +167,29 @@ export const createPullRequestForSignedInGithubRepo = async ({
   };
 };
 
+export const createPullRequestCommentForSignedInGithubRepo = async ({
+  body,
+  prNumber,
+  repoId,
+}: {
+  body: string;
+  prNumber: number;
+  repoId: string;
+}) => {
+  const [repo, octokit] = await Promise.all([getSignedInGithubRepo(repoId), getGithubOctokit()]);
+
+  if (!repo) {
+    throw new Error("Unknown repository selection.");
+  }
+
+  await octokit.rest.issues.createComment({
+    body,
+    issue_number: prNumber,
+    owner: repo.ownerLogin,
+    repo: repo.name,
+  });
+};
+
 export const listSignedInGithubRepoBranches = async (repoFullName: string) => {
   const { accessToken } = await getGithubAccount();
 

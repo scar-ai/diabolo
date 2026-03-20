@@ -354,7 +354,12 @@ export const $destroyTaskSandboxById = createServerFn({ method: "POST" })
 
     const [updated] = await db
       .update(task)
-      .set({ stage: "Sandbox destroyed" })
+      .set({
+        clonePath: null,
+        sandboxId: null,
+        sandboxName: null,
+        stage: "Sandbox stopped",
+      })
       .where(eq(task.id, row.task.id))
       .returning();
 

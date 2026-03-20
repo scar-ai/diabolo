@@ -97,9 +97,9 @@ function TaskDetailPage() {
   const task = taskQuery.data;
   const isRunning = task && !TERMINAL_STATUSES.has(task.status);
   const isCompleted = task && TERMINAL_STATUSES.has(task.status);
-  const sandboxAlive = isCompleted && task.sandboxId && task.stage !== "Sandbox destroyed";
+  const sandboxAlive = isCompleted && task.sandboxId;
   const canSendFollowUp =
-    sandboxAlive && followUpInput.trim().length >= 10 && !followUpMutation.isPending;
+    isCompleted && followUpInput.trim().length >= 10 && !followUpMutation.isPending;
 
   const scrollToBottom = useCallback(() => {
     if (scrollRef.current) {
@@ -234,7 +234,7 @@ function TaskDetailPage() {
       </div>
 
       {/* Bottom chat input */}
-      {sandboxAlive || isRunning ? (
+      {isCompleted || isRunning ? (
         <div className="shrink-0 border-t border-border bg-background px-4 py-3">
           <div className="mx-auto w-full max-w-3xl">
             <form
@@ -251,7 +251,9 @@ function TaskDetailPage() {
                 placeholder={
                   isRunning && !sandboxAlive
                     ? "Waiting for task to finish..."
-                    : "Send a follow-up..."
+                    : sandboxAlive
+                      ? "Send a follow-up..."
+                      : "Send a follow-up to restart the sandbox..."
                 }
                 disabled={isRunning && !sandboxAlive}
                 className="flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground/40 disabled:cursor-not-allowed disabled:opacity-50"
