@@ -9,6 +9,10 @@ type GithubAccount = {
   accessToken: string;
 };
 
+type GithubBranch = {
+  name: string;
+};
+
 type GithubRepoApiItem = {
   id: number;
   name: string;
@@ -22,6 +26,22 @@ type GithubRepoApiItem = {
   owner: {
     login: string;
   };
+};
+
+const fetchGithub = async <TData>(path: string, accessToken: string): Promise<TData> => {
+  const response = await fetch(`https://api.github.com${path}`, {
+    headers: {
+      Accept: "application/vnd.github+json",
+      Authorization: `Bearer ${accessToken}`,
+      "X-GitHub-Api-Version": "2022-11-28",
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`GitHub request failed with status ${response.status}.`);
+  }
+
+  return response.json() as Promise<TData>;
 };
 
 const getGithubOctokit = async () => {
@@ -150,10 +170,10 @@ export const createPullRequestForSignedInGithubRepo = async ({
 export const listSignedInGithubRepoBranches = async (repoFullName: string) => {
   const { accessToken } = await getGithubAccount();
 
-  const branches = await fetchGithub<{ name: string }[]>(
+  const branches = await fetchGithub<GithubBranch[]>(
     `/repos/${repoFullName}/branches?per_page=100`,
     accessToken,
   );
 
-  return branches.map((b) => ({ name: b.name }));
+  return branches.map((branch) => ({ name: branch.name }));
 };

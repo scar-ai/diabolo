@@ -187,10 +187,10 @@ const updateJob = (jobId: string, patch: Partial<RepoTaskJob>) => {
   });
 };
 
-const requireJob = (jobId: string, userId: string) => {
+const requireJob = (jobId: string, userId?: string) => {
   const job = jobs.get(jobId);
 
-  if (!job || job.userId !== userId) {
+  if (!job || (userId && job.userId !== userId)) {
     throw new Error("Task not found.");
   }
 
@@ -535,7 +535,7 @@ export const startRepoTaskJob = async (input: RepoTaskInput, userId: string) => 
   return job;
 };
 
-export const getRepoTaskJob = async (jobId: string) => requireJob(jobId);
+export const getRepoTaskJob = async (jobId: string, userId?: string) => requireJob(jobId, userId);
 
 export const terminateRepoTaskJob = async (jobId: string) => {
   const job = jobs.get(jobId);

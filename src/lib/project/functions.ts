@@ -43,9 +43,9 @@ const requireUserProject = async (projectId: string, userId: string) => {
   return row;
 };
 
-const syncTaskWithJob = async (row: typeof task.$inferSelect) => {
+const syncTaskWithJob = async (row: typeof task.$inferSelect, userId?: string) => {
   try {
-    const job = await getRepoTaskJob(row.id);
+    const job = await getRepoTaskJob(row.id, userId);
 
     const [updated] = await db
       .update(task)
@@ -119,7 +119,10 @@ export const $createTask = createServerFn({ method: "POST" })
   .handler(async ({ context, data }) => {
     const proj = await requireUserProject(data.projectId, context.user.id);
 
-    const job = await startRepoTaskJob({ prompt: data.prompt, repoId: proj.repoId });
+    const job = await startRepoTaskJob(
+      { prompt: data.prompt, repoId: proj.repoId },
+      context.user.id,
+    );
 
     const [inserted] = await db
       .insert(task)
@@ -166,7 +169,7 @@ export const $getTask = createServerFn({ method: "GET" })
       throw new Error("Task not found.");
     }
 
-    return syncTaskWithJob(row);
+    return syncTaskWithJob(row, context.user.id);
   });
 
 export const $deleteProject = createServerFn({ method: "POST" })
@@ -313,6 +316,8 @@ export const $listAllUserTasks = createServerFn({ method: "GET" })
       .orderBy(desc(task.startedAt));
 
     return Promise.all(
-      tasks.map((row) => (RUNNING_TASK_STATUSES.has(row.status) ? syncTaskWithJob(row) : row)),
+      tasks.map((row) =>
+        RUNNING_TASK_STATUSES.has(row.status) ? syncTaskWithJob(row, context.user.id) : row,
+      ),
     );
   });
