@@ -20,6 +20,7 @@ const projectIdInputSchema = z.object({
 const createTaskInputSchema = z.object({
   projectId: z.string().min(1),
   prompt: z.string().min(10),
+  sourceBranch: z.string().min(1),
 });
 
 const getTaskInputSchema = z.object({
@@ -120,7 +121,7 @@ export const $createTask = createServerFn({ method: "POST" })
     const proj = await requireUserProject(data.projectId, context.user.id);
 
     const job = await startRepoTaskJob(
-      { prompt: data.prompt, repoId: proj.repoId },
+      { prompt: data.prompt, repoId: proj.repoId, sourceBranch: data.sourceBranch },
       context.user.id,
     );
 

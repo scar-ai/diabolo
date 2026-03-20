@@ -7,6 +7,7 @@ import { getRepoTaskJob, startRepoTaskJob } from "@/lib/daytona/server";
 const startRepoTaskInputSchema = z.object({
   prompt: z.string().min(10),
   repoId: z.string().min(1),
+  sourceBranch: z.string().min(1),
 });
 
 const getRepoTaskInputSchema = z.object({

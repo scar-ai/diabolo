@@ -89,7 +89,7 @@ function AppHome() {
   const runningTasks = recentTasks.filter((t) => t.status === "queued" || t.status === "running");
 
   const taskMutation = useMutation({
-    mutationFn: async (data: { prompt: string; repoId: string }) => {
+    mutationFn: async (data: { prompt: string; repoId: string; sourceBranch: string }) => {
       // Ensure a project exists for this repo, then create a task
       let proj: { id: string };
       try {
@@ -101,7 +101,9 @@ function AppHome() {
         throw new Error("Failed to create project for this repository.");
       }
 
-      return createTask({ data: { projectId: proj.id, prompt: data.prompt } });
+      return createTask({
+        data: { projectId: proj.id, prompt: data.prompt, sourceBranch: data.sourceBranch },
+      });
     },
     onSuccess: (newTask) => {
       queryClient.invalidateQueries({ queryKey: ["all-user-tasks"] });
@@ -119,7 +121,11 @@ function AppHome() {
 
   const handleSubmit = () => {
     if (!canSubmit || !currentRepo) return;
-    taskMutation.mutate({ prompt: inputValue.trim(), repoId: currentRepo.id });
+    taskMutation.mutate({
+      prompt: inputValue.trim(),
+      repoId: currentRepo.id,
+      sourceBranch: currentBranch,
+    });
   };
 
   return (
