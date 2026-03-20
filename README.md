@@ -73,7 +73,7 @@ We use [Husky](https://typicode.github.io/husky/) to run git hooks with the foll
 
 We use **pnpm** by default, but you can modify these scripts in [package.json](./package.json) to use your preferred package manager.
 
-- **`auth:generate`** - Regenerate the [auth db schema](./src/lib/db/schema/auth.schema.ts) if you've made changes to your Better Auth [config](./src/lib/auth/auth.ts).
+- **`auth:generate`** - Regenerate the [auth db schema](./src/lib/db/schema/schema.ts) if you've made changes to your Better Auth [config](./src/lib/auth/auth.ts).
 - **`db`** - Run [drizzle-kit](https://orm.drizzle.team/docs/kit-overview) commands. (e.g. `pnpm db generate`, `pnpm db studio`)
 - **`ui`** - The shadcn/ui CLI. (e.g. `pnpm ui add button`)
 - **`format`**, **`lint`** - Run Oxfmt and Oxlint, or both via `pnpm check`.

@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import * as z from "zod";
 
+import { authMiddleware, freshAuthMiddleware } from "@/lib/auth/middleware";
 import { getRepoTaskJob, startRepoTaskJob } from "@/lib/daytona/server";
 
 const startRepoTaskInputSchema = z.object({
@@ -13,13 +14,15 @@ const getRepoTaskInputSchema = z.object({
 });
 
 export const $startRepoTask = createServerFn({ method: "POST" })
+  .middleware([freshAuthMiddleware])
   .inputValidator((data) => startRepoTaskInputSchema.parse(data))
-  .handler(async ({ data }) => {
-    return startRepoTaskJob(data);
+  .handler(async ({ data, context }) => {
+    return startRepoTaskJob(data, context.user.id);
   });
 
 export const $getRepoTask = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
   .inputValidator((data) => getRepoTaskInputSchema.parse(data))
-  .handler(async ({ data }) => {
-    return getRepoTaskJob(data.jobId);
+  .handler(async ({ data, context }) => {
+    return getRepoTaskJob(data.jobId, context.user.id);
   });

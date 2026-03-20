@@ -1,2 +1,2 @@
-export * from "./auth.schema";
-export * from "./app.schema";
+export * from "./schema";
+// export your other schemas here
