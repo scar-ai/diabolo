@@ -1,6 +1,6 @@
 {
-  "id": "e45950aa-8262-4bec-913c-49fa938a62e8",
-  "prevId": "7e8fc7d7-2011-4d60-adc2-bc5fda59efa8",
+  "id": "7e9ae4af-0653-4449-ac43-02402136579e",
+  "prevId": "e45950aa-8262-4bec-913c-49fa938a62e8",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -518,14 +518,14 @@
           "primaryKey": false,
           "notNull": false
         },
-        "live_updates": {
-          "name": "live_updates",
+        "logs": {
+          "name": "logs",
           "type": "text",
           "primaryKey": false,
           "notNull": false
         },
-        "logs": {
-          "name": "logs",
+        "agent_messages": {
+          "name": "agent_messages",
           "type": "text",
           "primaryKey": false,
           "notNull": false

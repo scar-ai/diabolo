@@ -3,7 +3,13 @@ import { and, desc, eq, inArray } from "drizzle-orm";
 import * as z from "zod";
 
 import { authMiddleware } from "@/lib/auth/middleware";
-import { getRepoTaskJob, startRepoTaskJob, terminateRepoTaskJob } from "@/lib/daytona/server";
+import {
+  destroyRepoTaskSandbox,
+  getRepoTaskJob,
+  runFollowUpOnSandbox,
+  startRepoTaskJob,
+  terminateRepoTaskJob,
+} from "@/lib/daytona/server";
 import { db } from "@/lib/db";
 import { project, task } from "@/lib/db/schema";
 import { getSignedInGithubRepo } from "@/lib/github/server";
@@ -54,6 +60,7 @@ const syncTaskWithJob = async (row: typeof task.$inferSelect, userId?: string) =
         status: job.status,
         stage: job.stage,
         logs: job.logs,
+        agentMessages: job.agentMessages.length > 0 ? JSON.stringify(job.agentMessages) : undefined,
         error: job.error,
         completedAt: job.completedAt ? new Date(job.completedAt) : undefined,
         branchName: job.branchName,
@@ -321,4 +328,63 @@ export const $listAllUserTasks = createServerFn({ method: "GET" })
         RUNNING_TASK_STATUSES.has(row.status) ? syncTaskWithJob(row, context.user.id) : row,
       ),
     );
+  });
+
+const followUpInputSchema = z.object({
+  prompt: z.string().min(10),
+  taskId: z.string().min(1),
+});
+
+export const $destroyTaskSandboxById = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .inputValidator((data) => taskIdInputSchema.parse(data))
+  .handler(async ({ context, data }) => {
+    const row = await db
+      .select()
+      .from(task)
+      .innerJoin(project, eq(task.projectId, project.id))
+      .where(and(eq(task.id, data.taskId), eq(project.userId, context.user.id)))
+      .then((rows) => rows[0]);
+
+    if (!row) {
+      throw new Error("Task not found.");
+    }
+
+    await destroyRepoTaskSandbox(row.task.id, context.user.id);
+
+    const [updated] = await db
+      .update(task)
+      .set({ stage: "Sandbox destroyed" })
+      .where(eq(task.id, row.task.id))
+      .returning();
+
+    return updated;
+  });
+
+export const $runFollowUpById = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .inputValidator((data) => followUpInputSchema.parse(data))
+  .handler(async ({ context, data }) => {
+    const row = await db
+      .select()
+      .from(task)
+      .innerJoin(project, eq(task.projectId, project.id))
+      .where(and(eq(task.id, data.taskId), eq(project.userId, context.user.id)))
+      .then((rows) => rows[0]);
+
+    if (!row) {
+      throw new Error("Task not found.");
+    }
+
+    queueMicrotask(() => {
+      void runFollowUpOnSandbox(row.task.id, data.prompt.trim(), context.user.id);
+    });
+
+    const [updated] = await db
+      .update(task)
+      .set({ status: "running", stage: "Running follow-up task" })
+      .where(eq(task.id, row.task.id))
+      .returning();
+
+    return updated;
   });

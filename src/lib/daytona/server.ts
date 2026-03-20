@@ -5,7 +5,6 @@ import {
   type CreateSandboxFromImageParams,
   Daytona,
 } from "@daytonaio/sdk";
-import * as z from "zod";
 
 import { env } from "@/env/server";
 import {
@@ -24,7 +23,13 @@ type RepoTaskInput = {
 
 type RepoTaskJobStatus = "queued" | "running" | "succeeded" | "failed";
 
+export type AgentMessage = {
+  text: string;
+  timestamp: number;
+};
+
 export type RepoTaskJob = {
+  agentMessages: AgentMessage[];
   branchName?: string;
   clonePath?: string;
   completedAt?: string;
@@ -167,14 +172,14 @@ const makeFallbackPrBody = (prompt: string) =>
     "\n",
   );
 
-const generatedGitMetadataSchema = z.object({
-  branchName: z.string().min(1),
-  commitTitle: z.string().min(1),
-  prTitle: z.string().min(1),
-  prBody: z.string().min(1),
-});
+type GeneratedGitMetadata = {
+  branchName: string;
+  commitTitle: string;
+  prTitle: string;
+  prBody: string;
+};
 
-type GeneratedGitMetadata = z.infer<typeof generatedGitMetadataSchema>;
+const MAX_AGENT_MESSAGES = 200;
 
 const appendJobLog = (jobId: string, chunk: string) => {
   const job = jobs.get(jobId);
@@ -188,6 +193,19 @@ const appendJobLog = (jobId: string, chunk: string) => {
     ...job,
     logs: nextLogs,
   });
+};
+
+const appendAgentMessage = (jobId: string, text: string, timestamp: number) => {
+  const job = jobs.get(jobId);
+
+  if (!job || !text.trim()) {
+    return;
+  }
+
+  const messages = [...job.agentMessages, { text: text.trim(), timestamp }].slice(
+    -MAX_AGENT_MESSAGES,
+  );
+  jobs.set(jobId, { ...job, agentMessages: messages });
 };
 
 const updateJob = (jobId: string, patch: Partial<RepoTaskJob>) => {
@@ -237,6 +255,28 @@ const runSandboxCommand = async (
   return response;
 };
 
+const parseOpenCodeJsonOutput = (jobId: string, output: string) => {
+  const lines = output.split("\n");
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+
+    if (!trimmed) {
+      continue;
+    }
+
+    try {
+      const event = JSON.parse(trimmed);
+
+      if (event.type === "text" && event.part?.text) {
+        appendAgentMessage(jobId, event.part.text, event.timestamp ?? Date.now());
+      }
+    } catch {
+      // Not a JSON line
+    }
+  }
+};
+
 const buildOpenCodePrompt = (userPrompt: string) =>
   [
     "You are working inside a cloned GitHub repository.",
@@ -248,32 +288,6 @@ const buildOpenCodePrompt = (userPrompt: string) =>
     "",
     "User task:",
     userPrompt.trim(),
-  ].join("\n");
-
-const buildGitMetadataPrompt = (input: {
-  defaultBranch: string;
-  diff: string;
-  repoFullName: string;
-  userPrompt: string;
-}) =>
-  [
-    "You are generating git metadata for a completed code change.",
-    "Return JSON only. Do not use markdown fences. Do not add commentary.",
-    'The JSON object must match this shape exactly: {"branchName":"...","commitTitle":"...","prTitle":"...","prBody":"..."}',
-    "Requirements:",
-    `- branchName must be a descriptive git branch name prefixed with "diabolo/" and use lowercase kebab-case path segments only.`,
-    "- branchName must be at most 80 characters.",
-    "- commitTitle must be a concise imperative git commit title at most 72 characters.",
-    "- prTitle must be concise, specific, and user-facing.",
-    "- prBody must be plain text, readable in GitHub, and include short sections named Summary, Testing, and Context.",
-    `- The base branch is "${input.defaultBranch}".`,
-    `- The repository is "${input.repoFullName}".`,
-    "",
-    "Original user task:",
-    input.userPrompt.trim(),
-    "",
-    "Unified diff:",
-    input.diff.trim(),
   ].join("\n");
 
 const getProviderScopedModelId = (model: string) => {
@@ -310,106 +324,12 @@ const buildOpenCodeConfigContent = (model: string) => {
 
 const escapeForSingleQuotedShell = (value: string) => value.replace(/'/g, `'\\''`);
 
-const extractJsonObject = (value: string) => {
-  const fencedMatch = value.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  const candidate = fencedMatch?.[1]?.trim() || value.trim();
-  const firstBrace = candidate.indexOf("{");
-  const lastBrace = candidate.lastIndexOf("}");
-
-  if (firstBrace === -1 || lastBrace === -1 || lastBrace <= firstBrace) {
-    return null;
-  }
-
-  try {
-    return JSON.parse(candidate.slice(firstBrace, lastBrace + 1));
-  } catch {
-    return null;
-  }
-};
-
-const normalizeBranchName = (value: string, fallbackPrompt: string) => {
-  const normalized =
-    value
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9/_-]+/g, "-")
-      .replace(/\/{2,}/g, "/")
-      .replace(/-{2,}/g, "-")
-      .replace(/(^[/-]+|[/-]+$)/g, "") || makeFallbackBranchName(fallbackPrompt);
-
-  const prefixed = normalized.startsWith("diabolo/") ? normalized : `diabolo/${normalized}`;
-  const limited = prefixed.slice(0, 80).replace(/[/-]+$/g, "");
-
-  return limited || makeFallbackBranchName(fallbackPrompt);
-};
-
-const normalizeTitle = (value: string, fallbackPrompt: string) =>
-  value.trim().replace(/\s+/g, " ").slice(0, 72) || makeFallbackTitle(fallbackPrompt);
-
-const normalizePrBody = (value: string, fallbackPrompt: string) =>
-  value.trim() || makeFallbackPrBody(fallbackPrompt);
-
-const generateGitMetadata = async (input: {
-  clonePath: string;
-  defaultBranch: string;
-  jobId: string;
-  openCodeApiKey: string;
-  openCodeModel: string;
-  repoFullName: string;
-  sandbox: Awaited<ReturnType<Daytona["create"]>>;
-  userPrompt: string;
-}) => {
-  const diffResponse = await runSandboxCommand(
-    input.sandbox,
-    input.jobId,
-    "git diff -- . ':(exclude)pnpm-lock.yaml'",
-    input.clonePath,
-    undefined,
-    120,
-  );
-  const diff = readCommandOutput(diffResponse.result);
-
-  if (!diff) {
-    throw new Error("Unable to generate git metadata because no diff was available.");
-  }
-
-  const prompt = buildGitMetadataPrompt({
-    defaultBranch: input.defaultBranch,
-    diff,
-    repoFullName: input.repoFullName,
-    userPrompt: input.userPrompt,
-  });
-  const metadataResponse = await runSandboxCommand(
-    input.sandbox,
-    input.jobId,
-    `opencode run --model '${escapeForSingleQuotedShell(input.openCodeModel)}' "$(cat <<'EOF'\n${prompt}\nEOF\n)"`,
-    input.clonePath,
-    {
-      OPENROUTER_API_KEY: input.openCodeApiKey,
-      OPENCODE_CONFIG_CONTENT: buildOpenCodeConfigContent(input.openCodeModel),
-    },
-    900,
-  );
-  const parsed = generatedGitMetadataSchema.safeParse(
-    extractJsonObject(metadataResponse.result || ""),
-  );
-
-  if (!parsed.success) {
-    return {
-      branchName: makeFallbackBranchName(input.userPrompt),
-      commitTitle: makeFallbackTitle(input.userPrompt),
-      prBody: makeFallbackPrBody(input.userPrompt),
-      prTitle: makeFallbackTitle(input.userPrompt),
-    };
-  }
-
-  return {
-    branchName: normalizeBranchName(parsed.data.branchName, input.userPrompt),
-    commitTitle: normalizeTitle(parsed.data.commitTitle, input.userPrompt),
-    prBody: normalizePrBody(parsed.data.prBody, input.userPrompt),
-    prTitle: normalizeTitle(parsed.data.prTitle, input.userPrompt),
-  } satisfies GeneratedGitMetadata;
-};
+const generateGitMetadata = (userPrompt: string): GeneratedGitMetadata => ({
+  branchName: makeFallbackBranchName(userPrompt),
+  commitTitle: makeFallbackTitle(userPrompt),
+  prBody: makeFallbackPrBody(userPrompt),
+  prTitle: makeFallbackTitle(userPrompt),
+});
 
 const getDaytonaErrorMessage = (error: unknown) => {
   const message = error instanceof Error ? error.message : "Unexpected Daytona error.";
@@ -527,10 +447,10 @@ const runRepoTaskJob = async (jobId: string, input: RepoTaskInput) => {
     });
 
     const openCodePrompt = buildOpenCodePrompt(input.prompt);
-    await runSandboxCommand(
+    const openCodeResponse = await runSandboxCommand(
       sandbox,
       jobId,
-      `opencode run --model '${escapeForSingleQuotedShell(openCode.model)}' "$(cat <<'EOF'\n${openCodePrompt}\nEOF\n)"`,
+      `opencode run --format json --model '${escapeForSingleQuotedShell(openCode.model)}' "$(cat <<'EOF'\n${openCodePrompt}\nEOF\n)"`,
       clonePath,
       {
         OPENROUTER_API_KEY: openCode.apiKey,
@@ -538,6 +458,8 @@ const runRepoTaskJob = async (jobId: string, input: RepoTaskInput) => {
       },
       3600,
     );
+
+    parseOpenCodeJsonOutput(jobId, openCodeResponse.result || "");
 
     updateJob(jobId, {
       stage: "Checking generated changes",
@@ -560,16 +482,7 @@ const runRepoTaskJob = async (jobId: string, input: RepoTaskInput) => {
       stage: "Generating branch and pull request metadata",
     });
 
-    const metadata = await generateGitMetadata({
-      clonePath,
-      defaultBranch: sourceBranch,
-      jobId,
-      openCodeApiKey: openCode.apiKey,
-      openCodeModel: openCode.model,
-      repoFullName: repo.fullName,
-      sandbox,
-      userPrompt: input.prompt,
-    });
+    const metadata = generateGitMetadata(input.prompt);
 
     updateJob(jobId, {
       branchName: metadata.branchName,
@@ -617,26 +530,12 @@ const runRepoTaskJob = async (jobId: string, input: RepoTaskInput) => {
       status: "failed",
     });
   } finally {
-    if (sandbox) {
-      updateJob(jobId, {
-        stage: "Destroying sandbox",
-      });
-
-      try {
-        await sandbox.stop(120);
-      } catch {}
-
-      try {
-        await sandbox.delete(120);
-      } catch {}
-    }
-
     const current = jobs.get(jobId);
 
     if (current && current.status !== "failed" && current.status !== "succeeded") {
       updateJob(jobId, {
         completedAt: new Date().toISOString(),
-        stage: "Sandbox cleaned up",
+        stage: "Task completed",
         status: "succeeded",
       });
     }
@@ -664,6 +563,7 @@ export const startRepoTaskJob = async (input: RepoTaskInput, userId: string) => 
   const jobId = makeJobId();
   const startedAt = new Date().toISOString();
   const job: RepoTaskJob = {
+    agentMessages: [],
     id: jobId,
     prompt,
     repoId: input.repoId,
@@ -698,4 +598,79 @@ export const terminateRepoTaskJob = async (jobId: string) => {
     stage: "Terminated",
     status: "failed",
   });
+};
+
+export const destroyRepoTaskSandbox = async (jobId: string, userId?: string) => {
+  const job = requireJob(jobId, userId);
+
+  if (!job.sandboxId) {
+    return;
+  }
+
+  const daytona = getDaytonaClient();
+
+  try {
+    const sandbox = await daytona.get(job.sandboxId);
+
+    try {
+      await sandbox.stop(120);
+    } catch {}
+
+    try {
+      await sandbox.delete(120);
+    } catch {}
+  } catch {}
+
+  updateJob(jobId, {
+    stage: "Sandbox destroyed",
+  });
+};
+
+export const runFollowUpOnSandbox = async (jobId: string, prompt: string, userId?: string) => {
+  const job = requireJob(jobId, userId);
+
+  if (!job.sandboxId || !job.clonePath) {
+    throw new Error("No sandbox available for follow-up.");
+  }
+
+  const openCode = ensureOpenCodeConfig();
+  const daytona = getDaytonaClient();
+  const sandbox = await daytona.get(job.sandboxId);
+
+  updateJob(jobId, {
+    completedAt: undefined,
+    error: undefined,
+    stage: "Running follow-up task",
+    status: "running",
+  });
+
+  try {
+    const openCodePrompt = buildOpenCodePrompt(prompt);
+    const followUpResponse = await runSandboxCommand(
+      sandbox,
+      jobId,
+      `opencode run --format json --model '${escapeForSingleQuotedShell(openCode.model)}' "$(cat <<'EOF'\n${openCodePrompt}\nEOF\n)"`,
+      job.clonePath,
+      {
+        OPENROUTER_API_KEY: openCode.apiKey,
+        OPENCODE_CONFIG_CONTENT: buildOpenCodeConfigContent(openCode.model),
+      },
+      3600,
+    );
+
+    parseOpenCodeJsonOutput(jobId, followUpResponse.result || "");
+
+    updateJob(jobId, {
+      completedAt: new Date().toISOString(),
+      stage: "Follow-up completed",
+      status: "succeeded",
+    });
+  } catch (error) {
+    updateJob(jobId, {
+      completedAt: new Date().toISOString(),
+      error: getDaytonaErrorMessage(error),
+      stage: "Follow-up failed",
+      status: "failed",
+    });
+  }
 };

@@ -15,6 +15,13 @@
       "when": 1773935927707,
       "tag": "0001_giant_madame_masque",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1774029741319,
+      "tag": "0002_supreme_bullseye",
+      "breakpoints": true
     }
   ]
 }

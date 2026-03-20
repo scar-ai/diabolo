@@ -39,6 +39,7 @@ export const task = pgTable(
     branchName: text("branch_name"),
     clonePath: text("clone_path"),
     logs: text("logs"),
+    agentMessages: text("agent_messages"),
     error: text("error"),
     prNumber: integer("pr_number"),
     prUrl: text("pr_url"),
