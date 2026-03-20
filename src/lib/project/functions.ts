@@ -26,6 +26,7 @@ const projectIdInputSchema = z.object({
 const createTaskInputSchema = z.object({
   projectId: z.string().min(1),
   prompt: z.string().min(10),
+  quickTask: z.boolean().optional().default(false),
   sourceBranch: z.string().min(1),
 });
 
@@ -59,16 +60,18 @@ const syncTaskWithJob = async (row: typeof task.$inferSelect, userId?: string) =
       .set({
         status: job.status,
         stage: job.stage,
-        logs: job.logs,
-        agentMessages: job.agentMessages.length > 0 ? JSON.stringify(job.agentMessages) : undefined,
-        error: job.error,
-        completedAt: job.completedAt ? new Date(job.completedAt) : undefined,
-        branchName: job.branchName,
-        clonePath: job.clonePath,
-        sandboxId: job.sandboxId,
-        repoName: job.repoName,
-        prUrl: job.prUrl,
-        prNumber: job.prNumber,
+        logs: job.logs ?? null,
+        agentMessages: job.agentMessages.length > 0 ? JSON.stringify(job.agentMessages) : null,
+        error: job.error ?? null,
+        completedAt: job.completedAt ? new Date(job.completedAt) : null,
+        branchName: job.branchName ?? null,
+        clonePath: job.clonePath ?? null,
+        sandboxId: job.sandboxId ?? null,
+        sandboxName: job.sandboxName ?? null,
+        repoName: job.repoName ?? null,
+        repoUrl: job.repoUrl ?? null,
+        prUrl: job.prUrl ?? null,
+        prNumber: job.prNumber ?? null,
       })
       .where(eq(task.id, row.id))
       .returning();
@@ -128,7 +131,12 @@ export const $createTask = createServerFn({ method: "POST" })
     const proj = await requireUserProject(data.projectId, context.user.id);
 
     const job = await startRepoTaskJob(
-      { prompt: data.prompt, repoId: proj.repoId, sourceBranch: data.sourceBranch },
+      {
+        prompt: data.prompt,
+        quickTask: data.quickTask,
+        repoId: proj.repoId,
+        sourceBranch: data.sourceBranch,
+      },
       context.user.id,
     );
 
@@ -138,6 +146,7 @@ export const $createTask = createServerFn({ method: "POST" })
         id: job.id,
         projectId: data.projectId,
         prompt: job.prompt,
+        quickTask: job.quickTask,
         status: job.status,
         stage: job.stage,
         repoId: job.repoId,
@@ -300,6 +309,50 @@ export const $terminateTaskById = createServerFn({ method: "POST" })
     return updated;
   });
 
+export const $terminateQuickTaskById = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .inputValidator((data) => taskIdInputSchema.parse(data))
+  .handler(async ({ context, data }) => {
+    const row = await db
+      .select()
+      .from(task)
+      .innerJoin(project, eq(task.projectId, project.id))
+      .where(and(eq(task.id, data.taskId), eq(project.userId, context.user.id)))
+      .then((rows) => rows[0]);
+
+    if (!row) {
+      throw new Error("Task not found.");
+    }
+
+    if (!row.task.quickTask) {
+      throw new Error("This action is only available for quick tasks.");
+    }
+
+    try {
+      await terminateRepoTaskJob(row.task.id);
+    } catch {}
+
+    try {
+      await destroyRepoTaskSandbox(row.task.id, context.user.id);
+    } catch {}
+
+    const [updated] = await db
+      .update(task)
+      .set({
+        clonePath: null,
+        completedAt: new Date(),
+        error: "Quick task was stopped by user.",
+        sandboxId: null,
+        sandboxName: null,
+        stage: "Quick task stopped",
+        status: "failed",
+      })
+      .where(eq(task.id, row.task.id))
+      .returning();
+
+    return updated;
+  });
+
 export const $listAllUserTasks = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
   .handler(async ({ context }) => {
@@ -379,6 +432,10 @@ export const $runFollowUpById = createServerFn({ method: "POST" })
 
     if (!row) {
       throw new Error("Task not found.");
+    }
+
+    if (row.task.quickTask) {
+      throw new Error("Quick tasks are read-only.");
     }
 
     queueMicrotask(() => {

@@ -18,6 +18,7 @@ import {
 
 type RepoTaskInput = {
   prompt: string;
+  quickTask: boolean;
   repoId: string;
   sourceBranch: string;
 };
@@ -40,6 +41,7 @@ export type RepoTaskJob = {
   prNumber?: number;
   prUrl?: string;
   prompt: string;
+  quickTask: boolean;
   repoId: string;
   repoName?: string;
   repoUrl?: string;
@@ -172,6 +174,8 @@ const makeFallbackPrBody = (prompt: string) =>
   ["Summary", "- Applies the requested repository changes.", "", "Context", prompt.trim()].join(
     "\n",
   );
+
+const GIT_METADATA_TIMEOUT_MS = 20_000;
 
 type GeneratedGitMetadata = {
   branchName: string;
@@ -396,10 +400,13 @@ const generateGitMetadata = async (
   model: string,
 ): Promise<GeneratedGitMetadata> => {
   const fallback = getFallbackGitMetadata(context.userPrompt);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), GIT_METADATA_TIMEOUT_MS);
 
   try {
     const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
+      signal: controller.signal,
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
@@ -490,6 +497,8 @@ const generateGitMetadata = async (
     };
   } catch {
     return fallback;
+  } finally {
+    clearTimeout(timeout);
   }
 };
 
@@ -532,6 +541,41 @@ const createSandbox = async (repoName: string) => {
   }
 
   return daytona.create(baseParams, { timeout: 120 });
+};
+
+const destroySandboxResources = async (
+  jobId: string,
+  options?: {
+    stage?: string;
+    userId?: string;
+  },
+) => {
+  const job = requireJob(jobId, options?.userId);
+
+  if (!job.sandboxId) {
+    return;
+  }
+
+  const daytona = getDaytonaClient();
+
+  try {
+    const sandbox = await daytona.get(job.sandboxId);
+
+    try {
+      await sandbox.stop(120);
+    } catch {}
+
+    try {
+      await sandbox.delete(120);
+    } catch {}
+  } catch {}
+
+  updateJob(jobId, {
+    clonePath: undefined,
+    sandboxId: undefined,
+    sandboxName: undefined,
+    stage: options?.stage ?? "Sandbox stopped",
+  });
 };
 
 const prepareSandboxWorkspace = async ({
@@ -704,6 +748,7 @@ const runRepoTaskJob = async (jobId: string, input: RepoTaskInput) => {
       stage: "Generating branch, pull request, and comment metadata",
     });
 
+    const metadataStartedAt = Date.now();
     const metadata = await generateGitMetadata(
       {
         baseBranch: sourceBranch,
@@ -715,6 +760,13 @@ const runRepoTaskJob = async (jobId: string, input: RepoTaskInput) => {
       openCode.apiKey,
       openCode.model,
     );
+
+    if (Date.now() - metadataStartedAt >= GIT_METADATA_TIMEOUT_MS) {
+      appendJobLog(
+        jobId,
+        "Git metadata generation timed out; using fallback branch, commit, and PR metadata.\n",
+      );
+    }
 
     updateJob(jobId, {
       branchName: metadata.branchName,
@@ -790,6 +842,23 @@ const runRepoTaskJob = async (jobId: string, input: RepoTaskInput) => {
         status: "succeeded",
       });
     }
+
+    if (input.quickTask) {
+      const terminalJob = jobs.get(jobId);
+      const cleanupStage =
+        terminalJob?.status === "failed"
+          ? "Quick task failed; sandbox destroyed"
+          : "Quick task completed; sandbox destroyed";
+
+      try {
+        await destroySandboxResources(jobId, { stage: cleanupStage });
+      } catch (error) {
+        appendJobLog(
+          jobId,
+          `Failed to destroy quick task sandbox: ${getDaytonaErrorMessage(error)}\n`,
+        );
+      }
+    }
   }
 };
 
@@ -817,6 +886,7 @@ export const startRepoTaskJob = async (input: RepoTaskInput, userId: string) => 
     agentMessages: [],
     id: jobId,
     prompt,
+    quickTask: input.quickTask,
     repoId: input.repoId,
     stage: "Queued",
     startedAt,
@@ -829,6 +899,7 @@ export const startRepoTaskJob = async (input: RepoTaskInput, userId: string) => 
   queueMicrotask(() => {
     void runRepoTaskJob(jobId, {
       prompt,
+      quickTask: input.quickTask,
       repoId: input.repoId,
       sourceBranch: input.sourceBranch,
     });
@@ -852,32 +923,7 @@ export const terminateRepoTaskJob = async (jobId: string) => {
 };
 
 export const destroyRepoTaskSandbox = async (jobId: string, userId?: string) => {
-  const job = requireJob(jobId, userId);
-
-  if (!job.sandboxId) {
-    return;
-  }
-
-  const daytona = getDaytonaClient();
-
-  try {
-    const sandbox = await daytona.get(job.sandboxId);
-
-    try {
-      await sandbox.stop(120);
-    } catch {}
-
-    try {
-      await sandbox.delete(120);
-    } catch {}
-  } catch {}
-
-  updateJob(jobId, {
-    clonePath: undefined,
-    sandboxId: undefined,
-    sandboxName: undefined,
-    stage: "Sandbox stopped",
-  });
+  await destroySandboxResources(jobId, { stage: "Sandbox stopped", userId });
 };
 
 export const runFollowUpOnSandbox = async (jobId: string, prompt: string, userId?: string) => {

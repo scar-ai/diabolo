@@ -1,5 +1,5 @@
 import { relations } from "drizzle-orm";
-import { pgTable, text, timestamp, integer, index } from "drizzle-orm/pg-core";
+import { boolean, pgTable, text, timestamp, integer, index } from "drizzle-orm/pg-core";
 
 import { user } from "./schema";
 
@@ -29,6 +29,7 @@ export const task = pgTable(
       .notNull()
       .references(() => project.id, { onDelete: "cascade" }),
     prompt: text("prompt").notNull(),
+    quickTask: boolean("quick_task").notNull().default(false),
     status: text("status").notNull().default("queued"),
     stage: text("stage").notNull().default("Queued"),
     repoId: text("repo_id"),

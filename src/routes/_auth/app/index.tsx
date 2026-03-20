@@ -13,6 +13,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -47,6 +48,7 @@ function AppHome() {
   });
 
   const [inputValue, setInputValue] = useState("");
+  const [quickTask, setQuickTask] = useState(false);
   const [selectedRepoId, setSelectedRepoId] = useState("");
   const [selectedBranch, setSelectedBranch] = useState("");
 
@@ -89,7 +91,12 @@ function AppHome() {
   const runningTasks = recentTasks.filter((t) => t.status === "queued" || t.status === "running");
 
   const taskMutation = useMutation({
-    mutationFn: async (data: { prompt: string; repoId: string; sourceBranch: string }) => {
+    mutationFn: async (data: {
+      prompt: string;
+      quickTask: boolean;
+      repoId: string;
+      sourceBranch: string;
+    }) => {
       // Ensure a project exists for this repo, then create a task
       let proj: { id: string };
       try {
@@ -102,13 +109,19 @@ function AppHome() {
       }
 
       return createTask({
-        data: { projectId: proj.id, prompt: data.prompt, sourceBranch: data.sourceBranch },
+        data: {
+          projectId: proj.id,
+          prompt: data.prompt,
+          quickTask: data.quickTask,
+          sourceBranch: data.sourceBranch,
+        },
       });
     },
     onSuccess: (newTask) => {
       queryClient.invalidateQueries({ queryKey: ["all-user-tasks"] });
       toast.success("Background task started.");
       setInputValue("");
+      setQuickTask(false);
       navigate({ to: "/app/tasks/$taskId", params: { taskId: newTask.id } });
     },
     onError: (error) => {
@@ -123,6 +136,7 @@ function AppHome() {
     if (!canSubmit || !currentRepo) return;
     taskMutation.mutate({
       prompt: inputValue.trim(),
+      quickTask,
       repoId: currentRepo.id,
       sourceBranch: currentBranch,
     });
@@ -201,6 +215,11 @@ function AppHome() {
                 placeholder="Ask anything..."
                 className="w-full bg-transparent text-foreground outline-none placeholder:text-muted-foreground/40"
               />
+              {quickTask ? (
+                <p className="mt-2 text-xs text-muted-foreground/60">
+                  Runs a single task, opens the PR, then destroys the sandbox automatically.
+                </p>
+              ) : null}
             </div>
           </form>
 
@@ -251,6 +270,20 @@ function AppHome() {
                   ) : null}
                 </DropdownMenuContent>
               </DropdownMenu>
+
+              <button
+                type="button"
+                onClick={() => setQuickTask((current) => !current)}
+                aria-pressed={quickTask}
+                className="flex cursor-pointer items-center gap-2 rounded-md px-1.5 py-1 text-sm font-medium text-muted-foreground/60 transition-colors hover:bg-accent hover:text-muted-foreground"
+              >
+                <Checkbox
+                  checked={quickTask}
+                  aria-label="Enable quick task mode"
+                  className="pointer-events-none size-3.5"
+                />
+                <span>Quick task</span>
+              </button>
             </div>
             <button
               type="button"

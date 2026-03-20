@@ -16,17 +16,19 @@ import {
   Trash2Icon,
   XCircleIcon,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import {
   $destroyTaskSandboxById,
   $getTaskById,
   $runFollowUpById,
+  $terminateQuickTaskById,
   $terminateTaskById,
 } from "@/lib/project/functions";
 
@@ -42,6 +44,7 @@ function TaskDetailPage() {
   const queryClient = useQueryClient();
   const getTaskById = useServerFn($getTaskById);
   const terminateTask = useServerFn($terminateTaskById);
+  const terminateQuickTask = useServerFn($terminateQuickTaskById);
   const destroySandbox = useServerFn($destroyTaskSandboxById);
   const runFollowUp = useServerFn($runFollowUpById);
 
@@ -83,6 +86,18 @@ function TaskDetailPage() {
     },
   });
 
+  const terminateQuickTaskMutation = useMutation({
+    mutationFn: () => terminateQuickTask({ data: { taskId } }),
+    onSuccess: () => {
+      toast.success("Quick task stopped and sandbox destroyed.");
+      queryClient.invalidateQueries({ queryKey: ["task-detail", taskId] });
+      queryClient.invalidateQueries({ queryKey: ["all-user-tasks"] });
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Failed to stop quick task.");
+    },
+  });
+
   const followUpMutation = useMutation({
     mutationFn: (prompt: string) => runFollowUp({ data: { taskId, prompt } }),
     onSuccess: () => {
@@ -98,8 +113,9 @@ function TaskDetailPage() {
   const isRunning = task && !TERMINAL_STATUSES.has(task.status);
   const isCompleted = task && TERMINAL_STATUSES.has(task.status);
   const sandboxAlive = isCompleted && task.sandboxId;
+  const isQuickTask = task?.quickTask === true;
   const canSendFollowUp =
-    isCompleted && followUpInput.trim().length >= 10 && !followUpMutation.isPending;
+    isCompleted && !isQuickTask && followUpInput.trim().length >= 10 && !followUpMutation.isPending;
 
   const scrollToBottom = useCallback(() => {
     if (scrollRef.current) {
@@ -139,6 +155,16 @@ function TaskDetailPage() {
   }
 
   const initials = (user.name ?? user.email ?? "?").slice(0, 1).toUpperCase();
+
+  if (isQuickTask) {
+    return (
+      <QuickTaskDetail
+        isStopping={terminateQuickTaskMutation.isPending}
+        onStop={() => terminateQuickTaskMutation.mutate()}
+        task={task}
+      />
+    );
+  }
 
   return (
     <main className="flex flex-1 flex-col overflow-hidden">
@@ -336,27 +362,205 @@ function parseAgentMessages(raw: string | null | undefined): ParsedAgentMessage[
   }
 }
 
-function AgentBubble({ task, isRunning }: { task: TaskData; isRunning: boolean }) {
-  const [logsOpen, setLogsOpen] = useState(false);
-  const agentMessages = parseAgentMessages(task.agentMessages);
-
-  const statusBadge =
-    task.status === "succeeded" ? (
+function renderStatusBadge(status: TaskData["status"]) {
+  if (status === "succeeded") {
+    return (
       <Badge variant="success" size="sm" className="gap-1">
         <CheckCircle2Icon className="size-3" />
         Completed
       </Badge>
-    ) : task.status === "failed" ? (
+    );
+  }
+
+  if (status === "failed") {
+    return (
       <Badge variant="error" size="sm" className="gap-1">
         <XCircleIcon className="size-3" />
         Failed
       </Badge>
-    ) : (
-      <Badge variant="info" size="sm" className="gap-1">
-        <LoaderIcon className="size-3 animate-spin" />
-        {task.status === "queued" ? "Queued" : "Running"}
-      </Badge>
     );
+  }
+
+  return (
+    <Badge variant="info" size="sm" className="gap-1">
+      <LoaderIcon className="size-3 animate-spin" />
+      {status === "queued" ? "Queued" : "Running"}
+    </Badge>
+  );
+}
+
+function formatTaskDate(value?: Date | string | null) {
+  if (!value) {
+    return "Pending";
+  }
+
+  return new Date(value).toLocaleString([], {
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+function QuickTaskDetail({
+  isStopping,
+  onStop,
+  task,
+}: {
+  isStopping: boolean;
+  onStop: () => void;
+  task: TaskData;
+}) {
+  const agentMessages = parseAgentMessages(task.agentMessages);
+  const responseText = agentMessages
+    .map((message) => message.text)
+    .join("\n\n")
+    .trim();
+  const isRunning = task.status === "queued" || task.status === "running";
+
+  return (
+    <main className="flex flex-1 justify-center px-4 py-8">
+      <div className="flex w-full max-w-4xl flex-col gap-4">
+        <div className="flex items-center justify-between gap-3">
+          <Button
+            render={<Link to="/app/sessions" />}
+            variant="ghost"
+            size="sm"
+            nativeButton={false}
+          >
+            <ArrowLeftIcon className="size-3.5" />
+            Sessions
+          </Button>
+          <div className="flex items-center gap-2">
+            <Badge variant="outline" size="sm">
+              Quick task
+            </Badge>
+            {isRunning ? (
+              <Button variant="destructive" size="sm" disabled={isStopping} onClick={onStop}>
+                {isStopping ? (
+                  <LoaderIcon className="size-3.5 animate-spin" />
+                ) : (
+                  <SquareIcon className="size-3.5" />
+                )}
+                {isStopping ? "Stopping..." : "Stop task"}
+              </Button>
+            ) : null}
+          </div>
+        </div>
+
+        <Card className="border border-border/80">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <span>{task.repoName ?? "Quick task"}</span>
+              {renderStatusBadge(task.status)}
+            </CardTitle>
+            <CardDescription>{task.stage}</CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-3 text-sm sm:grid-cols-3">
+            <ReadOnlyMetaItem
+              label="Date"
+              value={formatTaskDate(task.completedAt ?? task.startedAt)}
+            />
+            <ReadOnlyMetaItem label="Status" value={task.status} />
+            <ReadOnlyMetaItem
+              label="Pull request"
+              value={
+                task.prUrl ? (
+                  <a
+                    href={task.prUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1 text-emerald-600 underline underline-offset-4 dark:text-emerald-400"
+                  >
+                    PR #{task.prNumber}
+                    <ExternalLinkIcon className="size-3" />
+                  </a>
+                ) : (
+                  "Not available"
+                )
+              }
+            />
+          </CardContent>
+        </Card>
+
+        <ReadOnlySection title="Prompt" content={task.prompt} />
+        <ReadOnlySection
+          title="OpenCode response"
+          content={
+            responseText ||
+            (task.status === "queued" || task.status === "running"
+              ? "Waiting for OpenCode response..."
+              : "No OpenCode response captured.")
+          }
+        />
+        <ReadOnlySection
+          title="Logs"
+          content={
+            task.logs ||
+            (task.status === "queued" || task.status === "running"
+              ? "Waiting for sandbox logs..."
+              : "No sandbox logs captured.")
+          }
+          mono
+        />
+
+        {task.error ? (
+          <Card className="border border-destructive/30 bg-destructive/5">
+            <CardHeader>
+              <CardTitle className="text-destructive">Error</CardTitle>
+            </CardHeader>
+            <CardContent className="text-sm text-destructive/80">{task.error}</CardContent>
+          </Card>
+        ) : null}
+      </div>
+    </main>
+  );
+}
+
+function ReadOnlyMetaItem({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <div className="rounded-xl border border-border/70 bg-muted/30 px-4 py-3">
+      <div className="text-xs tracking-[0.08em] text-muted-foreground/70 uppercase">{label}</div>
+      <div className="mt-1 text-sm text-foreground">{value}</div>
+    </div>
+  );
+}
+
+function ReadOnlySection({
+  content,
+  mono = false,
+  title,
+}: {
+  content: string;
+  mono?: boolean;
+  title: string;
+}) {
+  return (
+    <Card className="border border-border/80">
+      <CardHeader>
+        <CardTitle>{title}</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div
+          className={`max-h-[360px] overflow-auto rounded-xl border border-border/70 px-4 py-3 text-sm whitespace-pre-wrap ${
+            mono
+              ? "bg-[#0a0a0a] font-mono text-[11px] leading-relaxed text-emerald-400"
+              : "bg-muted/20"
+          }`}
+        >
+          <pre className={mono ? "break-all whitespace-pre-wrap" : "font-sans whitespace-pre-wrap"}>
+            {content}
+          </pre>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function AgentBubble({ task, isRunning }: { task: TaskData; isRunning: boolean }) {
+  const [logsOpen, setLogsOpen] = useState(false);
+  const agentMessages = parseAgentMessages(task.agentMessages);
 
   return (
     <div className="flex max-w-[85%] items-start gap-3">
@@ -365,7 +569,7 @@ function AgentBubble({ task, isRunning }: { task: TaskData; isRunning: boolean }
         <div className="flex flex-col gap-3 rounded-2xl rounded-tl-sm border border-border bg-muted/40 px-4 py-3">
           {/* Status + stage */}
           <div className="flex items-center gap-2">
-            {statusBadge}
+            {renderStatusBadge(task.status)}
             <span className="text-xs text-muted-foreground">{task.stage}</span>
           </div>
 
