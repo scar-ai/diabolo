@@ -62,6 +62,8 @@ const syncTaskWithJob = async (row: typeof task.$inferSelect, userId?: string) =
         stage: job.stage,
         logs: job.logs ?? null,
         agentMessages: job.agentMessages.length > 0 ? JSON.stringify(job.agentMessages) : null,
+        followUpHistory:
+          job.followUpHistory.length > 0 ? JSON.stringify(job.followUpHistory) : null,
         error: job.error ?? null,
         completedAt: job.completedAt ? new Date(job.completedAt) : null,
         branchName: job.branchName ?? null,

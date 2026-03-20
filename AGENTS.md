@@ -1,5 +1,7 @@
 # Agent Guidelines
 
+The ./tmp directory is only a temp directory for me to drop reference code at a time or the other. If i don't mention it, don't mind it, don't even take the time to read it and DO NOT MODIFY IT.
+
 ## Essentials
 
 - Stack: TypeScript + React (TanStack Start), with Drizzle ORM, shadcn/ui, and Better Auth.

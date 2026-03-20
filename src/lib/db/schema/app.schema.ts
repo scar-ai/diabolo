@@ -41,6 +41,7 @@ export const task = pgTable(
     clonePath: text("clone_path"),
     logs: text("logs"),
     agentMessages: text("agent_messages"),
+    followUpHistory: text("follow_up_history"),
     error: text("error"),
     prNumber: integer("pr_number"),
     prUrl: text("pr_url"),

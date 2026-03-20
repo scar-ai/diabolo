@@ -29,6 +29,13 @@
       "when": 1775000000000,
       "tag": "0003_quick_task_toggle",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1776000000000,
+      "tag": "0004_follow_up_history",
+      "breakpoints": true
     }
   ]
 }

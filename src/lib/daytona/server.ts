@@ -30,12 +30,25 @@ export type AgentMessage = {
   timestamp: number;
 };
 
+export type FollowUpEntry = {
+  completedAt?: string;
+  error?: string;
+  id: string;
+  logs?: string;
+  prompt: string;
+  responseMessages: AgentMessage[];
+  stage: string;
+  startedAt: string;
+  status: RepoTaskJobStatus;
+};
+
 export type RepoTaskJob = {
   agentMessages: AgentMessage[];
   branchName?: string;
   clonePath?: string;
   completedAt?: string;
   error?: string;
+  followUpHistory: FollowUpEntry[];
   id: string;
   logs?: string;
   prNumber?: number;
@@ -201,6 +214,48 @@ const appendJobLog = (jobId: string, chunk: string) => {
   });
 };
 
+const updateFollowUpEntry = (
+  jobId: string,
+  followUpId: string,
+  updater: (entry: FollowUpEntry) => FollowUpEntry,
+) => {
+  const job = jobs.get(jobId);
+
+  if (!job) {
+    return;
+  }
+
+  let found = false;
+  const followUpHistory = job.followUpHistory.map((entry) => {
+    if (entry.id !== followUpId) {
+      return entry;
+    }
+
+    found = true;
+    return updater(entry);
+  });
+
+  if (!found) {
+    return;
+  }
+
+  jobs.set(jobId, {
+    ...job,
+    followUpHistory,
+  });
+};
+
+const appendFollowUpLog = (jobId: string, followUpId: string, chunk: string) => {
+  if (!chunk) {
+    return;
+  }
+
+  updateFollowUpEntry(jobId, followUpId, (entry) => ({
+    ...entry,
+    logs: `${entry.logs || ""}${chunk}`.slice(-MAX_LOG_LENGTH),
+  }));
+};
+
 const appendAgentMessage = (jobId: string, text: string, timestamp: number) => {
   const job = jobs.get(jobId);
 
@@ -212,6 +267,24 @@ const appendAgentMessage = (jobId: string, text: string, timestamp: number) => {
     -MAX_AGENT_MESSAGES,
   );
   jobs.set(jobId, { ...job, agentMessages: messages });
+};
+
+const appendFollowUpAgentMessage = (
+  jobId: string,
+  followUpId: string,
+  text: string,
+  timestamp: number,
+) => {
+  if (!text.trim()) {
+    return;
+  }
+
+  updateFollowUpEntry(jobId, followUpId, (entry) => ({
+    ...entry,
+    responseMessages: [...entry.responseMessages, { text: text.trim(), timestamp }].slice(
+      -MAX_AGENT_MESSAGES,
+    ),
+  }));
 };
 
 const updateJob = (jobId: string, patch: Partial<RepoTaskJob>) => {
@@ -244,12 +317,19 @@ const runSandboxCommand = async (
   cwd?: string,
   envVars?: Record<string, string>,
   timeout = 0,
+  options?: {
+    followUpId?: string;
+  },
 ) => {
   const response = await sandbox.process.executeCommand(command, cwd, envVars, timeout);
   const output = response.result || "";
 
   if (output) {
-    appendJobLog(jobId, `${output}\n`);
+    if (options?.followUpId) {
+      appendFollowUpLog(jobId, options.followUpId, `${output}\n`);
+    } else {
+      appendJobLog(jobId, `${output}\n`);
+    }
   }
 
   if (response.exitCode !== 0) {
@@ -262,6 +342,10 @@ const runSandboxCommand = async (
 };
 
 const parseOpenCodeJsonOutput = (jobId: string, output: string) => {
+  parseOpenCodeJsonOutputForTarget(jobId, output);
+};
+
+const parseOpenCodeJsonOutputForTarget = (jobId: string, output: string, followUpId?: string) => {
   const lines = output.split("\n");
 
   for (const line of lines) {
@@ -275,7 +359,16 @@ const parseOpenCodeJsonOutput = (jobId: string, output: string) => {
       const event = JSON.parse(trimmed);
 
       if (event.type === "text" && event.part?.text) {
-        appendAgentMessage(jobId, event.part.text, event.timestamp ?? Date.now());
+        if (followUpId) {
+          appendFollowUpAgentMessage(
+            jobId,
+            followUpId,
+            event.part.text,
+            event.timestamp ?? Date.now(),
+          );
+        } else {
+          appendAgentMessage(jobId, event.part.text, event.timestamp ?? Date.now());
+        }
       }
     } catch {
       // Not a JSON line
@@ -884,6 +977,7 @@ export const startRepoTaskJob = async (input: RepoTaskInput, userId: string) => 
   const startedAt = new Date().toISOString();
   const job: RepoTaskJob = {
     agentMessages: [],
+    followUpHistory: [],
     id: jobId,
     prompt,
     quickTask: input.quickTask,
@@ -928,15 +1022,30 @@ export const destroyRepoTaskSandbox = async (jobId: string, userId?: string) => 
 
 export const runFollowUpOnSandbox = async (jobId: string, prompt: string, userId?: string) => {
   const openCode = ensureOpenCodeConfig();
+  const followUpId = crypto.randomUUID();
+  const startedAt = new Date().toISOString();
+  const trimmedPrompt = prompt.trim();
+  const job = requireJob(jobId, userId);
+
   updateJob(jobId, {
     completedAt: undefined,
     error: undefined,
+    followUpHistory: [
+      ...job.followUpHistory,
+      {
+        id: followUpId,
+        prompt: trimmedPrompt,
+        responseMessages: [],
+        stage: "Running follow-up task",
+        startedAt,
+        status: "running",
+      },
+    ],
     stage: "Running follow-up task",
     status: "running",
   });
 
   try {
-    const job = requireJob(jobId, userId);
     const [viewer, githubAccessToken, followUpTarget] = await Promise.all([
       getSignedInGithubViewer(),
       getSignedInGithubAccessToken(),
@@ -953,6 +1062,10 @@ export const runFollowUpOnSandbox = async (jobId: string, prompt: string, userId
         updateJob(jobId, {
           stage: "Recreating sandbox for follow-up",
         });
+        updateFollowUpEntry(jobId, followUpId, (entry) => ({
+          ...entry,
+          stage: "Recreating sandbox for follow-up",
+        }));
 
         const prepared = await prepareSandboxWorkspace({
           branch: followUpTarget.branch,
@@ -972,6 +1085,10 @@ export const runFollowUpOnSandbox = async (jobId: string, prompt: string, userId
       updateJob(jobId, {
         stage: "Recreating sandbox for follow-up",
       });
+      updateFollowUpEntry(jobId, followUpId, (entry) => ({
+        ...entry,
+        stage: "Recreating sandbox for follow-up",
+      }));
 
       const prepared = await prepareSandboxWorkspace({
         branch: followUpTarget.branch,
@@ -995,6 +1112,10 @@ export const runFollowUpOnSandbox = async (jobId: string, prompt: string, userId
     updateJob(jobId, {
       stage: "Running follow-up task",
     });
+    updateFollowUpEntry(jobId, followUpId, (entry) => ({
+      ...entry,
+      stage: "Running follow-up task",
+    }));
 
     const openCodePrompt = buildOpenCodePrompt(prompt);
     const followUpResponse = await runSandboxCommand(
@@ -1007,15 +1128,22 @@ export const runFollowUpOnSandbox = async (jobId: string, prompt: string, userId
         OPENCODE_CONFIG_CONTENT: buildOpenCodeConfigContent(openCode.model),
       },
       3600,
+      { followUpId },
     );
 
-    parseOpenCodeJsonOutput(jobId, followUpResponse.result || "");
+    parseOpenCodeJsonOutputForTarget(jobId, followUpResponse.result || "", followUpId);
 
     updateJob(jobId, {
       completedAt: new Date().toISOString(),
       stage: "Follow-up completed",
       status: "succeeded",
     });
+    updateFollowUpEntry(jobId, followUpId, (entry) => ({
+      ...entry,
+      completedAt: new Date().toISOString(),
+      stage: "Follow-up completed",
+      status: "succeeded",
+    }));
   } catch (error) {
     updateJob(jobId, {
       completedAt: new Date().toISOString(),
@@ -1023,5 +1151,12 @@ export const runFollowUpOnSandbox = async (jobId: string, prompt: string, userId
       stage: "Follow-up failed",
       status: "failed",
     });
+    updateFollowUpEntry(jobId, followUpId, (entry) => ({
+      ...entry,
+      completedAt: new Date().toISOString(),
+      error: getDaytonaErrorMessage(error),
+      stage: "Follow-up failed",
+      status: "failed",
+    }));
   }
 };
