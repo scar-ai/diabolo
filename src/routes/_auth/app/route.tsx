@@ -1,29 +1,96 @@
-import { createFileRoute, Link, Outlet } from "@tanstack/react-router";
+import { useQueryClient } from "@tanstack/react-query";
+import { createFileRoute, Link, Outlet, useRouter } from "@tanstack/react-router";
+import { HouseIcon, HistoryIcon, LogOutIcon } from "lucide-react";
 
-import { SignOutButton } from "@/components/sign-out-button";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { Button } from "@/components/ui/button";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import authClient from "@/lib/auth/auth-client";
+import { authQueryOptions } from "@/lib/auth/queries";
 
 export const Route = createFileRoute("/_auth/app")({
   component: AppLayout,
 });
 
 function AppLayout() {
+  const { user } = Route.useRouteContext();
+  const queryClient = useQueryClient();
+  const router = useRouter();
+  const initials = (user.name ?? user.email ?? "?").slice(0, 1).toUpperCase();
+
   return (
-    <div className="min-h-svh bg-background px-4 py-8">
-      <div className="mx-auto flex w-full max-w-5xl flex-col gap-4">
-        <div className="flex items-center justify-between gap-3">
-          <Button render={<Link to="/" />} size="sm" variant="outline" nativeButton={false}>
-            back to home
-          </Button>
-          <div className="flex items-center gap-2">
-            <ThemeToggle />
-            <SignOutButton />
-          </div>
+    <div className="flex min-h-svh flex-col bg-background">
+      <header className="flex items-center justify-between px-6 py-4">
+        <div className="flex items-center">
+          <svg
+            className="size-7 text-foreground"
+            viewBox="0 0 24 24"
+            fill="currentColor"
+            aria-hidden="true"
+          >
+            <path d="M12 2L14.5 9.5L22 12L14.5 14.5L12 22L9.5 14.5L2 12L9.5 9.5L12 2Z" />
+          </svg>
         </div>
 
-        <Outlet />
-      </div>
+        <nav className="flex items-center gap-x-0.5 rounded-lg bg-muted p-0.5">
+          <Link
+            to="/app"
+            activeOptions={{ exact: true }}
+            className="relative flex h-8 shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-md px-2.5 text-sm font-medium whitespace-nowrap transition-colors [&_svg]:size-4"
+            activeProps={{ className: "bg-background text-foreground shadow-sm/5 dark:bg-input" }}
+            inactiveProps={{ className: "text-muted-foreground/72 hover:text-muted-foreground" }}
+          >
+            <HouseIcon aria-hidden="true" />
+            Home
+          </Link>
+          <Link
+            to="/app/sessions"
+            className="relative flex h-8 shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-md px-2.5 text-sm font-medium whitespace-nowrap transition-colors [&_svg]:size-4"
+            activeProps={{ className: "bg-background text-foreground shadow-sm/5 dark:bg-input" }}
+            inactiveProps={{ className: "text-muted-foreground/72 hover:text-muted-foreground" }}
+          >
+            <HistoryIcon aria-hidden="true" />
+            Sessions
+          </Link>
+        </nav>
+
+        <div className="flex items-center gap-2">
+          <ThemeToggle />
+          <DropdownMenu>
+            <DropdownMenuTrigger className="rounded-full">
+              <Avatar className="size-9 border border-border">
+                {user.image ? <AvatarImage src={user.image} alt={user.name ?? ""} /> : null}
+                <AvatarFallback>{initials}</AvatarFallback>
+              </Avatar>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem
+                variant="destructive"
+                onClick={async () => {
+                  await authClient.signOut({
+                    fetchOptions: {
+                      onResponse: async () => {
+                        queryClient.setQueryData(authQueryOptions().queryKey, null);
+                        await router.invalidate();
+                      },
+                    },
+                  });
+                }}
+              >
+                <LogOutIcon />
+                Sign out
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      </header>
+
+      <Outlet />
     </div>
   );
 }

@@ -11,6 +11,7 @@ node_modules
 .env
 
 .data
+.diabolo
 .vercel
 .output
 .wrangler
@@ -20,5 +21,7 @@ dist
 /api/
 /server/build
 /public/build
+/tmp/
+/tmp/ui
 
 .tanstack
