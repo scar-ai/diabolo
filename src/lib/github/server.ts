@@ -146,3 +146,14 @@ export const createPullRequestForSignedInGithubRepo = async ({
     url: pullRequest.html_url,
   };
 };
+
+export const listSignedInGithubRepoBranches = async (repoFullName: string) => {
+  const { accessToken } = await getGithubAccount();
+
+  const branches = await fetchGithub<{ name: string }[]>(
+    `/repos/${repoFullName}/branches?per_page=100`,
+    accessToken,
+  );
+
+  return branches.map((b) => ({ name: b.name }));
+};

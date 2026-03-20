@@ -1,377 +1,272 @@
-import {
-  RiErrorWarningLine,
-  RiExternalLinkLine,
-  RiGitPullRequestLine,
-  RiGitRepositoryLine,
-  RiLoader4Line,
-  RiRobot2Line,
-  RiSparklingLine,
-} from "@remixicon/react";
-import { useMutation, useQuery } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import { startTransition, useEffect, useRef, useState } from "react";
+import {
+  GitBranchIcon,
+  BookMarkedIcon,
+  CornerDownLeftIcon,
+  ChevronDownIcon,
+  ArrowRightIcon,
+  LoaderIcon,
+} from "lucide-react";
+import { useState } from "react";
 import { toast } from "sonner";
 
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import {
-  Card,
-  CardAction,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectLabel,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
-import { $getRepoTask, $startRepoTask } from "@/lib/daytona/functions";
-import { $listGithubRepos } from "@/lib/github/functions";
-
-type RepoTaskJob = {
-  branchName?: string;
-  clonePath?: string;
-  completedAt?: string;
-  error?: string;
-  id: string;
-  logs?: string;
-  prNumber?: number;
-  prUrl?: string;
-  prompt: string;
-  repoId: string;
-  repoName?: string;
-  repoUrl?: string;
-  sandboxId?: string;
-  sandboxName?: string;
-  stage: string;
-  startedAt: string;
-  status: "queued" | "running" | "succeeded" | "failed";
-};
-
-const TERMINAL_STATUSES = new Set<RepoTaskJob["status"]>(["failed", "succeeded"]);
-const DEFAULT_PROMPT =
-  "Inspect this repository, implement the requested change, run the relevant verification, and stop only when the task is fully complete.";
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "@/components/ui/dropdown-menu";
+import { Separator } from "@/components/ui/separator";
+import { $listGithubBranches, $listGithubRepos } from "@/lib/github/functions";
+import { $createProject, $createTask, $listAllUserTasks } from "@/lib/project/functions";
 
 export const Route = createFileRoute("/_auth/app/")({
-  component: AppIndex,
+  component: AppHome,
 });
 
-function AppIndex() {
+function AppHome() {
   const { user } = Route.useRouteContext();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const listGithubRepos = useServerFn($listGithubRepos);
-  const startRepoTask = useServerFn($startRepoTask);
-  const getRepoTask = useServerFn($getRepoTask);
+  const listGithubBranches = useServerFn($listGithubBranches);
+  const createProject = useServerFn($createProject);
+  const createTask = useServerFn($createTask);
+
+  const greeting = getGreeting();
+  const firstName = user.name?.split(" ")[0] ?? user.name ?? "there";
+
+  const today = new Date();
+  const dateString = today.toLocaleDateString("en-US", {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+  });
+
+  const [inputValue, setInputValue] = useState("");
   const [selectedRepoId, setSelectedRepoId] = useState("");
-  const [prompt, setPrompt] = useState(DEFAULT_PROMPT);
-  const [activeJobId, setActiveJobId] = useState("");
-  const lastCompletedJobIdRef = useRef("");
+  const [selectedBranch, setSelectedBranch] = useState("");
 
   const reposQuery = useQuery({
     queryFn: listGithubRepos,
     queryKey: ["github-repos", user.id],
   });
-  const currentRepoId = selectedRepoId || reposQuery.data?.[0]?.id || "";
-  const selectedRepo =
-    reposQuery.data?.find((repo) => repo.id === currentRepoId) ?? reposQuery.data?.[0] ?? null;
+
+  const repos = reposQuery.data ?? [];
+  const currentRepo = repos.find((r) => r.id === selectedRepoId) ?? repos[0] ?? null;
+
+  const branchesQuery = useQuery({
+    enabled: Boolean(currentRepo),
+    queryFn: () => listGithubBranches({ data: { repoFullName: currentRepo!.fullName } }),
+    queryKey: ["github-branches", currentRepo?.id, currentRepo?.fullName, listGithubBranches],
+  });
+
+  const branches = branchesQuery.data ?? [];
+  const currentBranch =
+    selectedBranch ||
+    branches.find((b) => b.name === currentRepo?.defaultBranch)?.name ||
+    branches[0]?.name ||
+    currentRepo?.defaultBranch ||
+    "main";
+
+  const listAllUserTasks = useServerFn($listAllUserTasks);
+
+  const recentTasksQuery = useQuery({
+    queryFn: listAllUserTasks,
+    queryKey: ["all-user-tasks", listAllUserTasks],
+    refetchInterval: (query) => {
+      const tasks = query.state.data ?? [];
+      return tasks.some((task) => task.status === "queued" || task.status === "running")
+        ? 2_000
+        : 10_000;
+    },
+  });
+
+  const recentTasks = recentTasksQuery.data ?? [];
+  const runningTasks = recentTasks.filter((t) => t.status === "queued" || t.status === "running");
 
   const taskMutation = useMutation({
-    mutationFn: async (data: { prompt: string; repoId: string }) => startRepoTask({ data }),
-    onError: (error) => {
-      const message = error instanceof Error ? error.message : "Failed to start the repo task.";
-      toast.error(message);
-    },
-    onSuccess: (job) => {
-      toast.success("Background repo task started.");
-      startTransition(() => {
-        setActiveJobId(job.id);
-      });
-    },
-  });
-
-  const activeJobQuery = useQuery({
-    enabled: Boolean(activeJobId),
-    queryFn: () => getRepoTask({ data: { jobId: activeJobId } }),
-    queryKey: ["repo-task", activeJobId, getRepoTask],
-    refetchInterval: (query) => {
-      const job = query.state.data as RepoTaskJob | undefined;
-
-      if (!job || TERMINAL_STATUSES.has(job.status)) {
-        return false;
+    mutationFn: async (data: { prompt: string; repoId: string }) => {
+      // Ensure a project exists for this repo, then create a task
+      let proj: { id: string };
+      try {
+        proj = await createProject({
+          data: { name: currentRepo?.fullName ?? "Project", repoId: data.repoId },
+        });
+      } catch {
+        // If project creation fails (e.g. duplicate), find existing
+        throw new Error("Failed to create project for this repository.");
       }
 
-      return 2_000;
+      return createTask({ data: { projectId: proj.id, prompt: data.prompt } });
+    },
+    onSuccess: (newTask) => {
+      queryClient.invalidateQueries({ queryKey: ["all-user-tasks"] });
+      toast.success("Background task started.");
+      setInputValue("");
+      navigate({ to: "/app/tasks/$taskId", params: { taskId: newTask.id } });
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Failed to start task.");
     },
   });
 
-  useEffect(() => {
-    const job = activeJobQuery.data;
+  const canSubmit =
+    inputValue.trim().length >= 10 && Boolean(currentRepo) && !taskMutation.isPending;
 
-    if (!job || !TERMINAL_STATUSES.has(job.status) || lastCompletedJobIdRef.current === job.id) {
-      return;
-    }
-
-    lastCompletedJobIdRef.current = job.id;
-
-    if (job.status === "succeeded") {
-      toast.success(job.prUrl ? "Task finished and PR opened." : "Task finished.");
-      return;
-    }
-
-    toast.error(job.error || "The background repo task failed.");
-  }, [activeJobQuery.data]);
-
-  const currentJob = activeJobQuery.data ?? taskMutation.data ?? null;
-  const isLaunching = taskMutation.isPending;
-  const isPolling =
-    currentJob?.status === "queued" ||
-    currentJob?.status === "running" ||
-    activeJobQuery.isFetching;
-  const canLaunch =
-    Boolean(currentRepoId) && !reposQuery.isPending && !reposQuery.isError && !isPolling;
+  const handleSubmit = () => {
+    if (!canSubmit || !currentRepo) return;
+    taskMutation.mutate({ prompt: inputValue.trim(), repoId: currentRepo.id });
+  };
 
   return (
-    <div className="flex flex-col gap-6">
-      <Card className="overflow-hidden border border-border/60 bg-gradient-to-br from-primary/10 via-background to-secondary/80 shadow-sm">
-        <CardHeader>
-          <CardTitle>Background Daytona repo agent</CardTitle>
-          <CardDescription>
-            Pick one GitHub repository, describe the task, and the app will boot a Daytona sandbox,
-            clone the repo, run OpenCode against it, push a branch, open a PR, and destroy the
-            sandbox.
-          </CardDescription>
-          <CardAction>
-            <Badge variant="outline">{user.name}</Badge>
-          </CardAction>
-        </CardHeader>
-        <CardContent className="grid gap-6 lg:grid-cols-[1.5fr_0.9fr]">
-          <div className="flex flex-col gap-4 rounded-2xl border border-border/60 bg-background/85 p-4">
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="repo-picker">Repository</Label>
-              <Select
-                value={currentRepoId}
-                onValueChange={(value) => setSelectedRepoId(value || "")}
-              >
-                <SelectTrigger id="repo-picker" className="w-full">
-                  <SelectValue
-                    placeholder={
-                      reposQuery.isPending ? "Loading your GitHub repos..." : "Select a repository"
-                    }
-                  />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    <SelectLabel>Your accessible GitHub repos</SelectLabel>
-                    {reposQuery.data?.map((repo) => (
-                      <SelectItem key={repo.id} value={repo.id}>
-                        {repo.fullName}
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-            </div>
+    <>
+      <main className="flex flex-1 flex-col items-center justify-center px-4 pb-48">
+        <div className="flex w-full max-w-[600px] flex-col items-center text-center">
+          <p className="mb-3 text-sm text-muted-foreground/60">{dateString}</p>
 
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="task-prompt">Task prompt</Label>
-              <Textarea
-                id="task-prompt"
-                className="min-h-36"
-                onChange={(event) => setPrompt(event.target.value)}
-                placeholder="Explain exactly what OpenCode should change in this repository."
-                value={prompt}
-              />
-            </div>
+          <h1 className="mb-10 font-serif text-[2.75rem] leading-tight tracking-tight text-muted-foreground/70">
+            {greeting}, <span className="text-foreground">{firstName}</span>
+          </h1>
 
-            {reposQuery.isPending ? (
-              <Alert>
-                <RiLoader4Line className="animate-spin" />
-                <AlertTitle>Loading repositories</AlertTitle>
-                <AlertDescription>
-                  Fetching the public and private GitHub repositories available to {user.name}.
-                </AlertDescription>
-              </Alert>
-            ) : null}
-
-            {reposQuery.isError ? (
-              <Alert variant="destructive">
-                <RiErrorWarningLine />
-                <AlertTitle>GitHub repos unavailable</AlertTitle>
-                <AlertDescription>
-                  {reposQuery.error instanceof Error
-                    ? reposQuery.error.message
-                    : "Failed to load your GitHub repositories."}
-                </AlertDescription>
-              </Alert>
-            ) : null}
-
-            {selectedRepo ? (
-              <div className="flex flex-col gap-3 rounded-2xl border border-border/60 bg-card/90 p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-2">
-                    <RiGitRepositoryLine className="text-muted-foreground" />
-                    <span className="font-medium">{selectedRepo.fullName}</span>
-                  </div>
-                  <Badge variant="secondary">{selectedRepo.visibility}</Badge>
+          {/* Running tasks */}
+          {runningTasks.length > 0 ? (
+            <div className="w-full text-left">
+              <div className="mb-3 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-500" />
+                  <span className="text-sm font-semibold text-foreground">
+                    Running ({runningTasks.length})
+                  </span>
                 </div>
-                <p className="text-sm text-muted-foreground">
-                  {selectedRepo.description || "No repository description provided."}
-                </p>
-                <p className="truncate text-xs text-muted-foreground">{selectedRepo.htmlUrl}</p>
+                <Link
+                  to="/app/sessions"
+                  className="flex items-center gap-1 text-xs text-muted-foreground/50 transition-colors hover:text-foreground"
+                >
+                  All sessions <ArrowRightIcon className="size-3" aria-hidden="true" />
+                </Link>
               </div>
-            ) : null}
-          </div>
 
-          <div className="flex flex-col gap-4">
-            <Alert>
-              <RiSparklingLine />
-              <AlertTitle>Execution flow</AlertTitle>
-              <AlertDescription>
-                The task runs in the background: sandbox boot, repo clone, OpenCode task execution,
-                branch push, PR creation, and sandbox teardown. Set `DAYTONA_API_KEY` and
-                `OPENROUTER_API_KEY`. Leave `DAYTONA_DEFAULT_IMAGE` blank unless you know the image
-                is valid for your target.
-              </AlertDescription>
-            </Alert>
-
-            <Alert>
-              <RiRobot2Line />
-              <AlertTitle>Provider</AlertTitle>
-              <AlertDescription>
-                OpenCode runs with the `openrouter` provider and uses `OPENCODE_MODEL` if
-                configured, otherwise `openrouter/openai/gpt-5-codex`. If you enter an OpenRouter
-                model like `nvidia/...`, the app will normalize it to `openrouter/nvidia/...` and
-                register it in the generated OpenCode provider config.
-              </AlertDescription>
-            </Alert>
-          </div>
-        </CardContent>
-        <CardFooter className="items-center justify-between gap-3 border-t border-border/60">
-          <div className="flex items-center gap-2">
-            <Badge variant="outline">Boot</Badge>
-            <Badge variant="outline">Clone</Badge>
-            <Badge variant="outline">Prompt</Badge>
-            <Badge variant="outline">PR</Badge>
-            <Badge variant="outline">Destroy</Badge>
-          </div>
-          <Button
-            disabled={!canLaunch || prompt.trim().length < 10}
-            onClick={() => taskMutation.mutate({ prompt, repoId: currentRepoId })}
-          >
-            {isLaunching || isPolling ? (
-              <RiLoader4Line data-icon="inline-start" className="animate-spin" />
-            ) : (
-              <RiRobot2Line data-icon="inline-start" />
-            )}
-            {isLaunching ? "Launching task..." : isPolling ? "Task running..." : "Run repo task"}
-          </Button>
-        </CardFooter>
-      </Card>
-
-      {currentJob ? (
-        <Card className="border border-border/60 shadow-sm">
-          <CardHeader>
-            <CardTitle>Task status</CardTitle>
-            <CardDescription>
-              {currentJob.repoName || "Repository task"} started at{" "}
-              {new Date(currentJob.startedAt).toLocaleString()}.
-            </CardDescription>
-            <CardAction>
-              <Badge
-                variant={
-                  currentJob.status === "succeeded"
-                    ? "secondary"
-                    : currentJob.status === "failed"
-                      ? "destructive"
-                      : "outline"
-                }
-              >
-                {currentJob.status}
-              </Badge>
-            </CardAction>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-4">
-            {currentJob.error ? (
-              <Alert variant="destructive">
-                <RiErrorWarningLine />
-                <AlertTitle>Task failed</AlertTitle>
-                <AlertDescription>{currentJob.error}</AlertDescription>
-              </Alert>
-            ) : null}
-
-            {currentJob.prUrl ? (
-              <Alert>
-                <RiGitPullRequestLine />
-                <AlertTitle>Pull request opened</AlertTitle>
-                <AlertDescription>
-                  <a
-                    className="inline-flex items-center gap-1 underline underline-offset-4"
-                    href={currentJob.prUrl}
-                    rel="noreferrer"
-                    target="_blank"
+              <div className="flex flex-col gap-2">
+                {runningTasks.map((t) => (
+                  <Link
+                    key={t.id}
+                    to="/app/tasks/$taskId"
+                    params={{ taskId: t.id }}
+                    className="flex items-center gap-3 rounded-xl border border-border bg-muted/40 px-4 py-3 transition-colors hover:bg-muted/60"
                   >
-                    View PR #{currentJob.prNumber}
-                    <RiExternalLinkLine />
-                  </a>
-                </AlertDescription>
-              </Alert>
-            ) : null}
+                    <LoaderIcon className="size-4 shrink-0 animate-spin text-muted-foreground" />
+                    <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                      <span className="truncate text-sm font-medium text-foreground">
+                        {t.prompt.split("\n")[0]?.slice(0, 60)}
+                      </span>
+                      <span className="text-xs text-muted-foreground/50">
+                        {t.repoName ?? "—"} · {t.stage}
+                      </span>
+                    </div>
+                    <Badge variant="info" size="sm">
+                      {t.status === "queued" ? "Queued" : "Running"}
+                    </Badge>
+                  </Link>
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </div>
+      </main>
 
-            <div className="grid gap-4 md:grid-cols-2">
-              <StatusItem label="Stage" value={currentJob.stage} />
-              <StatusItem label="Repository" value={currentJob.repoName || "Unknown"} />
-              <StatusItem label="Sandbox" value={currentJob.sandboxId || "Pending"} />
-              <StatusItem label="Branch" value={currentJob.branchName || "Pending"} />
-              <StatusItem label="Clone path" value={currentJob.clonePath || "Pending"} />
-              <StatusItem
-                label="Completed"
-                value={
-                  currentJob.completedAt
-                    ? new Date(currentJob.completedAt).toLocaleString()
-                    : "Still running"
-                }
+      {/* Bottom Input Area */}
+      <div className="fixed inset-x-0 bottom-6 flex justify-center px-4">
+        <div className="flex w-full max-w-[600px] flex-col overflow-hidden rounded-2xl border border-border bg-background">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleSubmit();
+            }}
+          >
+            <div className="px-4 pt-3.5 pb-6">
+              <input
+                type="text"
+                value={inputValue}
+                onChange={(e) => setInputValue(e.target.value)}
+                placeholder="Ask anything..."
+                className="w-full bg-transparent text-foreground outline-none placeholder:text-muted-foreground/40"
               />
             </div>
+          </form>
 
-            <div className="flex flex-col gap-2">
-              <span className="text-xs tracking-[0.18em] text-muted-foreground uppercase">
-                Prompt
-              </span>
-              <div className="rounded-2xl border border-border/60 bg-muted/40 p-4 text-sm whitespace-pre-wrap">
-                {currentJob.prompt}
-              </div>
-            </div>
+          <Separator className="bg-border" />
 
-            <div className="flex flex-col gap-2">
-              <span className="text-xs tracking-[0.18em] text-muted-foreground uppercase">
-                Recent logs
-              </span>
-              <div className="max-h-96 overflow-auto rounded-2xl border border-border/60 bg-muted/40 p-4 font-mono text-xs whitespace-pre-wrap">
-                {currentJob.logs || "No logs captured yet."}
-              </div>
+          <div className="flex items-center justify-between px-4 py-2.5">
+            <div className="flex items-center gap-0.5">
+              {/* Repository Selector */}
+              <DropdownMenu>
+                <DropdownMenuTrigger className="flex cursor-pointer items-center gap-1 rounded-md px-1.5 py-1 text-sm font-medium text-muted-foreground/60 transition-colors hover:bg-accent hover:text-muted-foreground">
+                  <BookMarkedIcon className="size-3.5" aria-hidden="true" />
+                  {currentRepo?.fullName ?? (reposQuery.isPending ? "Loading..." : "Select repo")}
+                  <ChevronDownIcon className="size-3 opacity-50" aria-hidden="true" />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent side="top" sideOffset={8}>
+                  {repos.map((repo) => (
+                    <DropdownMenuItem
+                      key={repo.id}
+                      onClick={() => {
+                        setSelectedRepoId(repo.id);
+                        setSelectedBranch("");
+                      }}
+                    >
+                      {repo.fullName}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+
+              {/* Branch Selector */}
+              <DropdownMenu>
+                <DropdownMenuTrigger className="flex cursor-pointer items-center gap-1 rounded-md px-1.5 py-1 text-sm font-medium text-muted-foreground/60 transition-colors hover:bg-accent hover:text-muted-foreground">
+                  <GitBranchIcon className="size-3.5" aria-hidden="true" />
+                  {currentBranch}
+                  <ChevronDownIcon className="size-3 opacity-50" aria-hidden="true" />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent side="top" sideOffset={8}>
+                  {branches.map((branch) => (
+                    <DropdownMenuItem
+                      key={branch.name}
+                      onClick={() => setSelectedBranch(branch.name)}
+                    >
+                      {branch.name}
+                    </DropdownMenuItem>
+                  ))}
+                  {branches.length === 0 && !branchesQuery.isPending ? (
+                    <DropdownMenuItem disabled>{currentBranch}</DropdownMenuItem>
+                  ) : null}
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
-          </CardContent>
-        </Card>
-      ) : null}
-    </div>
+            <button
+              type="button"
+              onClick={handleSubmit}
+              disabled={!canSubmit}
+              className={`flex items-center gap-2 transition-colors ${canSubmit ? "text-foreground" : "text-muted-foreground/40"}`}
+            >
+              <span className="text-sm">{taskMutation.isPending ? "Starting..." : "Go"}</span>
+              <span className="inline-flex items-center justify-center rounded border border-input px-1 py-0.5">
+                <CornerDownLeftIcon className="size-3" aria-hidden="true" />
+              </span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </>
   );
 }
 
-function StatusItem({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex flex-col gap-1 rounded-2xl border border-border/60 bg-muted/40 p-4">
-      <span className="text-xs tracking-[0.18em] text-muted-foreground uppercase">{label}</span>
-      <span className="font-medium break-all">{value}</span>
-    </div>
-  );
+function getGreeting() {
+  const hour = new Date().getHours();
+  if (hour < 12) return "Good morning";
+  if (hour < 17) return "Good afternoon";
+  return "Good evening";
 }
