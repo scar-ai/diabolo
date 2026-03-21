@@ -2,6 +2,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link, Outlet, useMatchRoute, useRouter } from "@tanstack/react-router";
 import { HouseIcon, HistoryIcon, LogOutIcon } from "lucide-react";
 
+import { HeaderPortalProvider, useHeaderSlots } from "@/components/app/header-portal";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
@@ -17,6 +18,14 @@ export const Route = createFileRoute("/_auth/app")({
 });
 
 function AppLayout() {
+  return (
+    <HeaderPortalProvider>
+      <AppLayoutInner />
+    </HeaderPortalProvider>
+  );
+}
+
+function AppLayoutInner() {
   const { user } = Route.useRouteContext();
   const queryClient = useQueryClient();
   const matchRoute = useMatchRoute();
@@ -24,11 +33,12 @@ function AppLayout() {
   const initials = (user.name ?? user.email ?? "?").slice(0, 1).toUpperCase();
   const isSessionsActive =
     !!matchRoute({ to: "/app/sessions" }) || !!matchRoute({ to: "/app/tasks/$taskId" });
+  const headerSlots = useHeaderSlots();
 
   return (
     <div className="flex min-h-svh flex-col bg-background">
       <header className="relative flex items-center justify-between px-6 py-4">
-        <div className="flex items-center">
+        <div className="flex items-center gap-3">
           <svg
             className="size-7 text-foreground"
             viewBox="0 0 24 24"
@@ -37,6 +47,7 @@ function AppLayout() {
           >
             <path d="M12 2L14.5 9.5L22 12L14.5 14.5L12 22L9.5 14.5L2 12L9.5 9.5L12 2Z" />
           </svg>
+          {headerSlots.left}
         </div>
 
         <nav className="absolute left-1/2 flex -translate-x-1/2 items-center gap-x-0.5 rounded-lg bg-muted p-0.5">
@@ -64,6 +75,7 @@ function AppLayout() {
         </nav>
 
         <div className="flex items-center gap-2">
+          {headerSlots.right}
           <ThemeToggle />
           <DropdownMenu>
             <DropdownMenuTrigger className="rounded-full">

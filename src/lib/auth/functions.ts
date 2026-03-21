@@ -1,4 +1,4 @@
-import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
+import { createServerFn } from "@tanstack/react-start";
 import { getRequest, setResponseHeader } from "@tanstack/react-start/server";
 
 import { auth } from "@/lib/auth/auth";
@@ -25,7 +25,7 @@ interface GetUserServerQuery {
  *
  * For server app logic, consider using authMiddleware instead.
  */
-export const _getUser = createServerOnlyFn(async (query?: GetUserServerQuery) => {
+export async function _getUser(query?: GetUserServerQuery) {
   const session = await auth.api.getSession({
     headers: getRequest().headers,
     query,
@@ -39,4 +39,4 @@ export const _getUser = createServerOnlyFn(async (query?: GetUserServerQuery) =>
   }
 
   return session.response?.user || null;
-});
+}

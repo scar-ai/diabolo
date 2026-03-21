@@ -12,6 +12,7 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
+import { useSetHeaderSlots } from "@/components/app/header-portal";
 import { PromptComposer } from "@/components/app/prompt-composer";
 import {
   AgentBubble,
@@ -49,6 +50,7 @@ function TaskDetailPage() {
   const terminateQuickTask = useServerFn($terminateQuickTaskById);
   const destroySandbox = useServerFn($destroyTaskSandboxById);
   const runFollowUp = useServerFn($runFollowUpById);
+  const setHeaderSlots = useSetHeaderSlots();
 
   const [followUpInput, setFollowUpInput] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -128,6 +130,66 @@ function TaskDetailPage() {
     scrollToBottom();
   }, [task?.logs, task?.stage, task?.status, task?.followUpHistory, scrollToBottom]);
 
+  const terminatePending = terminateMutation.isPending;
+  const terminateMutate = terminateMutation.mutate;
+  const destroyPending = destroyMutation.isPending;
+  const destroyMutate = destroyMutation.mutate;
+
+  useEffect(() => {
+    setHeaderSlots({
+      left: task ? (
+        <span className="truncate text-sm font-medium text-foreground">
+          {task.repoName ?? "Task"}
+        </span>
+      ) : null,
+      right: (
+        <>
+          {isRunning ? (
+            <Button
+              variant="destructive"
+              size="sm"
+              disabled={terminatePending}
+              onClick={() => terminateMutate()}
+            >
+              {terminatePending ? (
+                <LoaderIcon className="size-3.5 animate-spin" />
+              ) : (
+                <SquareIcon className="size-3.5" />
+              )}
+              {terminatePending ? "Stopping..." : "Terminate"}
+            </Button>
+          ) : null}
+          {sandboxAlive ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="gap-1.5 text-destructive hover:bg-destructive/10 hover:text-destructive"
+              disabled={destroyPending}
+              onClick={() => destroyMutate()}
+            >
+              {destroyPending ? (
+                <LoaderIcon className="size-3.5 animate-spin" />
+              ) : (
+                <Trash2Icon className="size-3.5" />
+              )}
+              {destroyPending ? "Destroying..." : "Destroy Sandbox"}
+            </Button>
+          ) : null}
+        </>
+      ),
+    });
+    return () => setHeaderSlots({ left: null, right: null });
+  }, [
+    task,
+    isRunning,
+    sandboxAlive,
+    terminatePending,
+    terminateMutate,
+    destroyPending,
+    destroyMutate,
+    setHeaderSlots,
+  ]);
+
   const handleSendFollowUp = () => {
     if (!canSendFollowUp) return;
     const prompt = followUpInput.trim();
@@ -174,46 +236,6 @@ function TaskDetailPage() {
 
   return (
     <main className="flex flex-1 flex-col overflow-hidden">
-      {/* Top bar */}
-      <div className="flex shrink-0 items-center justify-between border-b border-border/40 px-4 py-2.5">
-        <span className="truncate text-sm font-medium text-foreground">
-          {task.repoName ?? "Task"}
-        </span>
-        <div className="flex items-center gap-2">
-          {isRunning ? (
-            <Button
-              variant="destructive"
-              size="sm"
-              disabled={terminateMutation.isPending}
-              onClick={() => terminateMutation.mutate()}
-            >
-              {terminateMutation.isPending ? (
-                <LoaderIcon className="size-3.5 animate-spin" />
-              ) : (
-                <SquareIcon className="size-3.5" />
-              )}
-              {terminateMutation.isPending ? "Stopping..." : "Terminate"}
-            </Button>
-          ) : null}
-          {sandboxAlive ? (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="gap-1.5 text-destructive hover:bg-destructive/10 hover:text-destructive"
-              disabled={destroyMutation.isPending}
-              onClick={() => destroyMutation.mutate()}
-            >
-              {destroyMutation.isPending ? (
-                <LoaderIcon className="size-3.5 animate-spin" />
-              ) : (
-                <Trash2Icon className="size-3.5" />
-              )}
-              {destroyMutation.isPending ? "Destroying..." : "Destroy Sandbox"}
-            </Button>
-          ) : null}
-        </div>
-      </div>
-
       {/* Chat messages area */}
       <div ref={scrollRef} className="flex flex-1 flex-col overflow-y-auto">
         <div className="mx-auto flex w-full max-w-3xl flex-col gap-10 px-4 py-6 pb-8">
