@@ -1,69 +1,43 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import {
-  MessageSquareIcon,
-  CheckCircle2Icon,
-  LoaderIcon,
-  CircleDotIcon,
-  XCircleIcon,
-  Trash2Icon,
-} from "lucide-react";
+import { LoaderIcon, Trash2Icon } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
-import { Badge } from "@/components/ui/badge";
+import { SessionRow } from "@/components/app/session-row";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Frame } from "@/components/ui/frame";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { $deleteTask, $listAllUserTasks } from "@/lib/project/functions";
-
-type TaskRow = Awaited<ReturnType<typeof $listAllUserTasks>>[number];
-
-const statusConfig = {
-  queued: {
-    label: "Queued",
-    icon: CircleDotIcon,
-    variant: "secondary" as const,
-  },
-  running: {
-    label: "Running",
-    icon: LoaderIcon,
-    variant: "info" as const,
-  },
-  succeeded: {
-    label: "Completed",
-    icon: CheckCircle2Icon,
-    variant: "success" as const,
-  },
-  failed: {
-    label: "Failed",
-    icon: XCircleIcon,
-    variant: "error" as const,
-  },
-};
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty";
+import { Frame } from "@/components/ui/frame";
+import { Table, TableBody, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { $deleteTask } from "@/lib/project/functions";
+import { allUserTasksQueryOptions } from "@/lib/project/queries";
 
 export const Route = createFileRoute("/_auth/app/sessions")({
+  loader: async ({ context }) => {
+    await context.queryClient.ensureQueryData({
+      ...allUserTasksQueryOptions(context.user.id),
+      revalidateIfStale: true,
+    });
+  },
   component: SessionsPage,
 });
 
 function SessionsPage() {
+  const { user } = Route.useRouteContext();
   const queryClient = useQueryClient();
-  const listAllUserTasks = useServerFn($listAllUserTasks);
   const deleteTask = useServerFn($deleteTask);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const tasksQuery = useQuery({
-    queryFn: listAllUserTasks,
-    queryKey: ["all-user-tasks", listAllUserTasks],
+    ...allUserTasksQueryOptions(user.id),
     refetchInterval: 5_000,
   });
 
@@ -118,20 +92,53 @@ function SessionsPage() {
   return (
     <main className="flex flex-1 flex-col items-center px-4 pt-8 pb-16">
       <div className="w-full max-w-3xl">
-        <div className="mb-6">
-          <h1 className="text-xl font-semibold text-foreground">Sessions</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {sessions.length} total · {runningSessions.length} running
-          </p>
-        </div>
-
         {sessions.length === 0 && !tasksQuery.isPending ? (
-          <div className="flex flex-col items-center justify-center gap-2 py-16 text-center">
-            <MessageSquareIcon className="size-10 text-muted-foreground" />
-            <p className="text-muted-foreground">
-              No sessions yet. Start a task from the home page.
-            </p>
-          </div>
+          <Empty className="min-h-[48vh] border-0 bg-transparent py-16">
+            <EmptyContent>
+              <EmptyHeader>
+                <EmptyMedia variant="icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path
+                      d="M7 9.5A4.5 4.5 0 0 1 11.5 5h2.75A2.75 2.75 0 0 1 17 7.75V10"
+                      className="stroke-current"
+                      strokeWidth="1.6"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                    <path
+                      d="M6.5 19.5H4.75A1.75 1.75 0 0 1 3 17.75V9.25A1.75 1.75 0 0 1 4.75 7.5h9.5A1.75 1.75 0 0 1 16 9.25V11"
+                      className="stroke-current"
+                      strokeWidth="1.6"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                    <path
+                      d="M14.5 14.25 20 10.75v6.5l-5.5-3Z"
+                      className="stroke-current"
+                      strokeWidth="1.6"
+                      strokeLinejoin="round"
+                    />
+                    <path
+                      d="M8 12h4"
+                      className="stroke-current"
+                      strokeWidth="1.6"
+                      strokeLinecap="round"
+                    />
+                    <path
+                      d="M8 14.5h2.5"
+                      className="stroke-current"
+                      strokeWidth="1.6"
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                </EmptyMedia>
+                <EmptyTitle>Nothing to see here.</EmptyTitle>
+              </EmptyHeader>
+              <EmptyDescription>
+                Get back to work. The session graveyard is empty for now.
+              </EmptyDescription>
+            </EmptyContent>
+          </Empty>
         ) : null}
 
         {/* Running tasks section */}
@@ -219,113 +226,5 @@ function SessionsPage() {
         ) : null}
       </div>
     </main>
-  );
-}
-
-function SessionRow({
-  session,
-  onDelete,
-  onToggleSelect,
-  selected = false,
-  isDeleting = false,
-}: {
-  session: TaskRow;
-  onDelete?: () => void;
-  onToggleSelect?: () => void;
-  selected?: boolean;
-  isDeleting?: boolean;
-}) {
-  const status = session.status as keyof typeof statusConfig;
-  const config = statusConfig[status] ?? statusConfig.queued;
-  const StatusIcon = config.icon;
-  const isRunning = status === "running" || status === "queued";
-
-  return (
-    <TableRow className="group">
-      {onToggleSelect ? (
-        <TableCell className="w-10">
-          <div
-            className={`transition-opacity ${selected ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}
-          >
-            <Checkbox
-              checked={selected}
-              onCheckedChange={() => onToggleSelect()}
-              aria-label="Select session"
-              onClick={(e) => e.stopPropagation()}
-            />
-          </div>
-        </TableCell>
-      ) : null}
-      <TableCell className="max-w-0">
-        <Link
-          to="/app/tasks/$taskId"
-          params={{ taskId: session.id }}
-          className="flex flex-col gap-1"
-        >
-          <div className="flex items-center gap-1.5">
-            <span className="truncate text-sm font-medium text-foreground group-hover:underline">
-              {session.prompt.split("\n")[0]?.slice(0, 80)}
-            </span>
-            {session.quickTask ? (
-              <Badge variant="outline" size="sm">
-                Quick
-              </Badge>
-            ) : null}
-          </div>
-          <div className="flex items-center gap-1.5 text-xs text-muted-foreground/50">
-            {session.repoName ? <span className="font-mono">{session.repoName}</span> : null}
-            {session.branchName ? (
-              <>
-                {session.repoName ? <span>·</span> : null}
-                <span className="font-mono">{session.branchName}</span>
-              </>
-            ) : null}
-            {isRunning && session.stage ? (
-              <>
-                <span>·</span>
-                <span className="italic">{session.stage}</span>
-              </>
-            ) : null}
-          </div>
-        </Link>
-      </TableCell>
-      <TableCell className="w-28">
-        <Badge variant={config.variant} size="sm" className="gap-1">
-          <StatusIcon className={`size-3 ${isRunning ? "animate-spin" : ""}`} aria-hidden="true" />
-          {config.label}
-        </Badge>
-      </TableCell>
-      <TableCell className="w-28">
-        <span className="text-xs text-muted-foreground/60">
-          {new Date(session.startedAt).toLocaleDateString("en-US", {
-            month: "short",
-            day: "numeric",
-            year: "numeric",
-          })}
-        </span>
-      </TableCell>
-      <TableCell className="w-12 text-right">
-        {onDelete ? (
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            className="text-destructive/70 hover:bg-destructive/10 hover:text-destructive"
-            disabled={isDeleting}
-            onClick={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              onDelete();
-            }}
-            aria-label="Remove session"
-          >
-            {isDeleting ? (
-              <LoaderIcon className="size-3 animate-spin" aria-hidden="true" />
-            ) : (
-              <Trash2Icon className="size-3" aria-hidden="true" />
-            )}
-          </Button>
-        ) : null}
-      </TableCell>
-    </TableRow>
   );
 }

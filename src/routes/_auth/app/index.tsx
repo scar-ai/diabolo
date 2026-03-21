@@ -2,19 +2,19 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import {
-  GitBranchIcon,
   BookMarkedIcon,
-  CornerDownLeftIcon,
   ChevronDownIcon,
   ArrowRightIcon,
   PlusIcon,
   LoaderIcon,
   SearchIcon,
+  GitBranchIcon,
 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
-import { Badge } from "@/components/ui/badge";
+import { PromptComposer } from "@/components/app/prompt-composer";
+import { RunningTaskItem } from "@/components/app/running-task-item";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -36,16 +36,28 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Separator } from "@/components/ui/separator";
-import { $listGithubBranches, $listGithubRepos } from "@/lib/github/functions";
+import { githubBranchesQueryOptions, githubReposQueryOptions } from "@/lib/github/queries";
+import { $createProject, $createTask } from "@/lib/project/functions";
 import {
-  $createProject,
-  $createTask,
-  $listAllUserTasks,
-  $listProjects,
-} from "@/lib/project/functions";
+  allUserTasksQueryOptions,
+  projectDetailQueryOptions,
+  projectsQueryOptions,
+} from "@/lib/project/queries";
 
 export const Route = createFileRoute("/_auth/app/")({
+  loader: async ({ context }) => {
+    const userId = context.user.id;
+    await Promise.all([
+      context.queryClient.ensureQueryData({
+        ...projectsQueryOptions(userId),
+        revalidateIfStale: true,
+      }),
+      context.queryClient.ensureQueryData({
+        ...allUserTasksQueryOptions(userId),
+        revalidateIfStale: true,
+      }),
+    ]);
+  },
   component: AppHome,
 });
 
@@ -53,9 +65,6 @@ function AppHome() {
   const { user } = Route.useRouteContext();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const listGithubRepos = useServerFn($listGithubRepos);
-  const listGithubBranches = useServerFn($listGithubBranches);
-  const listProjects = useServerFn($listProjects);
   const createProject = useServerFn($createProject);
   const createTask = useServerFn($createTask);
 
@@ -73,30 +82,31 @@ function AppHome() {
   const [selectedProjectId, setSelectedProjectId] = useState("");
   const [quickTask, setQuickTask] = useState(false);
   const [selectedBranch, setSelectedBranch] = useState("");
+  const [branchMenuOpened, setBranchMenuOpened] = useState(false);
   const [createProjectOpen, setCreateProjectOpen] = useState(false);
   const [createProjectSearch, setCreateProjectSearch] = useState("");
   const [createProjectRepoId, setCreateProjectRepoId] = useState("");
   const [createProjectName, setCreateProjectName] = useState("");
 
-  const reposQuery = useQuery({
-    queryFn: listGithubRepos,
-    queryKey: ["github-repos", user.id],
-  });
-
-  const repos = reposQuery.data ?? [];
-  const projectsQuery = useQuery({
-    queryFn: listProjects,
-    queryKey: ["projects", user.id, listProjects],
-  });
+  const projectsQuery = useQuery(projectsQueryOptions(user.id));
 
   const projects = projectsQuery.data ?? [];
-  const currentProject = projects.find((p) => p.id === selectedProjectId) ?? null;
-  const currentRepoId = currentProject?.repoId ?? "";
+  const currentProjectId = selectedProjectId || projects[0]?.id || "";
+  const currentProject = projects.find((p) => p.id === currentProjectId) ?? null;
+  const currentProjectDetailQuery = useQuery({
+    ...projectDetailQueryOptions(currentProjectId),
+    enabled: Boolean(currentProjectId),
+  });
 
   const projectLabel =
     currentProject?.name ?? (projectsQuery.isPending ? "Loading..." : "Select project");
 
-  const currentRepo = repos.find((r) => r.id === currentRepoId) ?? null;
+  const currentProjectRepoFullName = currentProjectDetailQuery.data?.repoFullName ?? null;
+  const createProjectRepoQuery = useQuery({
+    ...githubReposQueryOptions(user.id),
+    enabled: createProjectOpen,
+  });
+  const repos = createProjectRepoQuery.data ?? [];
   const createProjectRepo = repos.find((repo) => repo.id === createProjectRepoId) ?? null;
   const createProjectQuery = createProjectSearch.trim().toLowerCase();
   const filteredCreateRepos = createProjectQuery
@@ -108,18 +118,12 @@ function AppHome() {
     : repos.slice(0, 8);
 
   const branchesQuery = useQuery({
-    enabled: Boolean(currentRepo),
-    queryFn: () => listGithubBranches({ data: { repoFullName: currentRepo!.fullName } }),
-    queryKey: ["github-branches", currentRepo?.id, currentRepo?.fullName, listGithubBranches],
+    ...githubBranchesQueryOptions(user.id, currentProjectRepoFullName ?? ""),
+    enabled: Boolean(currentProjectRepoFullName) && branchMenuOpened,
   });
 
   const branches = branchesQuery.data ?? [];
-  const currentBranch =
-    selectedBranch ||
-    branches.find((b) => b.name === currentRepo?.defaultBranch)?.name ||
-    branches[0]?.name ||
-    currentRepo?.defaultBranch ||
-    "main";
+  const currentBranch = selectedBranch || branches[0]?.name || "main";
 
   const createProjectMutation = useMutation({
     mutationFn: async () => {
@@ -148,11 +152,8 @@ function AppHome() {
     },
   });
 
-  const listAllUserTasks = useServerFn($listAllUserTasks);
-
   const recentTasksQuery = useQuery({
-    queryFn: listAllUserTasks,
-    queryKey: ["all-user-tasks", listAllUserTasks],
+    ...allUserTasksQueryOptions(user.id),
     refetchInterval: (query) => {
       const tasks = query.state.data ?? [];
       return tasks.some((task) => task.status === "queued" || task.status === "running")
@@ -192,7 +193,7 @@ function AppHome() {
   });
 
   const canSubmit =
-    inputValue.trim().length >= 10 && Boolean(currentProject) && !taskMutation.isPending;
+    inputValue.trim().length >= 1 && Boolean(currentProject) && !taskMutation.isPending;
 
   const handleSubmit = () => {
     if (!canSubmit || !currentProject) return;
@@ -233,25 +234,7 @@ function AppHome() {
 
               <div className="flex flex-col gap-2">
                 {runningTasks.map((t) => (
-                  <Link
-                    key={t.id}
-                    to="/app/tasks/$taskId"
-                    params={{ taskId: t.id }}
-                    className="flex items-center gap-3 rounded-xl border border-border bg-muted/40 px-4 py-3 transition-colors hover:bg-muted/60"
-                  >
-                    <LoaderIcon className="size-4 shrink-0 animate-spin text-muted-foreground" />
-                    <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-                      <span className="truncate text-sm font-medium text-foreground">
-                        {t.prompt.split("\n")[0]?.slice(0, 60)}
-                      </span>
-                      <span className="text-xs text-muted-foreground/50">
-                        {t.repoName ?? "—"} · {t.stage}
-                      </span>
-                    </div>
-                    <Badge variant="info" size="sm">
-                      {t.status === "queued" ? "Queued" : "Running"}
-                    </Badge>
-                  </Link>
+                  <RunningTaskItem key={t.id} task={t} />
                 ))}
               </div>
             </div>
@@ -261,39 +244,20 @@ function AppHome() {
 
       {/* Bottom Input Area */}
       <div className="fixed inset-x-0 bottom-6 flex justify-center px-4">
-        <div className="flex w-full max-w-[600px] flex-col overflow-hidden rounded-2xl border border-border bg-background">
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              handleSubmit();
-            }}
-          >
-            <div className="px-4 pt-3.5 pb-6">
-              <input
-                type="text"
-                value={inputValue}
-                onChange={(e) => setInputValue(e.target.value)}
-                placeholder="Ask anything..."
-                className="w-full bg-transparent text-foreground outline-none placeholder:text-muted-foreground/40"
-              />
-              {quickTask ? (
-                <p className="mt-2 text-xs text-muted-foreground/60">
-                  Runs a single task, opens the PR, then destroys the sandbox automatically.
-                </p>
-              ) : null}
-            </div>
-          </form>
-
-          <Separator className="bg-border" />
-
-          <div className="flex items-center justify-between px-4 py-2.5">
-            <div className="flex items-center gap-0.5">
-              {/* Repository Selector */}
+        <PromptComposer
+          value={inputValue}
+          onChange={setInputValue}
+          onSubmit={handleSubmit}
+          placeholder="Ask anything..."
+          canSubmit={canSubmit}
+          submitAriaLabel={taskMutation.isPending ? "Starting..." : "Send"}
+          footerLeft={
+            <>
               <DropdownMenu>
-                <DropdownMenuTrigger className="flex cursor-pointer items-center gap-1 rounded-md px-1.5 py-1 text-sm font-medium text-muted-foreground/60 transition-colors hover:bg-accent hover:text-muted-foreground">
-                  <BookMarkedIcon className="size-3.5" aria-hidden="true" />
-                  {projectLabel}
-                  <ChevronDownIcon className="size-3 opacity-50" aria-hidden="true" />
+                <DropdownMenuTrigger className="flex cursor-pointer items-center gap-1 rounded-lg px-2 py-1 text-sm text-muted-foreground/60 transition-colors hover:bg-accent hover:text-muted-foreground">
+                  <BookMarkedIcon className="size-3.5 shrink-0" aria-hidden="true" />
+                  <span className="max-w-[160px] truncate">{projectLabel}</span>
+                  <ChevronDownIcon className="size-3 shrink-0 opacity-50" aria-hidden="true" />
                 </DropdownMenuTrigger>
                 <DropdownMenuContent side="top" sideOffset={8} className="min-w-56">
                   {projects.length > 0 ? (
@@ -322,7 +286,7 @@ function AppHome() {
                   <DropdownMenuItem
                     onClick={() => {
                       setCreateProjectSearch("");
-                      setCreateProjectRepoId(repos[0]?.id ?? "");
+                      setCreateProjectRepoId("");
                       setCreateProjectName("");
                       setCreateProjectOpen(true);
                     }}
@@ -333,15 +297,18 @@ function AppHome() {
                 </DropdownMenuContent>
               </DropdownMenu>
 
-              {/* Branch Selector */}
-              <DropdownMenu>
+              <DropdownMenu
+                onOpenChange={(open) => {
+                  if (open) setBranchMenuOpened(true);
+                }}
+              >
                 <DropdownMenuTrigger
                   disabled={!currentProject}
-                  className="flex cursor-pointer items-center gap-1 rounded-md px-1.5 py-1 text-sm font-medium text-muted-foreground/60 transition-colors hover:bg-accent hover:text-muted-foreground disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-muted-foreground/60"
+                  className="flex cursor-pointer items-center gap-1 rounded-lg px-2 py-1 text-sm text-muted-foreground/60 transition-colors hover:bg-accent hover:text-muted-foreground disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-muted-foreground/60"
                 >
-                  <GitBranchIcon className="size-3.5" aria-hidden="true" />
-                  {currentBranch}
-                  <ChevronDownIcon className="size-3 opacity-50" aria-hidden="true" />
+                  <GitBranchIcon className="size-3.5 shrink-0" aria-hidden="true" />
+                  <span className="max-w-[160px] truncate">{currentBranch}</span>
+                  <ChevronDownIcon className="size-3 shrink-0 opacity-50" aria-hidden="true" />
                 </DropdownMenuTrigger>
                 <DropdownMenuContent side="top" sideOffset={8}>
                   {branches.map((branch) => (
@@ -362,7 +329,7 @@ function AppHome() {
                 type="button"
                 onClick={() => setQuickTask((current) => !current)}
                 aria-pressed={quickTask}
-                className="flex cursor-pointer items-center gap-2 rounded-md px-1.5 py-1 text-sm font-medium text-muted-foreground/60 transition-colors hover:bg-accent hover:text-muted-foreground"
+                className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1 text-sm text-muted-foreground/60 transition-colors hover:bg-accent hover:text-muted-foreground"
               >
                 <Checkbox
                   checked={quickTask}
@@ -371,20 +338,14 @@ function AppHome() {
                 />
                 <span>Quick task</span>
               </button>
-            </div>
-            <button
-              type="button"
-              onClick={handleSubmit}
-              disabled={!canSubmit}
-              className={`flex items-center gap-2 transition-colors ${canSubmit ? "text-foreground" : "text-muted-foreground/40"}`}
-            >
-              <span className="text-sm">{taskMutation.isPending ? "Starting..." : "Go"}</span>
-              <span className="inline-flex items-center justify-center rounded border border-input px-1 py-0.5">
-                <CornerDownLeftIcon className="size-3" aria-hidden="true" />
-              </span>
-            </button>
-          </div>
-        </div>
+            </>
+          }
+          note={
+            quickTask
+              ? "Runs a single task, opens the PR, then destroys the sandbox automatically."
+              : null
+          }
+        />
       </div>
 
       <Dialog open={createProjectOpen} onOpenChange={setCreateProjectOpen}>
@@ -414,7 +375,7 @@ function AppHome() {
             <div className="grid gap-2">
               <Label>Repository</Label>
               <div className="max-h-72 overflow-auto rounded-2xl border border-border bg-background p-1">
-                {reposQuery.isPending ? (
+                {createProjectRepoQuery.isPending ? (
                   <div className="flex items-center justify-center py-10">
                     <LoaderIcon className="size-5 animate-spin text-muted-foreground" />
                   </div>
