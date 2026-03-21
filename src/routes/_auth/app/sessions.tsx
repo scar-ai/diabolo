@@ -133,6 +133,42 @@ function SessionsPage() {
           <Empty className="min-h-[48vh] border-0 bg-transparent py-16">
             <EmptyContent>
               <EmptyHeader>
+                <EmptyMedia variant="icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path
+                      d="M7 9.5A4.5 4.5 0 0 1 11.5 5h2.75A2.75 2.75 0 0 1 17 7.75V10"
+                      className="stroke-current"
+                      strokeWidth="1.6"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                    <path
+                      d="M6.5 19.5H4.75A1.75 1.75 0 0 1 3 17.75V9.25A1.75 1.75 0 0 1 4.75 7.5h9.5A1.75 1.75 0 0 1 16 9.25V11"
+                      className="stroke-current"
+                      strokeWidth="1.6"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                    <path
+                      d="M14.5 14.25 20 10.75v6.5l-5.5-3Z"
+                      className="stroke-current"
+                      strokeWidth="1.6"
+                      strokeLinejoin="round"
+                    />
+                    <path
+                      d="M8 12h4"
+                      className="stroke-current"
+                      strokeWidth="1.6"
+                      strokeLinecap="round"
+                    />
+                    <path
+                      d="M8 14.5h2.5"
+                      className="stroke-current"
+                      strokeWidth="1.6"
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                </EmptyMedia>
                 <EmptyTitle>Nothing to see here.</EmptyTitle>
               </EmptyHeader>
               <EmptyDescription>

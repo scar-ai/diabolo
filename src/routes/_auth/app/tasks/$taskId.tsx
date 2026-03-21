@@ -2,13 +2,13 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import {
-  ArrowLeftIcon,
   BotIcon,
+  BookMarkedIcon,
   CheckCircle2Icon,
   ChevronDownIcon,
   ChevronRightIcon,
-  CornerDownLeftIcon,
   ExternalLinkIcon,
+  GitBranchIcon,
   GitPullRequestIcon,
   LoaderIcon,
   SquareIcon,
@@ -19,11 +19,12 @@ import {
 import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
+import { PromptComposer } from "@/components/app/prompt-composer";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Separator } from "@/components/ui/separator";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   $destroyTaskSandboxById,
   $getTaskById,
@@ -113,8 +114,9 @@ function TaskDetailPage() {
   const isCompleted = task && TERMINAL_STATUSES.has(task.status);
   const sandboxAlive = isCompleted && task.sandboxId;
   const isQuickTask = task?.quickTask === true;
-  const canSendFollowUp =
-    isCompleted && !isQuickTask && followUpInput.trim().length >= 10 && !followUpMutation.isPending;
+  const canSendFollowUp = Boolean(
+    isCompleted && !isQuickTask && followUpInput.trim().length >= 10 && !followUpMutation.isPending,
+  );
 
   const scrollToBottom = useCallback(() => {
     if (scrollRef.current) {
@@ -174,22 +176,10 @@ function TaskDetailPage() {
   return (
     <main className="flex flex-1 flex-col overflow-hidden">
       {/* Top bar */}
-      <div className="flex shrink-0 items-center justify-between border-b border-border px-4 py-3">
-        <div className="flex items-center gap-3">
-          <Button
-            render={<Link to="/app/sessions" />}
-            variant="ghost"
-            size="sm"
-            nativeButton={false}
-          >
-            <ArrowLeftIcon className="size-3.5" />
-            Sessions
-          </Button>
-          <Separator orientation="vertical" className="h-5" />
-          <span className="truncate text-sm font-medium text-foreground">
-            {task.repoName ?? "Task"}
-          </span>
-        </div>
+      <div className="flex shrink-0 items-center justify-between px-4 py-3">
+        <span className="truncate text-sm font-medium text-foreground">
+          {task.repoName ?? "Task"}
+        </span>
         <div className="flex items-center gap-2">
           {isRunning ? (
             <Button
@@ -226,7 +216,7 @@ function TaskDetailPage() {
       </div>
 
       {/* Chat messages area */}
-      <div ref={scrollRef} className="flex flex-1 flex-col gap-6 overflow-y-auto px-4 py-6">
+      <div ref={scrollRef} className="flex flex-1 flex-col gap-6 overflow-y-auto px-4 py-6 pb-44">
         <div className="mx-auto flex w-full max-w-3xl flex-col gap-6">
           {/* Initial user message */}
           <UserBubble
@@ -265,45 +255,61 @@ function TaskDetailPage() {
         </div>
       </div>
 
-      {/* Bottom chat input */}
       {isCompleted || isRunning ? (
-        <div className="shrink-0 border-t border-border bg-background px-4 py-3">
-          <div className="mx-auto w-full max-w-3xl">
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                handleSendFollowUp();
-              }}
-              className="flex items-center gap-3"
-            >
-              <input
-                type="text"
-                value={followUpInput}
-                onChange={(e) => setFollowUpInput(e.target.value)}
-                placeholder={
-                  isRunning && !sandboxAlive
-                    ? "Waiting for task to finish..."
-                    : sandboxAlive
-                      ? "Send a follow-up..."
-                      : "Send a follow-up to restart the sandbox..."
-                }
-                disabled={isRunning && !sandboxAlive}
-                className="flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground/40 disabled:cursor-not-allowed disabled:opacity-50"
-              />
-              <button
-                type="submit"
-                disabled={!canSendFollowUp}
-                className={`flex items-center gap-2 transition-colors ${
-                  canSendFollowUp ? "text-foreground" : "text-muted-foreground/40"
-                }`}
-              >
-                <span className="text-sm">Send</span>
-                <span className="inline-flex items-center justify-center rounded border border-input px-1 py-0.5">
-                  <CornerDownLeftIcon className="size-3" />
-                </span>
-              </button>
-            </form>
-          </div>
+        <div className="fixed inset-x-0 bottom-6 flex justify-center px-4">
+          <PromptComposer
+            value={followUpInput}
+            onChange={setFollowUpInput}
+            onSubmit={handleSendFollowUp}
+            placeholder={
+              isRunning && !sandboxAlive
+                ? "Waiting for task to finish..."
+                : sandboxAlive
+                  ? "Send a follow-up..."
+                  : "Send a follow-up to restart the sandbox..."
+            }
+            canSubmit={canSendFollowUp}
+            disabled={isRunning && !sandboxAlive}
+            submitAriaLabel={followUpMutation.isPending ? "Sending..." : "Send"}
+            footerLeft={
+              <>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled
+                  className="cursor-not-allowed gap-1 text-muted-foreground/40 hover:bg-transparent hover:text-muted-foreground/40"
+                >
+                  <BookMarkedIcon className="size-3.5 shrink-0" aria-hidden="true" />
+                  <span className="max-w-[160px] truncate">{task.repoName ?? "Project"}</span>
+                  <ChevronDownIcon className="size-3 shrink-0 opacity-30" aria-hidden="true" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled
+                  className="cursor-not-allowed gap-1 text-muted-foreground/40 hover:bg-transparent hover:text-muted-foreground/40"
+                >
+                  <GitBranchIcon className="size-3.5 shrink-0" aria-hidden="true" />
+                  <span className="max-w-[160px] truncate">{task.branchName ?? "Used branch"}</span>
+                  <ChevronDownIcon className="size-3 shrink-0 opacity-30" aria-hidden="true" />
+                </Button>
+                <button
+                  type="button"
+                  disabled
+                  aria-pressed={!!task.quickTask}
+                  className="flex cursor-not-allowed items-center gap-2 rounded-lg px-2 py-1 text-sm text-muted-foreground/40 transition-colors hover:bg-transparent hover:text-muted-foreground/40"
+                >
+                  <Checkbox
+                    checked={!!task.quickTask}
+                    disabled
+                    aria-label="Quick task mode"
+                    className="pointer-events-none size-3.5"
+                  />
+                  <span>Quick task</span>
+                </button>
+              </>
+            }
+          />
         </div>
       ) : null}
     </main>
@@ -462,15 +468,9 @@ function QuickTaskDetail({
     <main className="flex flex-1 justify-center px-4 py-8">
       <div className="flex w-full max-w-4xl flex-col gap-4">
         <div className="flex items-center justify-between gap-3">
-          <Button
-            render={<Link to="/app/sessions" />}
-            variant="ghost"
-            size="sm"
-            nativeButton={false}
-          >
-            <ArrowLeftIcon className="size-3.5" />
-            Sessions
-          </Button>
+          <span className="truncate text-sm font-medium text-foreground">
+            {task.repoName ?? "Quick task"}
+          </span>
           <div className="flex items-center gap-2">
             <Badge variant="outline" size="sm">
               Quick task

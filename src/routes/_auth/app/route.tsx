@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { createFileRoute, Link, Outlet, useRouter } from "@tanstack/react-router";
+import { createFileRoute, Link, Outlet, useMatchRoute, useRouter } from "@tanstack/react-router";
 import { HouseIcon, HistoryIcon, LogOutIcon } from "lucide-react";
 
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -20,8 +20,11 @@ export const Route = createFileRoute("/_auth/app")({
 function AppLayout() {
   const { user } = Route.useRouteContext();
   const queryClient = useQueryClient();
+  const matchRoute = useMatchRoute();
   const router = useRouter();
   const initials = (user.name ?? user.email ?? "?").slice(0, 1).toUpperCase();
+  const isSessionsActive =
+    !!matchRoute({ to: "/app/sessions" }) || !!matchRoute({ to: "/app/tasks/$taskId" });
 
   return (
     <div className="flex min-h-svh flex-col bg-background">
@@ -50,9 +53,11 @@ function AppLayout() {
           </Link>
           <Link
             to="/app/sessions"
-            className="relative flex h-8 shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-md px-2.5 text-sm font-medium whitespace-nowrap transition-colors [&_svg]:size-4"
-            activeProps={{ className: "bg-background text-foreground shadow-sm/5 dark:bg-input" }}
-            inactiveProps={{ className: "text-muted-foreground/72 hover:text-muted-foreground" }}
+            className={`relative flex h-8 shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-md px-2.5 text-sm font-medium whitespace-nowrap transition-colors [&_svg]:size-4 ${
+              isSessionsActive
+                ? "bg-background text-foreground shadow-sm/5 dark:bg-input"
+                : "text-muted-foreground/72 hover:text-muted-foreground"
+            }`}
           >
             <HistoryIcon aria-hidden="true" />
             Sessions
