@@ -36,7 +36,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Separator } from "@/components/ui/separator";
+import { Textarea } from "@/components/ui/textarea";
 import { $listGithubBranches, $listGithubRepos } from "@/lib/github/functions";
 import {
   $createProject,
@@ -90,7 +90,7 @@ function AppHome() {
   });
 
   const projects = projectsQuery.data ?? [];
-  const currentProject = projects.find((p) => p.id === selectedProjectId) ?? null;
+  const currentProject = projects.find((p) => p.id === selectedProjectId) ?? projects[0] ?? null;
   const currentRepoId = currentProject?.repoId ?? "";
 
   const projectLabel =
@@ -192,7 +192,7 @@ function AppHome() {
   });
 
   const canSubmit =
-    inputValue.trim().length >= 10 && Boolean(currentProject) && !taskMutation.isPending;
+    inputValue.trim().length >= 1 && Boolean(currentProject) && !taskMutation.isPending;
 
   const handleSubmit = () => {
     if (!canSubmit || !currentProject) return;
@@ -261,39 +261,45 @@ function AppHome() {
 
       {/* Bottom Input Area */}
       <div className="fixed inset-x-0 bottom-6 flex justify-center px-4">
-        <div className="flex w-full max-w-[600px] flex-col overflow-hidden rounded-2xl border border-border bg-background">
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              handleSubmit();
-            }}
-          >
-            <div className="px-4 pt-3.5 pb-6">
-              <input
-                type="text"
-                value={inputValue}
-                onChange={(e) => setInputValue(e.target.value)}
-                placeholder="Ask anything..."
-                className="w-full bg-transparent text-foreground outline-none placeholder:text-muted-foreground/40"
-              />
-              {quickTask ? (
-                <p className="mt-2 text-xs text-muted-foreground/60">
-                  Runs a single task, opens the PR, then destroys the sandbox automatically.
-                </p>
-              ) : null}
-            </div>
-          </form>
+        {/* Outer wrapper — the gray container that wraps everything */}
+        <div className="flex w-full max-w-[600px] flex-col overflow-hidden rounded-2xl border border-border bg-muted/40">
+          {/* Inner input shell — white/background area for the textarea */}
+          <div className="m-1.5 mb-0 rounded-xl bg-background">
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                handleSubmit();
+              }}
+            >
+              <div className="relative">
+                <div className="max-h-[240px] overflow-y-auto">
+                  <Textarea
+                    value={inputValue}
+                    onChange={(e) => setInputValue(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key !== "Enter") return;
+                      if (e.shiftKey) return;
 
-          <Separator className="bg-border" />
+                      e.preventDefault();
+                      handleSubmit();
+                    }}
+                    placeholder="Ask anything..."
+                    className="max-h-[240px] border-0 bg-transparent px-4 py-3.5 text-foreground shadow-none placeholder:text-muted-foreground/40 focus-visible:border-0 focus-visible:ring-0"
+                  />
+                </div>
+              </div>
+            </form>
+          </div>
 
-          <div className="flex items-center justify-between px-4 py-2.5">
-            <div className="flex items-center gap-0.5">
-              {/* Repository Selector */}
+          {/* Bottom tray: selectors + submit (inside the gray outer container) */}
+          <div className="flex items-center justify-between px-3 py-2.5">
+            <div className="flex items-center gap-1.5">
+              {/* Project Selector */}
               <DropdownMenu>
-                <DropdownMenuTrigger className="flex cursor-pointer items-center gap-1 rounded-md px-1.5 py-1 text-sm font-medium text-muted-foreground/60 transition-colors hover:bg-accent hover:text-muted-foreground">
-                  <BookMarkedIcon className="size-3.5" aria-hidden="true" />
-                  {projectLabel}
-                  <ChevronDownIcon className="size-3 opacity-50" aria-hidden="true" />
+                <DropdownMenuTrigger className="flex cursor-pointer items-center gap-1 rounded-lg px-2 py-1 text-sm text-muted-foreground/60 transition-colors hover:bg-accent hover:text-muted-foreground">
+                  <BookMarkedIcon className="size-3.5 shrink-0" aria-hidden="true" />
+                  <span className="max-w-[160px] truncate">{projectLabel}</span>
+                  <ChevronDownIcon className="size-3 shrink-0 opacity-50" aria-hidden="true" />
                 </DropdownMenuTrigger>
                 <DropdownMenuContent side="top" sideOffset={8} className="min-w-56">
                   {projects.length > 0 ? (
@@ -337,11 +343,11 @@ function AppHome() {
               <DropdownMenu>
                 <DropdownMenuTrigger
                   disabled={!currentProject}
-                  className="flex cursor-pointer items-center gap-1 rounded-md px-1.5 py-1 text-sm font-medium text-muted-foreground/60 transition-colors hover:bg-accent hover:text-muted-foreground disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-muted-foreground/60"
+                  className="flex cursor-pointer items-center gap-1 rounded-lg px-2 py-1 text-sm text-muted-foreground/60 transition-colors hover:bg-accent hover:text-muted-foreground disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-muted-foreground/60"
                 >
-                  <GitBranchIcon className="size-3.5" aria-hidden="true" />
-                  {currentBranch}
-                  <ChevronDownIcon className="size-3 opacity-50" aria-hidden="true" />
+                  <GitBranchIcon className="size-3.5 shrink-0" aria-hidden="true" />
+                  <span className="max-w-[160px] truncate">{currentBranch}</span>
+                  <ChevronDownIcon className="size-3 shrink-0 opacity-50" aria-hidden="true" />
                 </DropdownMenuTrigger>
                 <DropdownMenuContent side="top" sideOffset={8}>
                   {branches.map((branch) => (
@@ -358,11 +364,12 @@ function AppHome() {
                 </DropdownMenuContent>
               </DropdownMenu>
 
+              {/* Quick Task toggle */}
               <button
                 type="button"
                 onClick={() => setQuickTask((current) => !current)}
                 aria-pressed={quickTask}
-                className="flex cursor-pointer items-center gap-2 rounded-md px-1.5 py-1 text-sm font-medium text-muted-foreground/60 transition-colors hover:bg-accent hover:text-muted-foreground"
+                className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1 text-sm text-muted-foreground/60 transition-colors hover:bg-accent hover:text-muted-foreground"
               >
                 <Checkbox
                   checked={quickTask}
@@ -372,18 +379,24 @@ function AppHome() {
                 <span>Quick task</span>
               </button>
             </div>
+
+            {/* Submit button */}
             <button
               type="button"
               onClick={handleSubmit}
               disabled={!canSubmit}
-              className={`flex items-center gap-2 transition-colors ${canSubmit ? "text-foreground" : "text-muted-foreground/40"}`}
+              className="flex size-8 items-center justify-center rounded-lg bg-foreground text-background transition-opacity disabled:opacity-30"
+              aria-label={taskMutation.isPending ? "Starting..." : "Send"}
             >
-              <span className="text-sm">{taskMutation.isPending ? "Starting..." : "Go"}</span>
-              <span className="inline-flex items-center justify-center rounded border border-input px-1 py-0.5">
-                <CornerDownLeftIcon className="size-3" aria-hidden="true" />
-              </span>
+              <CornerDownLeftIcon className="size-4" aria-hidden="true" />
             </button>
           </div>
+
+          {quickTask ? (
+            <p className="px-4 pb-2 text-xs text-muted-foreground/60">
+              Runs a single task, opens the PR, then destroys the sandbox automatically.
+            </p>
+          ) : null}
         </div>
       </div>
 
