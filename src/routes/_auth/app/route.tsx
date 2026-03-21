@@ -25,7 +25,7 @@ function AppLayout() {
 
   return (
     <div className="flex min-h-svh flex-col bg-background">
-      <header className="flex items-center justify-between px-6 py-4">
+      <header className="relative flex items-center justify-between px-6 py-4">
         <div className="flex items-center">
           <svg
             className="size-7 text-foreground"
@@ -37,7 +37,7 @@ function AppLayout() {
           </svg>
         </div>
 
-        <nav className="flex items-center gap-x-0.5 rounded-lg bg-muted p-0.5">
+        <nav className="absolute left-1/2 flex -translate-x-1/2 items-center gap-x-0.5 rounded-lg bg-muted p-0.5">
           <Link
             to="/app"
             activeOptions={{ exact: true }}

@@ -7,22 +7,43 @@ import {
   CornerDownLeftIcon,
   ChevronDownIcon,
   ArrowRightIcon,
+  PlusIcon,
   LoaderIcon,
+  SearchIcon,
 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuGroup,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { $listGithubBranches, $listGithubRepos } from "@/lib/github/functions";
-import { $createProject, $createTask, $listAllUserTasks } from "@/lib/project/functions";
+import {
+  $createProject,
+  $createTask,
+  $listAllUserTasks,
+  $listProjects,
+} from "@/lib/project/functions";
 
 export const Route = createFileRoute("/_auth/app/")({
   component: AppHome,
@@ -34,6 +55,7 @@ function AppHome() {
   const queryClient = useQueryClient();
   const listGithubRepos = useServerFn($listGithubRepos);
   const listGithubBranches = useServerFn($listGithubBranches);
+  const listProjects = useServerFn($listProjects);
   const createProject = useServerFn($createProject);
   const createTask = useServerFn($createTask);
 
@@ -48,9 +70,14 @@ function AppHome() {
   });
 
   const [inputValue, setInputValue] = useState("");
+  const [selectedProjectId, setSelectedProjectId] = useState("");
   const [quickTask, setQuickTask] = useState(false);
   const [selectedRepoId, setSelectedRepoId] = useState("");
   const [selectedBranch, setSelectedBranch] = useState("");
+  const [createProjectOpen, setCreateProjectOpen] = useState(false);
+  const [createProjectSearch, setCreateProjectSearch] = useState("");
+  const [createProjectRepoId, setCreateProjectRepoId] = useState("");
+  const [createProjectName, setCreateProjectName] = useState("");
 
   const reposQuery = useQuery({
     queryFn: listGithubRepos,
@@ -58,7 +85,28 @@ function AppHome() {
   });
 
   const repos = reposQuery.data ?? [];
-  const currentRepo = repos.find((r) => r.id === selectedRepoId) ?? repos[0] ?? null;
+  const projectsQuery = useQuery({
+    queryFn: listProjects,
+    queryKey: ["projects", user.id, listProjects],
+  });
+
+  const projects = projectsQuery.data ?? [];
+  const currentProject = projects.find((p) => p.id === selectedProjectId) ?? null;
+  const currentRepoId = currentProject?.repoId ?? "";
+
+  const projectLabel =
+    currentProject?.name ?? (projectsQuery.isPending ? "Loading..." : "Select project");
+
+  const currentRepo = repos.find((r) => r.id === currentRepoId) ?? null;
+  const createProjectRepo = repos.find((repo) => repo.id === createProjectRepoId) ?? null;
+  const createProjectQuery = createProjectSearch.trim().toLowerCase();
+  const filteredCreateRepos = createProjectQuery
+    ? repos.filter((repo) =>
+        [repo.fullName, repo.name, repo.ownerLogin].some((value) =>
+          value.toLowerCase().includes(createProjectQuery),
+        ),
+      )
+    : repos.slice(0, 8);
 
   const branchesQuery = useQuery({
     enabled: Boolean(currentRepo),
@@ -73,6 +121,33 @@ function AppHome() {
     branches[0]?.name ||
     currentRepo?.defaultBranch ||
     "main";
+
+  const createProjectMutation = useMutation({
+    mutationFn: async () => {
+      if (!createProjectRepo) {
+        throw new Error("Select a repository first.");
+      }
+
+      return createProject({
+        data: {
+          name: createProjectName.trim() || createProjectRepo.fullName,
+          repoId: createProjectRepo.id,
+        },
+      });
+    },
+    onSuccess: (project) => {
+      queryClient.invalidateQueries({ queryKey: ["projects"] });
+      toast.success("Project created.");
+      setCreateProjectOpen(false);
+      setCreateProjectSearch("");
+      setCreateProjectRepoId("");
+      setCreateProjectName("");
+      setSelectedProjectId(project.id);
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Failed to create project.");
+    },
+  });
 
   const listAllUserTasks = useServerFn($listAllUserTasks);
 
@@ -91,6 +166,12 @@ function AppHome() {
   const runningTasks = recentTasks.filter((t) => t.status === "queued" || t.status === "running");
 
   const taskMutation = useMutation({
+    mutationFn: async (data: { prompt: string }) => {
+      if (!currentProject) {
+        throw new Error("Select a project first.");
+      }
+
+      return createTask({ data: { projectId: currentProject.id, prompt: data.prompt } });
     mutationFn: async (data: {
       prompt: string;
       quickTask: boolean;
@@ -130,9 +211,11 @@ function AppHome() {
   });
 
   const canSubmit =
-    inputValue.trim().length >= 10 && Boolean(currentRepo) && !taskMutation.isPending;
+    inputValue.trim().length >= 10 && Boolean(currentProject) && !taskMutation.isPending;
 
   const handleSubmit = () => {
+    if (!canSubmit || !currentProject) return;
+    taskMutation.mutate({ prompt: inputValue.trim() });
     if (!canSubmit || !currentRepo) return;
     taskMutation.mutate({
       prompt: inputValue.trim(),
@@ -231,27 +314,53 @@ function AppHome() {
               <DropdownMenu>
                 <DropdownMenuTrigger className="flex cursor-pointer items-center gap-1 rounded-md px-1.5 py-1 text-sm font-medium text-muted-foreground/60 transition-colors hover:bg-accent hover:text-muted-foreground">
                   <BookMarkedIcon className="size-3.5" aria-hidden="true" />
-                  {currentRepo?.fullName ?? (reposQuery.isPending ? "Loading..." : "Select repo")}
+                  {projectLabel}
                   <ChevronDownIcon className="size-3 opacity-50" aria-hidden="true" />
                 </DropdownMenuTrigger>
-                <DropdownMenuContent side="top" sideOffset={8}>
-                  {repos.map((repo) => (
-                    <DropdownMenuItem
-                      key={repo.id}
-                      onClick={() => {
-                        setSelectedRepoId(repo.id);
-                        setSelectedBranch("");
-                      }}
-                    >
-                      {repo.fullName}
-                    </DropdownMenuItem>
-                  ))}
+                <DropdownMenuContent side="top" sideOffset={8} className="min-w-56">
+                  {projects.length > 0 ? (
+                    <>
+                      {projects.map((project) => (
+                        <DropdownMenuItem
+                          key={project.id}
+                          onClick={() => {
+                            setSelectedProjectId(project.id);
+                            setSelectedBranch("");
+                          }}
+                        >
+                          {project.name}
+                        </DropdownMenuItem>
+                      ))}
+                      <DropdownMenuSeparator />
+                    </>
+                  ) : (
+                    <DropdownMenuGroup>
+                      <DropdownMenuLabel className="font-normal text-muted-foreground">
+                        No projects yet
+                      </DropdownMenuLabel>
+                      <DropdownMenuSeparator />
+                    </DropdownMenuGroup>
+                  )}
+                  <DropdownMenuItem
+                    onClick={() => {
+                      setCreateProjectSearch("");
+                      setCreateProjectRepoId(repos[0]?.id ?? "");
+                      setCreateProjectName("");
+                      setCreateProjectOpen(true);
+                    }}
+                  >
+                    <PlusIcon className="size-4" aria-hidden="true" />
+                    Add project
+                  </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
 
               {/* Branch Selector */}
               <DropdownMenu>
-                <DropdownMenuTrigger className="flex cursor-pointer items-center gap-1 rounded-md px-1.5 py-1 text-sm font-medium text-muted-foreground/60 transition-colors hover:bg-accent hover:text-muted-foreground">
+                <DropdownMenuTrigger
+                  disabled={!currentProject}
+                  className="flex cursor-pointer items-center gap-1 rounded-md px-1.5 py-1 text-sm font-medium text-muted-foreground/60 transition-colors hover:bg-accent hover:text-muted-foreground disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-muted-foreground/60"
+                >
                   <GitBranchIcon className="size-3.5" aria-hidden="true" />
                   {currentBranch}
                   <ChevronDownIcon className="size-3 opacity-50" aria-hidden="true" />
@@ -299,6 +408,98 @@ function AppHome() {
           </div>
         </div>
       </div>
+
+      <Dialog open={createProjectOpen} onOpenChange={setCreateProjectOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Create project</DialogTitle>
+            <DialogDescription>
+              Search your GitHub repositories, then bind one to a new project.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid gap-5">
+            <div className="grid gap-2">
+              <Label htmlFor="repo-search">Search repositories</Label>
+              <div className="relative">
+                <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground/60" />
+                <Input
+                  id="repo-search"
+                  value={createProjectSearch}
+                  onChange={(event) => setCreateProjectSearch(event.target.value)}
+                  placeholder="Search by repo, owner, or full name"
+                  className="pl-9"
+                />
+              </div>
+            </div>
+
+            <div className="grid gap-2">
+              <Label>Repository</Label>
+              <div className="max-h-72 overflow-auto rounded-2xl border border-border bg-background p-1">
+                {reposQuery.isPending ? (
+                  <div className="flex items-center justify-center py-10">
+                    <LoaderIcon className="size-5 animate-spin text-muted-foreground" />
+                  </div>
+                ) : repos.length === 0 ? (
+                  <div className="px-3 py-6 text-sm text-muted-foreground">
+                    No GitHub repositories found.
+                  </div>
+                ) : filteredCreateRepos.length === 0 ? (
+                  <div className="px-3 py-6 text-sm text-muted-foreground">
+                    No repositories match your search.
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-1">
+                    {filteredCreateRepos.map((repo) => {
+                      const isSelected = repo.id === createProjectRepoId;
+
+                      return (
+                        <button
+                          key={repo.id}
+                          type="button"
+                          onClick={() => {
+                            setCreateProjectRepoId(repo.id);
+                            setCreateProjectName(repo.fullName);
+                          }}
+                          className={`flex flex-col items-start gap-1 rounded-xl px-3 py-2 text-left transition-colors ${isSelected ? "bg-accent text-accent-foreground" : "hover:bg-muted"}`}
+                        >
+                          <span className="font-medium">{repo.fullName}</span>
+                          <span className="text-xs text-muted-foreground/70">
+                            {repo.ownerLogin} · {repo.visibility}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="grid gap-2">
+              <Label htmlFor="project-name">Project name</Label>
+              <Input
+                id="project-name"
+                value={createProjectName}
+                onChange={(event) => setCreateProjectName(event.target.value)}
+                placeholder={createProjectRepo?.fullName ?? "Project name"}
+                disabled={!createProjectRepo}
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCreateProjectOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              disabled={!createProjectRepo || createProjectMutation.isPending}
+              onClick={() => createProjectMutation.mutate()}
+            >
+              {createProjectMutation.isPending ? "Creating..." : "Create project"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
