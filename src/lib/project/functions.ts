@@ -4,7 +4,7 @@ import * as z from "zod";
 
 import { authMiddleware } from "@/lib/auth/middleware";
 import {
-  destroyRepoTaskSandbox,
+  destroySandboxById,
   getRepoTaskJob,
   runFollowUpOnSandbox,
   startRepoTaskJob,
@@ -66,7 +66,7 @@ const syncTaskWithJob = async (row: typeof task.$inferSelect, userId?: string) =
           job.followUpHistory.length > 0 ? JSON.stringify(job.followUpHistory) : null,
         error: job.error ?? null,
         completedAt: job.completedAt ? new Date(job.completedAt) : null,
-        branchName: job.branchName ?? null,
+        branchName: job.branchName ?? job.sourceBranch ?? null,
         clonePath: job.clonePath ?? null,
         sandboxId: job.sandboxId ?? null,
         sandboxName: job.sandboxName ?? null,
@@ -123,6 +123,7 @@ export const $getProject = createServerFn({ method: "GET" })
       repoFullName: repo?.fullName ?? null,
       repoDescription: repo?.description ?? null,
       repoHtmlUrl: repo?.htmlUrl ?? null,
+      repoDefaultBranch: repo?.defaultBranch ?? null,
     };
   });
 
@@ -152,6 +153,7 @@ export const $createTask = createServerFn({ method: "POST" })
         status: job.status,
         stage: job.stage,
         repoId: job.repoId,
+        branchName: job.sourceBranch,
         startedAt: new Date(job.startedAt),
       })
       .returning();
@@ -334,9 +336,11 @@ export const $terminateQuickTaskById = createServerFn({ method: "POST" })
       await terminateRepoTaskJob(row.task.id);
     } catch {}
 
-    try {
-      await destroyRepoTaskSandbox(row.task.id, context.user.id);
-    } catch {}
+    if (row.task.sandboxId) {
+      try {
+        await destroySandboxById(row.task.sandboxId);
+      } catch {}
+    }
 
     const [updated] = await db
       .update(task)
@@ -405,7 +409,9 @@ export const $destroyTaskSandboxById = createServerFn({ method: "POST" })
       throw new Error("Task not found.");
     }
 
-    await destroyRepoTaskSandbox(row.task.id, context.user.id);
+    if (row.task.sandboxId) {
+      await destroySandboxById(row.task.sandboxId);
+    }
 
     const [updated] = await db
       .update(task)

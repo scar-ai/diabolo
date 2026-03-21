@@ -58,6 +58,7 @@ export type RepoTaskJob = {
   repoId: string;
   repoName?: string;
   repoUrl?: string;
+  sourceBranch: string;
   userId: string;
   sandboxId?: string;
   sandboxName?: string;
@@ -778,7 +779,8 @@ const runRepoTaskJob = async (jobId: string, input: RepoTaskInput) => {
       status: "running",
     });
 
-    const sourceBranch = input.sourceBranch.trim() || repo.defaultBranch;
+    const job = jobs.get(jobId);
+    const sourceBranch = job?.sourceBranch || input.sourceBranch.trim() || repo.defaultBranch;
     const prepared = await prepareSandboxWorkspace({
       branch: sourceBranch,
       githubAccessToken,
@@ -975,6 +977,7 @@ export const startRepoTaskJob = async (input: RepoTaskInput, userId: string) => 
 
   const jobId = makeJobId();
   const startedAt = new Date().toISOString();
+  const sourceBranch = input.sourceBranch.trim() || repo.defaultBranch;
   const job: RepoTaskJob = {
     agentMessages: [],
     followUpHistory: [],
@@ -982,6 +985,7 @@ export const startRepoTaskJob = async (input: RepoTaskInput, userId: string) => 
     prompt,
     quickTask: input.quickTask,
     repoId: input.repoId,
+    sourceBranch,
     stage: "Queued",
     startedAt,
     status: "queued",
@@ -1018,6 +1022,22 @@ export const terminateRepoTaskJob = async (jobId: string) => {
 
 export const destroyRepoTaskSandbox = async (jobId: string, userId?: string) => {
   await destroySandboxResources(jobId, { stage: "Sandbox stopped", userId });
+};
+
+export const destroySandboxById = async (sandboxId: string) => {
+  const daytona = getDaytonaClient();
+
+  try {
+    const sandbox = await daytona.get(sandboxId);
+
+    try {
+      await sandbox.stop(120);
+    } catch {}
+
+    try {
+      await sandbox.delete(120);
+    } catch {}
+  } catch {}
 };
 
 export const runFollowUpOnSandbox = async (jobId: string, prompt: string, userId?: string) => {

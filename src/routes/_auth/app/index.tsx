@@ -82,7 +82,6 @@ function AppHome() {
   const [selectedProjectId, setSelectedProjectId] = useState("");
   const [quickTask, setQuickTask] = useState(false);
   const [selectedBranch, setSelectedBranch] = useState("");
-  const [branchMenuOpened, setBranchMenuOpened] = useState(false);
   const [createProjectOpen, setCreateProjectOpen] = useState(false);
   const [createProjectSearch, setCreateProjectSearch] = useState("");
   const [createProjectRepoId, setCreateProjectRepoId] = useState("");
@@ -102,6 +101,7 @@ function AppHome() {
     currentProject?.name ?? (projectsQuery.isPending ? "Loading..." : "Select project");
 
   const currentProjectRepoFullName = currentProjectDetailQuery.data?.repoFullName ?? null;
+  const currentProjectDefaultBranch = currentProjectDetailQuery.data?.repoDefaultBranch ?? "main";
   const createProjectRepoQuery = useQuery({
     ...githubReposQueryOptions(user.id),
     enabled: createProjectOpen,
@@ -119,11 +119,11 @@ function AppHome() {
 
   const branchesQuery = useQuery({
     ...githubBranchesQueryOptions(user.id, currentProjectRepoFullName ?? ""),
-    enabled: Boolean(currentProjectRepoFullName) && branchMenuOpened,
+    enabled: Boolean(currentProjectRepoFullName),
   });
 
   const branches = branchesQuery.data ?? [];
-  const currentBranch = selectedBranch || branches[0]?.name || "main";
+  const currentBranch = selectedBranch || currentProjectDefaultBranch;
 
   const createProjectMutation = useMutation({
     mutationFn: async () => {
@@ -207,7 +207,7 @@ function AppHome() {
   return (
     <>
       <main className="flex flex-1 flex-col items-center justify-center px-4 pb-48">
-        <div className="flex w-full max-w-[600px] flex-col items-center text-center">
+        <div className="flex w-full max-w-3xl flex-col items-center text-center">
           <p className="mb-3 text-sm text-muted-foreground/60">{dateString}</p>
 
           <h1 className="mb-10 font-serif text-[2.75rem] leading-tight tracking-tight text-muted-foreground/70">
@@ -297,11 +297,7 @@ function AppHome() {
                 </DropdownMenuContent>
               </DropdownMenu>
 
-              <DropdownMenu
-                onOpenChange={(open) => {
-                  if (open) setBranchMenuOpened(true);
-                }}
-              >
+              <DropdownMenu>
                 <DropdownMenuTrigger
                   disabled={!currentProject}
                   className="flex cursor-pointer items-center gap-1 rounded-lg px-2 py-1 text-sm text-muted-foreground/60 transition-colors hover:bg-accent hover:text-muted-foreground disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-muted-foreground/60"

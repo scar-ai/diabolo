@@ -12,6 +12,7 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
+import { useSetHeaderSlots } from "@/components/app/header-portal";
 import { PromptComposer } from "@/components/app/prompt-composer";
 import {
   AgentBubble,
@@ -44,12 +45,12 @@ export const Route = createFileRoute("/_auth/app/tasks/$taskId")({
 
 function TaskDetailPage() {
   const { taskId } = Route.useParams();
-  const { user } = Route.useRouteContext();
   const queryClient = useQueryClient();
   const terminateTask = useServerFn($terminateTaskById);
   const terminateQuickTask = useServerFn($terminateQuickTaskById);
   const destroySandbox = useServerFn($destroyTaskSandboxById);
   const runFollowUp = useServerFn($runFollowUpById);
+  const setHeaderSlots = useSetHeaderSlots();
 
   const [followUpInput, setFollowUpInput] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -129,6 +130,66 @@ function TaskDetailPage() {
     scrollToBottom();
   }, [task?.logs, task?.stage, task?.status, task?.followUpHistory, scrollToBottom]);
 
+  const terminatePending = terminateMutation.isPending;
+  const terminateMutate = terminateMutation.mutate;
+  const destroyPending = destroyMutation.isPending;
+  const destroyMutate = destroyMutation.mutate;
+
+  useEffect(() => {
+    setHeaderSlots({
+      left: task ? (
+        <span className="truncate text-sm font-medium text-foreground">
+          {task.repoName ?? "Task"}
+        </span>
+      ) : null,
+      right: (
+        <>
+          {isRunning ? (
+            <Button
+              variant="destructive"
+              size="sm"
+              disabled={terminatePending}
+              onClick={() => terminateMutate()}
+            >
+              {terminatePending ? (
+                <LoaderIcon className="size-3.5 animate-spin" />
+              ) : (
+                <SquareIcon className="size-3.5" />
+              )}
+              {terminatePending ? "Stopping..." : "Terminate"}
+            </Button>
+          ) : null}
+          {sandboxAlive ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="gap-1.5 text-destructive hover:bg-destructive/10 hover:text-destructive"
+              disabled={destroyPending}
+              onClick={() => destroyMutate()}
+            >
+              {destroyPending ? (
+                <LoaderIcon className="size-3.5 animate-spin" />
+              ) : (
+                <Trash2Icon className="size-3.5" />
+              )}
+              {destroyPending ? "Destroying..." : "Destroy Sandbox"}
+            </Button>
+          ) : null}
+        </>
+      ),
+    });
+    return () => setHeaderSlots({ left: null, right: null });
+  }, [
+    task,
+    isRunning,
+    sandboxAlive,
+    terminatePending,
+    terminateMutate,
+    destroyPending,
+    destroyMutate,
+    setHeaderSlots,
+  ]);
+
   const handleSendFollowUp = () => {
     if (!canSendFollowUp) return;
     const prompt = followUpInput.trim();
@@ -155,7 +216,6 @@ function TaskDetailPage() {
     );
   }
 
-  const initials = (user.name ?? user.email ?? "?").slice(0, 1).toUpperCase();
   const followUps = parseFollowUpHistory(task.followUpHistory);
   const pendingFollowUpPrompt =
     followUpMutation.isPending &&
@@ -176,141 +236,87 @@ function TaskDetailPage() {
 
   return (
     <main className="flex flex-1 flex-col overflow-hidden">
-      {/* Top bar */}
-      <div className="flex shrink-0 items-center justify-between px-4 py-3">
-        <span className="truncate text-sm font-medium text-foreground">
-          {task.repoName ?? "Task"}
-        </span>
-        <div className="flex items-center gap-2">
-          {isRunning ? (
-            <Button
-              variant="destructive"
-              size="sm"
-              disabled={terminateMutation.isPending}
-              onClick={() => terminateMutation.mutate()}
-            >
-              {terminateMutation.isPending ? (
-                <LoaderIcon className="size-3.5 animate-spin" />
-              ) : (
-                <SquareIcon className="size-3.5" />
-              )}
-              {terminateMutation.isPending ? "Stopping..." : "Terminate"}
-            </Button>
-          ) : null}
-          {sandboxAlive ? (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="gap-1.5 text-destructive hover:bg-destructive/10 hover:text-destructive"
-              disabled={destroyMutation.isPending}
-              onClick={() => destroyMutation.mutate()}
-            >
-              {destroyMutation.isPending ? (
-                <LoaderIcon className="size-3.5 animate-spin" />
-              ) : (
-                <Trash2Icon className="size-3.5" />
-              )}
-              {destroyMutation.isPending ? "Destroying..." : "Destroy Sandbox"}
-            </Button>
-          ) : null}
-        </div>
-      </div>
-
       {/* Chat messages area */}
-      <div ref={scrollRef} className="flex flex-1 flex-col gap-6 overflow-y-auto px-4 py-6 pb-44">
-        <div className="mx-auto flex w-full max-w-3xl flex-col gap-6">
+      <div ref={scrollRef} className="flex flex-1 flex-col overflow-y-auto">
+        <div className="mx-auto flex w-full max-w-3xl flex-col gap-10 px-4 py-6 pb-8">
           {/* Initial user message */}
-          <UserBubble
-            text={task.prompt}
-            userName={user.name}
-            userImage={user.image}
-            initials={initials}
-            timestamp={task.startedAt}
-          />
+          <UserBubble text={task.prompt} timestamp={task.startedAt} />
 
           {/* Agent response */}
           <AgentBubble task={task} isRunning={!!isRunning} />
 
           {/* Follow-up messages */}
           {followUps.map((followUp) => (
-            <div key={followUp.id} className="flex flex-col gap-6">
-              <UserBubble
-                text={followUp.prompt}
-                userName={user.name}
-                userImage={user.image}
-                initials={initials}
-                timestamp={followUp.startedAt}
-              />
+            <div key={followUp.id} className="flex flex-col gap-10">
+              <UserBubble text={followUp.prompt} timestamp={followUp.startedAt} />
               <FollowUpAgentBubble followUp={followUp} />
             </div>
           ))}
 
-          {pendingFollowUpPrompt ? (
-            <UserBubble
-              text={pendingFollowUpPrompt}
-              userName={user.name}
-              userImage={user.image}
-              initials={initials}
-            />
-          ) : null}
+          {pendingFollowUpPrompt ? <UserBubble text={pendingFollowUpPrompt} /> : null}
         </div>
       </div>
 
+      {/* Sticky prompt at the bottom */}
       {isCompleted || isRunning ? (
-        <div className="fixed inset-x-0 bottom-6 flex justify-center px-4">
-          <PromptComposer
-            value={followUpInput}
-            onChange={setFollowUpInput}
-            onSubmit={handleSendFollowUp}
-            placeholder={
-              isRunning && !sandboxAlive
-                ? "Waiting for task to finish..."
-                : sandboxAlive
-                  ? "Send a follow-up..."
-                  : "Send a follow-up to restart the sandbox..."
-            }
-            canSubmit={canSendFollowUp}
-            disabled={isRunning && !sandboxAlive}
-            submitAriaLabel={followUpMutation.isPending ? "Sending..." : "Send"}
-            footerLeft={
-              <>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  disabled
-                  className="cursor-not-allowed gap-1 text-muted-foreground/40 hover:bg-transparent hover:text-muted-foreground/40"
-                >
-                  <BookMarkedIcon className="size-3.5 shrink-0" aria-hidden="true" />
-                  <span className="max-w-[160px] truncate">{task.repoName ?? "Project"}</span>
-                  <ChevronDownIcon className="size-3 shrink-0 opacity-30" aria-hidden="true" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  disabled
-                  className="cursor-not-allowed gap-1 text-muted-foreground/40 hover:bg-transparent hover:text-muted-foreground/40"
-                >
-                  <GitBranchIcon className="size-3.5 shrink-0" aria-hidden="true" />
-                  <span className="max-w-[160px] truncate">{task.branchName ?? "Used branch"}</span>
-                  <ChevronDownIcon className="size-3 shrink-0 opacity-30" aria-hidden="true" />
-                </Button>
-                <button
-                  type="button"
-                  disabled
-                  aria-pressed={!!task.quickTask}
-                  className="flex cursor-not-allowed items-center gap-2 rounded-lg px-2 py-1 text-sm text-muted-foreground/40 transition-colors hover:bg-transparent hover:text-muted-foreground/40"
-                >
-                  <Checkbox
-                    checked={!!task.quickTask}
+        <div className="shrink-0 bg-background px-4 py-3">
+          <div className="mx-auto max-w-3xl">
+            <PromptComposer
+              value={followUpInput}
+              onChange={setFollowUpInput}
+              onSubmit={handleSendFollowUp}
+              placeholder={
+                isRunning && !sandboxAlive
+                  ? "Waiting for task to finish..."
+                  : sandboxAlive
+                    ? "Send a follow-up..."
+                    : "Send a follow-up to restart the sandbox..."
+              }
+              canSubmit={canSendFollowUp}
+              disabled={isRunning && !sandboxAlive}
+              submitAriaLabel={followUpMutation.isPending ? "Sending..." : "Send"}
+              footerLeft={
+                <>
+                  <Button
+                    variant="ghost"
+                    size="sm"
                     disabled
-                    aria-label="Quick task mode"
-                    className="pointer-events-none size-3.5"
-                  />
-                  <span>Quick task</span>
-                </button>
-              </>
-            }
-          />
+                    className="cursor-not-allowed gap-1 text-muted-foreground/40 hover:bg-transparent hover:text-muted-foreground/40"
+                  >
+                    <BookMarkedIcon className="size-3.5 shrink-0" aria-hidden="true" />
+                    <span className="max-w-[160px] truncate">{task.repoName ?? "Project"}</span>
+                    <ChevronDownIcon className="size-3 shrink-0 opacity-30" aria-hidden="true" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled
+                    className="cursor-not-allowed gap-1 text-muted-foreground/40 hover:bg-transparent hover:text-muted-foreground/40"
+                  >
+                    <GitBranchIcon className="size-3.5 shrink-0" aria-hidden="true" />
+                    <span className="max-w-[160px] truncate">
+                      {task.branchName ?? "Used branch"}
+                    </span>
+                    <ChevronDownIcon className="size-3 shrink-0 opacity-30" aria-hidden="true" />
+                  </Button>
+                  <button
+                    type="button"
+                    disabled
+                    aria-pressed={!!task.quickTask}
+                    className="flex cursor-not-allowed items-center gap-2 rounded-lg px-2 py-1 text-sm text-muted-foreground/40 transition-colors hover:bg-transparent hover:text-muted-foreground/40"
+                  >
+                    <Checkbox
+                      checked={!!task.quickTask}
+                      disabled
+                      aria-label="Quick task mode"
+                      className="pointer-events-none size-3.5"
+                    />
+                    <span>Quick task</span>
+                  </button>
+                </>
+              }
+            />
+          </div>
         </div>
       ) : null}
     </main>

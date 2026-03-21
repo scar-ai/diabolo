@@ -30,55 +30,50 @@ function PromptComposer({
   const formId = useId();
 
   return (
-    <div
-      className={cn(
-        "flex w-full max-w-[600px] flex-col overflow-hidden rounded-2xl border border-border bg-muted/40",
-        className,
-      )}
-    >
-      <div className="m-1.5 mb-0 rounded-xl bg-background">
-        <form
-          id={formId}
-          onSubmit={(event) => {
-            event.preventDefault();
-            onSubmit();
-          }}
-        >
-          <div className="relative">
-            <div className="max-h-[240px] overflow-y-auto">
-              <Textarea
-                value={value}
-                onChange={(event) => onChange(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key !== "Enter" || event.shiftKey) return;
-                  if (!canSubmit || disabled) return;
+    <div className={cn("flex w-full max-w-3xl flex-col", className)}>
+      {/* Shell — uses box-shadow for border so it overlaps tray cleanly */}
+      <form
+        id={formId}
+        onSubmit={(event) => {
+          event.preventDefault();
+          onSubmit();
+        }}
+        className="dock-shell relative z-10 overflow-hidden rounded-xl"
+      >
+        <div className="max-h-[240px] overflow-y-auto">
+          <Textarea
+            value={value}
+            onChange={(event) => onChange(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key !== "Enter" || event.shiftKey) return;
+              if (!canSubmit || disabled) return;
+              event.preventDefault();
+              onSubmit();
+            }}
+            placeholder={placeholder}
+            disabled={disabled}
+            className="min-h-12 resize-none border-0 bg-transparent px-4 py-3 text-sm text-foreground shadow-none ring-0 placeholder:text-muted-foreground/40 focus-visible:border-0 focus-visible:ring-0"
+          />
+        </div>
+        <div className="flex items-center justify-end px-3 pb-2">
+          <button
+            type="submit"
+            disabled={!canSubmit || disabled}
+            className="flex size-7 items-center justify-center rounded-lg bg-foreground text-background transition-opacity disabled:opacity-30"
+            aria-label={submitAriaLabel}
+          >
+            <CornerDownLeftIcon className="size-3.5" aria-hidden="true" />
+          </button>
+        </div>
+      </form>
 
-                  event.preventDefault();
-                  onSubmit();
-                }}
-                placeholder={placeholder}
-                disabled={disabled}
-                className="max-h-[240px] border-0 bg-transparent px-4 py-3.5 text-foreground shadow-none placeholder:text-muted-foreground/40 focus-visible:border-0 focus-visible:ring-0"
-              />
-            </div>
-          </div>
-        </form>
-      </div>
-
-      <div className="flex items-center justify-between px-3 py-2.5">
-        <div className="flex items-center gap-1.5">{footerLeft}</div>
-        <button
-          type="submit"
-          form={formId}
-          disabled={!canSubmit || disabled}
-          className={`flex size-8 items-center justify-center rounded-lg bg-foreground text-background transition-opacity disabled:opacity-30`}
-          aria-label={submitAriaLabel}
-        >
-          <CornerDownLeftIcon className="size-4" aria-hidden="true" />
-        </button>
-      </div>
-
-      {note ? <p className="px-4 pb-2 text-xs text-muted-foreground/60">{note}</p> : null}
+      {/* Tray — sits behind the shell with negative top margin */}
+      {footerLeft || note ? (
+        <div className="dock-tray relative z-0 -mt-3.5 overflow-hidden rounded-xl rounded-t-none border border-border/30 px-3 pt-5 pb-2">
+          {footerLeft ? <div className="flex items-center gap-1.5">{footerLeft}</div> : null}
+          {note ? <p className="mt-1 text-xs text-muted-foreground/60">{note}</p> : null}
+        </div>
+      ) : null}
     </div>
   );
 }
