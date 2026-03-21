@@ -12,15 +12,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import authClient from "@/lib/auth/auth-client";
 import { authQueryOptions } from "@/lib/auth/queries";
-import { allUserTasksQueryOptions } from "@/lib/project/queries";
-
 export const Route = createFileRoute("/_auth/app")({
-  loader: async ({ context }) => {
-    await context.queryClient.ensureQueryData({
-      ...allUserTasksQueryOptions(context.user.id),
-      revalidateIfStale: true,
-    });
-  },
   component: AppLayout,
 });
 

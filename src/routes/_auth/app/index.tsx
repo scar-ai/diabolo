@@ -38,16 +38,16 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { githubBranchesQueryOptions, githubReposQueryOptions } from "@/lib/github/queries";
 import { $createProject, $createTask } from "@/lib/project/functions";
-import { allUserTasksQueryOptions, projectsQueryOptions } from "@/lib/project/queries";
+import {
+  allUserTasksQueryOptions,
+  projectDetailQueryOptions,
+  projectsQueryOptions,
+} from "@/lib/project/queries";
 
 export const Route = createFileRoute("/_auth/app/")({
   loader: async ({ context }) => {
     const userId = context.user.id;
-    const [repos, projects] = await Promise.all([
-      context.queryClient.ensureQueryData({
-        ...githubReposQueryOptions(userId),
-        revalidateIfStale: true,
-      }),
+    await Promise.all([
       context.queryClient.ensureQueryData({
         ...projectsQueryOptions(userId),
         revalidateIfStale: true,
@@ -57,18 +57,6 @@ export const Route = createFileRoute("/_auth/app/")({
         revalidateIfStale: true,
       }),
     ]);
-
-    const defaultProject = projects[0];
-    const defaultRepo = defaultProject
-      ? repos.find((repo) => repo.id === defaultProject.repoId)
-      : null;
-
-    if (defaultRepo) {
-      await context.queryClient.ensureQueryData({
-        ...githubBranchesQueryOptions(userId, defaultRepo.fullName),
-        revalidateIfStale: true,
-      });
-    }
   },
   component: AppHome,
 });
@@ -94,25 +82,31 @@ function AppHome() {
   const [selectedProjectId, setSelectedProjectId] = useState("");
   const [quickTask, setQuickTask] = useState(false);
   const [selectedBranch, setSelectedBranch] = useState("");
+  const [branchMenuOpened, setBranchMenuOpened] = useState(false);
   const [createProjectOpen, setCreateProjectOpen] = useState(false);
   const [createProjectSearch, setCreateProjectSearch] = useState("");
   const [createProjectRepoId, setCreateProjectRepoId] = useState("");
   const [createProjectName, setCreateProjectName] = useState("");
 
-  const reposQuery = useQuery(githubReposQueryOptions(user.id));
-
-  const repos = reposQuery.data ?? [];
   const projectsQuery = useQuery(projectsQueryOptions(user.id));
 
   const projects = projectsQuery.data ?? [];
   const currentProjectId = selectedProjectId || projects[0]?.id || "";
   const currentProject = projects.find((p) => p.id === currentProjectId) ?? null;
-  const currentRepoId = currentProject?.repoId ?? "";
+  const currentProjectDetailQuery = useQuery({
+    ...projectDetailQueryOptions(currentProjectId),
+    enabled: Boolean(currentProjectId),
+  });
 
   const projectLabel =
     currentProject?.name ?? (projectsQuery.isPending ? "Loading..." : "Select project");
 
-  const currentRepo = repos.find((r) => r.id === currentRepoId) ?? null;
+  const currentProjectRepoFullName = currentProjectDetailQuery.data?.repoFullName ?? null;
+  const createProjectRepoQuery = useQuery({
+    ...githubReposQueryOptions(user.id),
+    enabled: createProjectOpen,
+  });
+  const repos = createProjectRepoQuery.data ?? [];
   const createProjectRepo = repos.find((repo) => repo.id === createProjectRepoId) ?? null;
   const createProjectQuery = createProjectSearch.trim().toLowerCase();
   const filteredCreateRepos = createProjectQuery
@@ -124,17 +118,12 @@ function AppHome() {
     : repos.slice(0, 8);
 
   const branchesQuery = useQuery({
-    ...githubBranchesQueryOptions(user.id, currentRepo?.fullName ?? ""),
-    enabled: Boolean(currentRepo),
+    ...githubBranchesQueryOptions(user.id, currentProjectRepoFullName ?? ""),
+    enabled: Boolean(currentProjectRepoFullName) && branchMenuOpened,
   });
 
   const branches = branchesQuery.data ?? [];
-  const currentBranch =
-    selectedBranch ||
-    branches.find((b) => b.name === currentRepo?.defaultBranch)?.name ||
-    branches[0]?.name ||
-    currentRepo?.defaultBranch ||
-    "main";
+  const currentBranch = selectedBranch || branches[0]?.name || "main";
 
   const createProjectMutation = useMutation({
     mutationFn: async () => {
@@ -297,7 +286,7 @@ function AppHome() {
                   <DropdownMenuItem
                     onClick={() => {
                       setCreateProjectSearch("");
-                      setCreateProjectRepoId(repos[0]?.id ?? "");
+                      setCreateProjectRepoId("");
                       setCreateProjectName("");
                       setCreateProjectOpen(true);
                     }}
@@ -308,7 +297,11 @@ function AppHome() {
                 </DropdownMenuContent>
               </DropdownMenu>
 
-              <DropdownMenu>
+              <DropdownMenu
+                onOpenChange={(open) => {
+                  if (open) setBranchMenuOpened(true);
+                }}
+              >
                 <DropdownMenuTrigger
                   disabled={!currentProject}
                   className="flex cursor-pointer items-center gap-1 rounded-lg px-2 py-1 text-sm text-muted-foreground/60 transition-colors hover:bg-accent hover:text-muted-foreground disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-muted-foreground/60"
@@ -382,7 +375,7 @@ function AppHome() {
             <div className="grid gap-2">
               <Label>Repository</Label>
               <div className="max-h-72 overflow-auto rounded-2xl border border-border bg-background p-1">
-                {reposQuery.isPending ? (
+                {createProjectRepoQuery.isPending ? (
                   <div className="flex items-center justify-center py-10">
                     <LoaderIcon className="size-5 animate-spin text-muted-foreground" />
                   </div>
