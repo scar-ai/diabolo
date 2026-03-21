@@ -12,6 +12,16 @@ import {
 import { useState } from "react";
 import { toast } from "sonner";
 
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogClose,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -239,6 +249,7 @@ function SessionRow({
   const config = statusConfig[status] ?? statusConfig.queued;
   const StatusIcon = config.icon;
   const isRunning = status === "running" || status === "queued";
+  const [deleteOpen, setDeleteOpen] = useState(false);
 
   return (
     <TableRow className="group">
@@ -306,24 +317,48 @@ function SessionRow({
       </TableCell>
       <TableCell className="w-12 text-right">
         {onDelete ? (
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            className="text-destructive/70 hover:bg-destructive/10 hover:text-destructive"
-            disabled={isDeleting}
-            onClick={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              onDelete();
-            }}
-            aria-label="Remove session"
-          >
-            {isDeleting ? (
-              <LoaderIcon className="size-3 animate-spin" aria-hidden="true" />
-            ) : (
-              <Trash2Icon className="size-3" aria-hidden="true" />
-            )}
-          </Button>
+          <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              className="text-destructive/70 hover:bg-destructive/10 hover:text-destructive"
+              disabled={isDeleting}
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                setDeleteOpen(true);
+              }}
+              aria-label="Remove session"
+            >
+              {isDeleting ? (
+                <LoaderIcon className="size-3 animate-spin" aria-hidden="true" />
+              ) : (
+                <Trash2Icon className="size-3" aria-hidden="true" />
+              )}
+            </Button>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Delete session?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This removes the session from your history. The task data cannot be recovered.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+                <AlertDialogClose
+                  variant="destructive"
+                  disabled={isDeleting}
+                  onClick={() => onDelete()}
+                >
+                  {isDeleting ? (
+                    <LoaderIcon className="size-3 animate-spin" aria-hidden="true" />
+                  ) : (
+                    "Delete"
+                  )}
+                </AlertDialogClose>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         ) : null}
       </TableCell>
     </TableRow>
