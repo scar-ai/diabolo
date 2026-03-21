@@ -2,19 +2,19 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import {
-  GitBranchIcon,
   BookMarkedIcon,
   ChevronDownIcon,
   ArrowRightIcon,
   PlusIcon,
   LoaderIcon,
   SearchIcon,
+  GitBranchIcon,
 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
 import { PromptComposer } from "@/components/app/prompt-composer";
-import { Badge } from "@/components/ui/badge";
+import { RunningTaskItem } from "@/components/app/running-task-item";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -36,15 +36,40 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { $listGithubBranches, $listGithubRepos } from "@/lib/github/functions";
-import {
-  $createProject,
-  $createTask,
-  $listAllUserTasks,
-  $listProjects,
-} from "@/lib/project/functions";
+import { githubBranchesQueryOptions, githubReposQueryOptions } from "@/lib/github/queries";
+import { $createProject, $createTask } from "@/lib/project/functions";
+import { allUserTasksQueryOptions, projectsQueryOptions } from "@/lib/project/queries";
 
 export const Route = createFileRoute("/_auth/app/")({
+  loader: async ({ context }) => {
+    const userId = context.user.id;
+    const [repos, projects] = await Promise.all([
+      context.queryClient.ensureQueryData({
+        ...githubReposQueryOptions(userId),
+        revalidateIfStale: true,
+      }),
+      context.queryClient.ensureQueryData({
+        ...projectsQueryOptions(userId),
+        revalidateIfStale: true,
+      }),
+      context.queryClient.ensureQueryData({
+        ...allUserTasksQueryOptions(userId),
+        revalidateIfStale: true,
+      }),
+    ]);
+
+    const defaultProject = projects[0];
+    const defaultRepo = defaultProject
+      ? repos.find((repo) => repo.id === defaultProject.repoId)
+      : null;
+
+    if (defaultRepo) {
+      await context.queryClient.ensureQueryData({
+        ...githubBranchesQueryOptions(userId, defaultRepo.fullName),
+        revalidateIfStale: true,
+      });
+    }
+  },
   component: AppHome,
 });
 
@@ -52,9 +77,6 @@ function AppHome() {
   const { user } = Route.useRouteContext();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const listGithubRepos = useServerFn($listGithubRepos);
-  const listGithubBranches = useServerFn($listGithubBranches);
-  const listProjects = useServerFn($listProjects);
   const createProject = useServerFn($createProject);
   const createTask = useServerFn($createTask);
 
@@ -77,19 +99,14 @@ function AppHome() {
   const [createProjectRepoId, setCreateProjectRepoId] = useState("");
   const [createProjectName, setCreateProjectName] = useState("");
 
-  const reposQuery = useQuery({
-    queryFn: listGithubRepos,
-    queryKey: ["github-repos", user.id],
-  });
+  const reposQuery = useQuery(githubReposQueryOptions(user.id));
 
   const repos = reposQuery.data ?? [];
-  const projectsQuery = useQuery({
-    queryFn: listProjects,
-    queryKey: ["projects", user.id, listProjects],
-  });
+  const projectsQuery = useQuery(projectsQueryOptions(user.id));
 
   const projects = projectsQuery.data ?? [];
-  const currentProject = projects.find((p) => p.id === selectedProjectId) ?? projects[0] ?? null;
+  const currentProjectId = selectedProjectId || projects[0]?.id || "";
+  const currentProject = projects.find((p) => p.id === currentProjectId) ?? null;
   const currentRepoId = currentProject?.repoId ?? "";
 
   const projectLabel =
@@ -107,9 +124,8 @@ function AppHome() {
     : repos.slice(0, 8);
 
   const branchesQuery = useQuery({
+    ...githubBranchesQueryOptions(user.id, currentRepo?.fullName ?? ""),
     enabled: Boolean(currentRepo),
-    queryFn: () => listGithubBranches({ data: { repoFullName: currentRepo!.fullName } }),
-    queryKey: ["github-branches", currentRepo?.id, currentRepo?.fullName, listGithubBranches],
   });
 
   const branches = branchesQuery.data ?? [];
@@ -147,11 +163,8 @@ function AppHome() {
     },
   });
 
-  const listAllUserTasks = useServerFn($listAllUserTasks);
-
   const recentTasksQuery = useQuery({
-    queryFn: listAllUserTasks,
-    queryKey: ["all-user-tasks", listAllUserTasks],
+    ...allUserTasksQueryOptions(user.id),
     refetchInterval: (query) => {
       const tasks = query.state.data ?? [];
       return tasks.some((task) => task.status === "queued" || task.status === "running")
@@ -232,25 +245,7 @@ function AppHome() {
 
               <div className="flex flex-col gap-2">
                 {runningTasks.map((t) => (
-                  <Link
-                    key={t.id}
-                    to="/app/tasks/$taskId"
-                    params={{ taskId: t.id }}
-                    className="flex items-center gap-3 rounded-xl border border-border bg-muted/40 px-4 py-3 transition-colors hover:bg-muted/60"
-                  >
-                    <LoaderIcon className="size-4 shrink-0 animate-spin text-muted-foreground" />
-                    <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-                      <span className="truncate text-sm font-medium text-foreground">
-                        {t.prompt.split("\n")[0]?.slice(0, 60)}
-                      </span>
-                      <span className="text-xs text-muted-foreground/50">
-                        {t.repoName ?? "—"} · {t.stage}
-                      </span>
-                    </div>
-                    <Badge variant="info" size="sm">
-                      {t.status === "queued" ? "Queued" : "Running"}
-                    </Badge>
-                  </Link>
+                  <RunningTaskItem key={t.id} task={t} />
                 ))}
               </div>
             </div>

@@ -1,23 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import { CheckCircle2Icon, LoaderIcon, CircleDotIcon, XCircleIcon, Trash2Icon } from "lucide-react";
+import { LoaderIcon, Trash2Icon } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
-import {
-  AlertDialog,
-  AlertDialogCancel,
-  AlertDialogClose,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import { Badge } from "@/components/ui/badge";
+import { SessionRow } from "@/components/app/session-row";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import {
   Empty,
   EmptyContent,
@@ -27,54 +16,28 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import { Frame } from "@/components/ui/frame";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { $deleteTask, $listAllUserTasks } from "@/lib/project/functions";
-
-type TaskRow = Awaited<ReturnType<typeof $listAllUserTasks>>[number];
-
-const statusConfig = {
-  queued: {
-    label: "Queued",
-    icon: CircleDotIcon,
-    variant: "secondary" as const,
-  },
-  running: {
-    label: "Running",
-    icon: LoaderIcon,
-    variant: "info" as const,
-  },
-  succeeded: {
-    label: "Completed",
-    icon: CheckCircle2Icon,
-    variant: "success" as const,
-  },
-  failed: {
-    label: "Failed",
-    icon: XCircleIcon,
-    variant: "error" as const,
-  },
-};
+import { Table, TableBody, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { $deleteTask } from "@/lib/project/functions";
+import { allUserTasksQueryOptions } from "@/lib/project/queries";
 
 export const Route = createFileRoute("/_auth/app/sessions")({
+  loader: async ({ context }) => {
+    await context.queryClient.ensureQueryData({
+      ...allUserTasksQueryOptions(context.user.id),
+      revalidateIfStale: true,
+    });
+  },
   component: SessionsPage,
 });
 
 function SessionsPage() {
+  const { user } = Route.useRouteContext();
   const queryClient = useQueryClient();
-  const listAllUserTasks = useServerFn($listAllUserTasks);
   const deleteTask = useServerFn($deleteTask);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const tasksQuery = useQuery({
-    queryFn: listAllUserTasks,
-    queryKey: ["all-user-tasks", listAllUserTasks],
+    ...allUserTasksQueryOptions(user.id),
     refetchInterval: 5_000,
   });
 
@@ -263,138 +226,5 @@ function SessionsPage() {
         ) : null}
       </div>
     </main>
-  );
-}
-
-function SessionRow({
-  session,
-  onDelete,
-  onToggleSelect,
-  selected = false,
-  isDeleting = false,
-}: {
-  session: TaskRow;
-  onDelete?: () => void;
-  onToggleSelect?: () => void;
-  selected?: boolean;
-  isDeleting?: boolean;
-}) {
-  const status = session.status as keyof typeof statusConfig;
-  const config = statusConfig[status] ?? statusConfig.queued;
-  const StatusIcon = config.icon;
-  const isRunning = status === "running" || status === "queued";
-  const [deleteOpen, setDeleteOpen] = useState(false);
-
-  return (
-    <TableRow className="group">
-      {onToggleSelect ? (
-        <TableCell className="w-10">
-          <div
-            className={`transition-opacity ${selected ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}
-          >
-            <Checkbox
-              checked={selected}
-              onCheckedChange={() => onToggleSelect()}
-              aria-label="Select session"
-              onClick={(e) => e.stopPropagation()}
-            />
-          </div>
-        </TableCell>
-      ) : null}
-      <TableCell className="max-w-0">
-        <Link
-          to="/app/tasks/$taskId"
-          params={{ taskId: session.id }}
-          className="flex flex-col gap-1"
-        >
-          <div className="flex items-center gap-1.5">
-            <span className="truncate text-sm font-medium text-foreground group-hover:underline">
-              {session.prompt.split("\n")[0]?.slice(0, 80)}
-            </span>
-            {session.quickTask ? (
-              <Badge variant="outline" size="sm">
-                Quick
-              </Badge>
-            ) : null}
-          </div>
-          <div className="flex items-center gap-1.5 text-xs text-muted-foreground/50">
-            {session.repoName ? <span className="font-mono">{session.repoName}</span> : null}
-            {session.branchName ? (
-              <>
-                {session.repoName ? <span>·</span> : null}
-                <span className="font-mono">{session.branchName}</span>
-              </>
-            ) : null}
-            {isRunning && session.stage ? (
-              <>
-                <span>·</span>
-                <span className="italic">{session.stage}</span>
-              </>
-            ) : null}
-          </div>
-        </Link>
-      </TableCell>
-      <TableCell className="w-28">
-        <Badge variant={config.variant} size="sm" className="gap-1">
-          <StatusIcon className={`size-3 ${isRunning ? "animate-spin" : ""}`} aria-hidden="true" />
-          {config.label}
-        </Badge>
-      </TableCell>
-      <TableCell className="w-28">
-        <span className="text-xs text-muted-foreground/60">
-          {new Date(session.startedAt).toLocaleDateString("en-US", {
-            month: "short",
-            day: "numeric",
-            year: "numeric",
-          })}
-        </span>
-      </TableCell>
-      <TableCell className="w-12 text-right">
-        {onDelete ? (
-          <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
-            <Button
-              variant="ghost"
-              size="icon-xs"
-              className="text-destructive/70 hover:bg-destructive/10 hover:text-destructive"
-              disabled={isDeleting}
-              onClick={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                setDeleteOpen(true);
-              }}
-              aria-label="Remove session"
-            >
-              {isDeleting ? (
-                <LoaderIcon className="size-3 animate-spin" aria-hidden="true" />
-              ) : (
-                <Trash2Icon className="size-3" aria-hidden="true" />
-              )}
-            </Button>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>Delete session?</AlertDialogTitle>
-                <AlertDialogDescription>
-                  This removes the session from your history. The task data cannot be recovered.
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
-                <AlertDialogClose
-                  variant="destructive"
-                  disabled={isDeleting}
-                  onClick={() => onDelete()}
-                >
-                  {isDeleting ? (
-                    <LoaderIcon className="size-3 animate-spin" aria-hidden="true" />
-                  ) : (
-                    "Delete"
-                  )}
-                </AlertDialogClose>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
-        ) : null}
-      </TableCell>
-    </TableRow>
   );
 }

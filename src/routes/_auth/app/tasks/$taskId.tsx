@@ -4,7 +4,6 @@ import { useServerFn } from "@tanstack/react-start";
 import {
   BotIcon,
   BookMarkedIcon,
-  CheckCircle2Icon,
   ChevronDownIcon,
   ChevronRightIcon,
   ExternalLinkIcon,
@@ -14,12 +13,12 @@ import {
   SquareIcon,
   TerminalIcon,
   Trash2Icon,
-  XCircleIcon,
 } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { PromptComposer } from "@/components/app/prompt-composer";
+import { TaskStatusBadge } from "@/components/app/task-status-badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -27,15 +26,21 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   $destroyTaskSandboxById,
-  $getTaskById,
   $runFollowUpById,
   $terminateQuickTaskById,
   $terminateTaskById,
 } from "@/lib/project/functions";
+import { type TaskDetailResult, taskDetailQueryOptions } from "@/lib/project/queries";
 
 const TERMINAL_STATUSES = new Set(["failed", "succeeded"]);
 
 export const Route = createFileRoute("/_auth/app/tasks/$taskId")({
+  loader: async ({ context, params }) => {
+    await context.queryClient.ensureQueryData({
+      ...taskDetailQueryOptions(params.taskId),
+      revalidateIfStale: true,
+    });
+  },
   component: TaskDetailPage,
 });
 
@@ -43,7 +48,6 @@ function TaskDetailPage() {
   const { taskId } = Route.useParams();
   const { user } = Route.useRouteContext();
   const queryClient = useQueryClient();
-  const getTaskById = useServerFn($getTaskById);
   const terminateTask = useServerFn($terminateTaskById);
   const terminateQuickTask = useServerFn($terminateQuickTaskById);
   const destroySandbox = useServerFn($destroyTaskSandboxById);
@@ -53,8 +57,7 @@ function TaskDetailPage() {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const taskQuery = useQuery({
-    queryFn: () => getTaskById({ data: { taskId } }),
-    queryKey: ["task-detail", taskId, getTaskById],
+    ...taskDetailQueryOptions(taskId),
     refetchInterval: (query) => {
       const data = query.state.data;
       if (!data || TERMINAL_STATUSES.has(data.status)) return false;
@@ -359,7 +362,7 @@ function AgentAvatar() {
   );
 }
 
-type TaskData = NonNullable<Awaited<ReturnType<typeof $getTaskById>>>;
+type TaskData = TaskDetailResult;
 
 type ParsedAgentMessage = { text: string; timestamp: number };
 type ParsedFollowUp = {
@@ -405,33 +408,6 @@ function parseFollowUpHistory(raw: string | null | undefined): ParsedFollowUp[] 
   } catch {
     return [];
   }
-}
-
-function renderStatusBadge(status: TaskData["status"]) {
-  if (status === "succeeded") {
-    return (
-      <Badge variant="success" size="sm" className="gap-1">
-        <CheckCircle2Icon className="size-3" />
-        Completed
-      </Badge>
-    );
-  }
-
-  if (status === "failed") {
-    return (
-      <Badge variant="error" size="sm" className="gap-1">
-        <XCircleIcon className="size-3" />
-        Failed
-      </Badge>
-    );
-  }
-
-  return (
-    <Badge variant="info" size="sm" className="gap-1">
-      <LoaderIcon className="size-3 animate-spin" />
-      {status === "queued" ? "Queued" : "Running"}
-    </Badge>
-  );
 }
 
 function formatTaskDate(value?: Date | string | null) {
@@ -492,7 +468,7 @@ function QuickTaskDetail({
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <span>{task.repoName ?? "Quick task"}</span>
-              {renderStatusBadge(task.status)}
+              <TaskStatusBadge status={task.status} />
             </CardTitle>
             <CardDescription>{task.stage}</CardDescription>
           </CardHeader>
@@ -608,7 +584,7 @@ function AgentBubble({ task, isRunning }: { task: TaskData; isRunning: boolean }
         <div className="flex flex-col gap-3 rounded-2xl rounded-tl-sm border border-border bg-muted/40 px-4 py-3">
           {/* Status + stage */}
           <div className="flex items-center gap-2">
-            {renderStatusBadge(task.status)}
+            <TaskStatusBadge status={task.status} />
             <span className="text-xs text-muted-foreground">{task.stage}</span>
           </div>
 
@@ -710,7 +686,7 @@ function FollowUpAgentBubble({ followUp }: { followUp: ParsedFollowUp }) {
       <div className="flex flex-col gap-2">
         <div className="flex flex-col gap-3 rounded-2xl rounded-tl-sm border border-border bg-muted/40 px-4 py-3">
           <div className="flex items-center gap-2">
-            {renderStatusBadge(followUp.status)}
+            <TaskStatusBadge status={followUp.status} />
             <span className="text-xs text-muted-foreground">{followUp.stage}</span>
           </div>
 
