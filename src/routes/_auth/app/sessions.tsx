@@ -1,14 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import {
-  MessageSquareIcon,
-  CheckCircle2Icon,
-  LoaderIcon,
-  CircleDotIcon,
-  XCircleIcon,
-  Trash2Icon,
-} from "lucide-react";
+import { CheckCircle2Icon, LoaderIcon, CircleDotIcon, XCircleIcon, Trash2Icon } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -25,6 +18,14 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty";
 import { Frame } from "@/components/ui/frame";
 import {
   Table,
@@ -128,20 +129,17 @@ function SessionsPage() {
   return (
     <main className="flex flex-1 flex-col items-center px-4 pt-8 pb-16">
       <div className="w-full max-w-3xl">
-        <div className="mb-6">
-          <h1 className="text-xl font-semibold text-foreground">Sessions</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {sessions.length} total · {runningSessions.length} running
-          </p>
-        </div>
-
         {sessions.length === 0 && !tasksQuery.isPending ? (
-          <div className="flex flex-col items-center justify-center gap-2 py-16 text-center">
-            <MessageSquareIcon className="size-10 text-muted-foreground" />
-            <p className="text-muted-foreground">
-              No sessions yet. Start a task from the home page.
-            </p>
-          </div>
+          <Empty className="min-h-[48vh] border-0 bg-transparent py-16">
+            <EmptyContent>
+              <EmptyHeader>
+                <EmptyTitle>Nothing to see here.</EmptyTitle>
+              </EmptyHeader>
+              <EmptyDescription>
+                Get back to work. The session graveyard is empty for now.
+              </EmptyDescription>
+            </EmptyContent>
+          </Empty>
         ) : null}
 
         {/* Running tasks section */}
