@@ -80,6 +80,21 @@ const syncTaskWithJob = async (row: typeof task.$inferSelect, userId?: string) =
 
     return updated;
   } catch {
+    if (RUNNING_TASK_STATUSES.has(row.status)) {
+      const [updated] = await db
+        .update(task)
+        .set({
+          completedAt: new Date(),
+          error: "Task worker was not available. Start the task again.",
+          stage: "Task failed",
+          status: "failed",
+        })
+        .where(eq(task.id, row.id))
+        .returning();
+
+      return updated;
+    }
+
     return row;
   }
 };
@@ -446,15 +461,22 @@ export const $runFollowUpById = createServerFn({ method: "POST" })
       throw new Error("Quick tasks are read-only.");
     }
 
-    queueMicrotask(() => {
-      void runFollowUpOnSandbox(row.task.id, data.prompt.trim(), context.user.id);
-    });
-
-    const [updated] = await db
+    await db
       .update(task)
       .set({ status: "running", stage: "Running follow-up task" })
-      .where(eq(task.id, row.task.id))
-      .returning();
+      .where(eq(task.id, row.task.id));
 
-    return updated;
+    await runFollowUpOnSandbox(row.task.id, data.prompt.trim(), context.user.id);
+
+    const latestRow = await db
+      .select()
+      .from(task)
+      .where(eq(task.id, row.task.id))
+      .then((rows) => rows[0]);
+
+    if (!latestRow) {
+      throw new Error("Task not found.");
+    }
+
+    return syncTaskWithJob(latestRow, context.user.id);
   });
