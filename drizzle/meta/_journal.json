@@ -15,6 +15,27 @@
       "when": 1773935927707,
       "tag": "0001_giant_madame_masque",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1774029741319,
+      "tag": "0002_supreme_bullseye",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1775000000000,
+      "tag": "0003_quick_task_toggle",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1776000000000,
+      "tag": "0004_follow_up_history",
+      "breakpoints": true
     }
   ]
 }

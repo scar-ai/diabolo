@@ -266,6 +266,11 @@ function SessionRow({
             <span className="truncate text-sm font-medium text-foreground group-hover:underline">
               {session.prompt.split("\n")[0]?.slice(0, 80)}
             </span>
+            {session.quickTask ? (
+              <Badge variant="outline" size="sm">
+                Quick
+              </Badge>
+            ) : null}
           </div>
           <div className="flex items-center gap-1.5 text-xs text-muted-foreground/50">
             {session.repoName ? <span className="font-mono">{session.repoName}</span> : null}
