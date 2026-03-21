@@ -16,6 +16,7 @@ import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -24,7 +25,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Checkbox } from "@/components/ui/checkbox";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -72,7 +72,6 @@ function AppHome() {
   const [inputValue, setInputValue] = useState("");
   const [selectedProjectId, setSelectedProjectId] = useState("");
   const [quickTask, setQuickTask] = useState(false);
-  const [selectedRepoId, setSelectedRepoId] = useState("");
   const [selectedBranch, setSelectedBranch] = useState("");
   const [createProjectOpen, setCreateProjectOpen] = useState(false);
   const [createProjectSearch, setCreateProjectSearch] = useState("");
@@ -166,32 +165,14 @@ function AppHome() {
   const runningTasks = recentTasks.filter((t) => t.status === "queued" || t.status === "running");
 
   const taskMutation = useMutation({
-    mutationFn: async (data: { prompt: string }) => {
+    mutationFn: async (data: { prompt: string; quickTask: boolean; sourceBranch: string }) => {
       if (!currentProject) {
         throw new Error("Select a project first.");
       }
 
-      return createTask({ data: { projectId: currentProject.id, prompt: data.prompt } });
-    mutationFn: async (data: {
-      prompt: string;
-      quickTask: boolean;
-      repoId: string;
-      sourceBranch: string;
-    }) => {
-      // Ensure a project exists for this repo, then create a task
-      let proj: { id: string };
-      try {
-        proj = await createProject({
-          data: { name: currentRepo?.fullName ?? "Project", repoId: data.repoId },
-        });
-      } catch {
-        // If project creation fails (e.g. duplicate), find existing
-        throw new Error("Failed to create project for this repository.");
-      }
-
       return createTask({
         data: {
-          projectId: proj.id,
+          projectId: currentProject.id,
           prompt: data.prompt,
           quickTask: data.quickTask,
           sourceBranch: data.sourceBranch,
@@ -215,12 +196,9 @@ function AppHome() {
 
   const handleSubmit = () => {
     if (!canSubmit || !currentProject) return;
-    taskMutation.mutate({ prompt: inputValue.trim() });
-    if (!canSubmit || !currentRepo) return;
     taskMutation.mutate({
       prompt: inputValue.trim(),
       quickTask,
-      repoId: currentRepo.id,
       sourceBranch: currentBranch,
     });
   };
