@@ -1,10 +1,4 @@
-import {
-  ChevronDownIcon,
-  ChevronRightIcon,
-  ExternalLinkIcon,
-  GitPullRequestIcon,
-  TerminalIcon,
-} from "lucide-react";
+import { ChevronDownIcon, ChevronRightIcon, TerminalIcon } from "lucide-react";
 import { useState } from "react";
 
 import { Markdown } from "@/components/app/markdown";
@@ -54,21 +48,6 @@ export function AgentBubble({ task, isRunning }: { task: TaskData; isRunning: bo
         <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2">
           <p className="text-xs font-medium text-destructive">Error</p>
           <p className="mt-0.5 text-xs text-destructive/80">{task.error}</p>
-        </div>
-      ) : null}
-
-      {task.prUrl ? (
-        <div className="flex items-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-3 py-2">
-          <GitPullRequestIcon className="size-3.5 shrink-0 text-emerald-500" />
-          <a
-            href={task.prUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="flex items-center gap-1 text-xs text-emerald-600 underline underline-offset-4 dark:text-emerald-400"
-          >
-            View PR #{task.prNumber}
-            <ExternalLinkIcon className="size-2.5" />
-          </a>
         </div>
       ) : null}
 

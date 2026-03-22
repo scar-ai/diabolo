@@ -1,4 +1,10 @@
-import { BookMarkedIcon, ChevronDownIcon, GitBranchIcon } from "lucide-react";
+import {
+  BookMarkedIcon,
+  ChevronDownIcon,
+  ExternalLinkIcon,
+  GitBranchIcon,
+  GitPullRequestIcon,
+} from "lucide-react";
 
 import { PromptComposer } from "@/components/app/prompt-composer";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -27,13 +33,31 @@ export function TaskFollowUpComposer({
 
   return (
     <>
-      <div className="pointer-events-none fixed inset-x-0 bottom-0 h-48 bg-gradient-to-t from-background from-40% to-transparent" />
+      <div
+        className={`pointer-events-none fixed inset-x-0 bottom-0 bg-gradient-to-t from-background from-40% to-transparent ${task.prUrl ? "h-72" : "h-48"}`}
+      />
       <div className="fixed inset-x-0 bottom-6 flex justify-center px-4">
         <div className="w-full max-w-3xl">
           <PromptComposer
             value={value}
             onChange={onChange}
             onSubmit={onSubmit}
+            headerContent={
+              task.prUrl ? (
+                <div className="flex items-center gap-2">
+                  <GitPullRequestIcon className="size-3.5 shrink-0 text-emerald-500" />
+                  <a
+                    href={task.prUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex items-center gap-1 text-xs text-emerald-600 underline underline-offset-4 dark:text-emerald-400"
+                  >
+                    View PR #{task.prNumber}
+                    <ExternalLinkIcon className="size-2.5" />
+                  </a>
+                </div>
+              ) : undefined
+            }
             placeholder={
               taskIsRunning && !sandboxAlive
                 ? "Waiting for task to finish..."

@@ -1,6 +1,8 @@
 import { ArrowDownIcon } from "lucide-react";
 import { type RefObject, useEffect, useRef, useState } from "react";
 
+import { cn } from "@/lib/utils";
+
 import { AgentBubble } from "./agent-bubble";
 import { FollowUpAgentBubble } from "./follow-up-agent-bubble";
 import type { ParsedFollowUp, TaskData } from "./types";
@@ -39,7 +41,12 @@ export function TaskConversation({
   return (
     <>
       <div ref={scrollRef} className="flex flex-1 flex-col overflow-y-auto">
-        <div className="mx-auto flex w-full max-w-3xl flex-col gap-10 px-4 py-6 pb-38">
+        <div
+          className={cn(
+            "mx-auto flex w-full max-w-3xl flex-col gap-10 px-4 py-6",
+            task.prUrl ? "pb-48" : "pb-38",
+          )}
+        >
           <UserBubble text={task.prompt} timestamp={task.startedAt} />
           <AgentBubble task={task} isRunning={taskIsRunning} />
           {followUps.map((followUp) => (
