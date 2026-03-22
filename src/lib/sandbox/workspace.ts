@@ -1,8 +1,7 @@
-import type { GithubRepo } from "@/lib/github/types";
-import type { SandboxProvider, SandboxSession } from "@/lib/sandbox/types";
+import type { Github } from "@/lib/github";
+import type { Sandbox } from "@/lib/sandbox";
 
 import { opencodeInstallCommand } from "./opencode";
-import type { SandboxTaskJob } from "./task";
 
 type Viewer = {
   email: string;
@@ -17,7 +16,7 @@ type DaytonaEnv = {
 };
 
 type Run = (
-  sandbox: SandboxSession,
+  sandbox: Sandbox.Session,
   jobId: string,
   command: string,
   cwd?: string,
@@ -26,7 +25,7 @@ type Run = (
   options?: { followUpId?: string },
 ) => Promise<{ exitCode: number; output: string }>;
 
-type Update = (jobId: string, patch: Partial<SandboxTaskJob>) => void;
+type Update = (jobId: string, patch: Partial<Sandbox.TaskJob>) => void;
 type UpdateFollowUp = (jobId: string, followUpId: string, update: (entry: any) => any) => void;
 
 const withDaytonaEnv = (env: DaytonaEnv) => ({
@@ -37,8 +36,8 @@ const withDaytonaEnv = (env: DaytonaEnv) => ({
 
 export namespace SandboxWorkspace {
   export const destroy = async (
-    provider: SandboxProvider,
-    job: SandboxTaskJob,
+    provider: Sandbox.Provider,
+    job: Sandbox.TaskJob,
     update: Update,
     opts?: {
       stage?: string;
@@ -67,7 +66,7 @@ export namespace SandboxWorkspace {
     enableDaytonaTools: boolean;
     githubAccessToken: string;
     jobId: string;
-    provider: SandboxProvider;
+    provider: Sandbox.Provider;
     repoName: string;
     repoOwnerLogin: string;
     repoUrl: string;
@@ -136,7 +135,7 @@ export namespace SandboxWorkspace {
     };
   };
 
-  export const followUpTarget = (repo: GithubRepo, branchName?: string) => ({
+  export const followUpTarget = (repo: Github.Repo, branchName?: string) => ({
     branch: branchName?.trim() || repo.defaultBranch,
     repo,
   });
@@ -162,9 +161,9 @@ export namespace SandboxWorkspace {
     enableDaytonaTools: boolean;
     followUpId: string;
     githubAccessToken: string;
-    job: SandboxTaskJob;
-    provider: SandboxProvider;
-    repo: GithubRepo;
+    job: Sandbox.TaskJob;
+    provider: Sandbox.Provider;
+    repo: Github.Repo;
     run: Run;
     setupTools?: string;
     update: Update;

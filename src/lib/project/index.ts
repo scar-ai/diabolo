@@ -1,14 +1,8 @@
 import { and, desc, eq, inArray } from "drizzle-orm";
 
 import { db } from "@/lib/db";
-import { getSignedInGithubRepo } from "@/lib/github/server";
-import {
-  destroySandbox,
-  getSandboxTask,
-  runSandboxTaskFollowUp,
-  startSandboxTask,
-  terminateSandboxTask,
-} from "@/lib/sandbox/server";
+import { Github } from "@/lib/github";
+import { Sandbox } from "@/lib/sandbox";
 
 import { project, task } from "./project.sql";
 
@@ -172,7 +166,7 @@ export namespace Project {
     return result;
   };
 
-  const toSerializedJobPatch = (job: Awaited<ReturnType<typeof getSandboxTask>>) => ({
+  const toSerializedJobPatch = (job: Awaited<ReturnType<typeof Sandbox.getTask>>) => ({
     agentMessages: job.agentMessages.length > 0 ? JSON.stringify(job.agentMessages) : null,
     branchName: job.branchName ?? job.sourceBranch ?? null,
     completedAt: job.completedAt ? new Date(job.completedAt) : null,
@@ -208,7 +202,7 @@ export namespace Project {
 
   const syncTaskWithJob = async (t: TaskRecord, userId?: string) => {
     try {
-      const job = await getSandboxTask(t.id, userId);
+      const job = await Sandbox.getTask(t.id, userId);
       return updateTask(t.id, toSerializedJobPatch(job));
     } catch {
       if (!RUNNING_TASK_STATUSES.has(t.status)) {
@@ -229,7 +223,7 @@ export namespace Project {
 
   const terminateTaskRecord = async (taskId: string) => {
     try {
-      await terminateSandboxTask(taskId);
+      await Sandbox.terminateTask(taskId);
     } catch {}
 
     return updateTask(taskId, {
@@ -256,7 +250,7 @@ export namespace Project {
 
   export const getProjectForUser = async (projectId: string, userId: string) => {
     const p = await requireUserProject(projectId, userId);
-    const repo = await getSignedInGithubRepo(p.repoId);
+    const repo = await Github.getRepo(p.repoId);
 
     return {
       ...p,
@@ -281,7 +275,7 @@ export namespace Project {
   }) => {
     const p = await requireUserProject(input.projectId, input.userId);
 
-    const job = await startSandboxTask(
+    const job = await Sandbox.startTask(
       {
         prompt: input.prompt,
         quickTask: input.quickTask,
@@ -354,12 +348,12 @@ export namespace Project {
     }
 
     try {
-      await terminateSandboxTask(t.id);
+      await Sandbox.terminateTask(t.id);
     } catch {}
 
     if (t.sandboxId) {
       try {
-        await destroySandbox(t.sandboxId);
+        await Sandbox.destroySandbox(t.sandboxId);
       } catch {}
     }
 
@@ -378,7 +372,7 @@ export namespace Project {
     const { task: t } = await requireTaskForUser(taskId, userId);
 
     if (t.sandboxId) {
-      await destroySandbox(t.sandboxId);
+      await Sandbox.destroySandbox(t.sandboxId);
     }
 
     return updateTask(t.id, {
@@ -401,7 +395,7 @@ export namespace Project {
       status: "running",
     });
 
-    await runSandboxTaskFollowUp(t.id, prompt.trim(), userId);
+    await Sandbox.runTaskFollowUp(t.id, prompt.trim(), userId);
 
     const latestTask = await findTask(t.id);
 

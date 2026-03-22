@@ -1,11 +1,11 @@
 import { createInMemoryJobStore } from "@/lib/sandbox/job-store";
 
-import type { FollowUpEntry, SandboxTaskJob } from "./task";
+import type { Sandbox } from "./index";
 
 const MAX_LOG_LENGTH = 16_000;
 const MAX_AGENT_MESSAGES = 200;
 
-export const jobs = createInMemoryJobStore<SandboxTaskJob>();
+export const jobs = createInMemoryJobStore<Sandbox.TaskJob>();
 
 export const appendJobLog = (jobId: string, chunk: string) => {
   const job = jobs.get(jobId);
@@ -23,7 +23,7 @@ export const appendJobLog = (jobId: string, chunk: string) => {
 export const updateFollowUp = (
   jobId: string,
   followUpId: string,
-  update: (entry: FollowUpEntry) => FollowUpEntry,
+  update: (entry: Sandbox.FollowUpEntry) => Sandbox.FollowUpEntry,
 ) => {
   const job = jobs.get(jobId);
 
@@ -95,7 +95,7 @@ export const appendFollowUpAgentMessage = (
   }));
 };
 
-export const updateJob = (jobId: string, patch: Partial<SandboxTaskJob>) => {
+export const updateJob = (jobId: string, patch: Partial<Sandbox.TaskJob>) => {
   const job = jobs.get(jobId);
 
   if (!job) {

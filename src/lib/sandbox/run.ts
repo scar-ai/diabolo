@@ -1,14 +1,8 @@
 import { env } from "@/env/server";
-import {
-  createPullRequestCommentForSignedInGithubRepo,
-  createPullRequestForSignedInGithubRepo,
-  getGithubAuthenticatedRemoteUrl,
-  getSignedInGithubAccessToken,
-  getSignedInGithubRepo,
-  getSignedInGithubViewer,
-} from "@/lib/github/server";
+import { Github } from "@/lib/github";
 import { buildOpenCodeConfigContent, ensureOpenCodeConfig } from "@/lib/opencode/config";
 import { didGitMetadataGenerationTimeout, generateGitMetadata } from "@/lib/opencode/git-metadata";
+import { Sandbox } from "@/lib/sandbox";
 import { buildOpenCodePrompt, buildOpenCodeRunCommand } from "@/lib/sandbox/opencode";
 import {
   appendAgentMessage,
@@ -20,8 +14,6 @@ import {
   updateFollowUp,
   updateJob,
 } from "@/lib/sandbox/state";
-import { isFrontendTaskPrompt, type SandboxTaskInput } from "@/lib/sandbox/task";
-import type { SandboxProvider, SandboxSession } from "@/lib/sandbox/types";
 import { SandboxWorkspace } from "@/lib/sandbox/workspace";
 
 const read = (value: string) => value.trim();
@@ -34,7 +26,7 @@ const daytonaEnv = () => ({
 });
 
 const run = async (
-  sandbox: SandboxSession,
+  sandbox: Sandbox.Session,
   jobId: string,
   command: string,
   cwd?: string,
@@ -91,23 +83,23 @@ const parse = (jobId: string, output: string, followUpId?: string) => {
 export namespace SandboxRun {
   export const destroy = async (
     jobId: string,
-    provider: SandboxProvider,
+    provider: Sandbox.Provider,
     stage?: string,
     userId?: string,
   ) => SandboxWorkspace.destroy(provider, requireJob(jobId, userId), updateJob, { stage });
 
   export const task = async (
     jobId: string,
-    input: SandboxTaskInput,
-    provider: SandboxProvider,
+    input: Sandbox.TaskInput,
+    provider: Sandbox.Provider,
     setupTools?: string,
   ) => {
     try {
       const [repo, githubAccessToken, viewer, authenticatedRemoteUrl] = await Promise.all([
-        getSignedInGithubRepo(input.repoId),
-        getSignedInGithubAccessToken(),
-        getSignedInGithubViewer(),
-        getGithubAuthenticatedRemoteUrl(input.repoId),
+        Github.getRepo(input.repoId),
+        Github.getAccessToken(),
+        Github.getViewer(),
+        Github.getAuthenticatedRemoteUrl(input.repoId),
       ]);
       const openCode = ensureOpenCodeConfig();
 
@@ -123,7 +115,7 @@ export namespace SandboxRun {
 
       const sourceBranch =
         jobs.get(jobId)?.sourceBranch || input.sourceBranch.trim() || repo.defaultBranch;
-      const enableDaytonaTools = isFrontendTaskPrompt(input.prompt);
+      const enableDaytonaTools = Sandbox.isFrontendTaskPrompt(input.prompt);
       const prepared = await SandboxWorkspace.prepare({
         authenticatedRemoteUrl,
         branch: sourceBranch,
@@ -255,7 +247,7 @@ export namespace SandboxRun {
         stage: "Opening pull request",
       });
 
-      const pr = await createPullRequestForSignedInGithubRepo({
+      const pr = await Github.createPullRequest({
         base: sourceBranch,
         body: metadata.prBody,
         head: metadata.branchName,
@@ -269,7 +261,7 @@ export namespace SandboxRun {
         });
 
         try {
-          await createPullRequestCommentForSignedInGithubRepo({
+          await Github.createPullRequestComment({
             body: metadata.prComment,
             prNumber: pr.number,
             repoId: input.repoId,
@@ -328,7 +320,7 @@ export namespace SandboxRun {
   export const followUp = async (
     jobId: string,
     prompt: string,
-    provider: SandboxProvider,
+    provider: Sandbox.Provider,
     setupTools?: string,
     userId?: string,
   ) => {
@@ -336,7 +328,7 @@ export namespace SandboxRun {
     const followUpId = crypto.randomUUID();
     const startedAt = new Date().toISOString();
     const trimmedPrompt = prompt.trim();
-    const enableDaytonaTools = isFrontendTaskPrompt(trimmedPrompt);
+    const enableDaytonaTools = Sandbox.isFrontendTaskPrompt(trimmedPrompt);
     const job = requireJob(jobId, userId);
 
     updateJob(jobId, {
@@ -359,10 +351,10 @@ export namespace SandboxRun {
 
     try {
       const [viewer, githubAccessToken, repo, authenticatedRemoteUrl] = await Promise.all([
-        getSignedInGithubViewer(),
-        getSignedInGithubAccessToken(),
-        getSignedInGithubRepo(job.repoId),
-        getGithubAuthenticatedRemoteUrl(job.repoId),
+        Github.getViewer(),
+        Github.getAccessToken(),
+        Github.getRepo(job.repoId),
+        Github.getAuthenticatedRemoteUrl(job.repoId),
       ]);
 
       if (!repo) {
