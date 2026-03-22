@@ -69,31 +69,22 @@ export type RepoTaskJob = {
 
 const jobs = new Map<string, RepoTaskJob>();
 const MAX_LOG_LENGTH = 16_000;
+const SANDBOX_TOOL_PATH_EXPORT =
+  'export PATH="$HOME/.local/bin:$HOME/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/bin:$(npm config get prefix)/bin:$PATH"';
 const OPENCODE_INSTALL_COMMAND = [
-  'export PATH="$(npm config get prefix)/bin:$PATH"',
+  SANDBOX_TOOL_PATH_EXPORT,
   "if ! command -v opencode >/dev/null 2>&1; then npm install -g opencode-ai; fi",
   "opencode --version",
 ].join("\n");
+const DAYTONA_CLI_INSTALL_COMMAND = [
+  SANDBOX_TOOL_PATH_EXPORT,
+  "if ! command -v daytona >/dev/null 2>&1; then",
+  '  if command -v brew >/dev/null 2>&1; then brew install daytonaio/cli/daytona; else echo "Daytona CLI is required for frontend tasks. Install it in the sandbox image or make Homebrew available." >&2; exit 1; fi',
+  "fi",
+  'daytona login --api-key="${DAYTONA_API_KEY}"',
+  "daytona --version",
+].join("\n");
 const DEFAULT_OPENCODE_MODEL = "openrouter/openai/gpt-5-codex";
-const KNOWN_NON_OPENROUTER_PROVIDERS = new Set([
-  "amazon-bedrock",
-  "anthropic",
-  "azure",
-  "azure-openai",
-  "cerebras",
-  "deepseek",
-  "fireworks",
-  "google",
-  "google-vertex",
-  "groq",
-  "lmstudio",
-  "ollama",
-  "openai",
-  "openrouter",
-  "opencode",
-  "together",
-  "xai",
-]);
 const LEGACY_UNSUPPORTED_IMAGES = new Set(["daytonaio/workspace", "daytonaio/workspace:latest"]);
 
 const getDaytonaClient = () => {
@@ -135,17 +126,7 @@ const normalizeOpenRouterModel = (value: string) => {
     return model;
   }
 
-  const providerPrefix = model.split("/", 1)[0];
-
-  if (!providerPrefix || !KNOWN_NON_OPENROUTER_PROVIDERS.has(providerPrefix)) {
-    return `openrouter/${model}`;
-  }
-
-  if (providerPrefix === "openrouter") {
-    return model;
-  }
-
-  return model;
+  return `openrouter/${model}`;
 };
 
 const getConfiguredOpenCodeModel = () =>
@@ -377,7 +358,18 @@ const parseOpenCodeJsonOutputForTarget = (jobId: string, output: string, followU
   }
 };
 
-const buildOpenCodePrompt = (userPrompt: string) =>
+const FRONTEND_TASK_PATTERN =
+  /\b(frontend|ui|ux|browser|screenshot|screen shot|visual|css|tailwind|layout|responsive|component|shadcn|page|modal|dialog|dropdown|form|button|input|navbar|sidebar|header|footer|computer use|computer-use|desktop|gui|click|type|typing|keyboard|mouse|preview|daytona mcp|use daytona|daytona tool|sandbox browser|open the browser|open browser|checkout the file|check out the file)\b/i;
+
+const isFrontendTaskPrompt = (prompt: string) => FRONTEND_TASK_PATTERN.test(prompt);
+
+const buildOpenCodePrompt = (
+  userPrompt: string,
+  options?: {
+    enableDaytonaMcp?: boolean;
+    sandboxId?: string;
+  },
+) =>
   [
     "You are working inside a cloned GitHub repository.",
     "Complete the user's task fully before you stop.",
@@ -385,6 +377,18 @@ const buildOpenCodePrompt = (userPrompt: string) =>
     "Fix any issues you find during verification before finishing.",
     "Do not create commits, branches, or pull requests yourself.",
     "Leave the repository with uncommitted file changes only.",
+    ...(options?.enableDaytonaMcp
+      ? [
+          "",
+          "Frontend validation instructions:",
+          "Use the Daytona MCP tools for sandbox preview, browser automation, screenshots, and computer use when the task touches frontend behavior.",
+          "If the user explicitly asks to use Daytona MCP, computer use, the desktop, the browser, screenshots, clicking, typing, or similar interactive actions, you must use the Daytona MCP tools instead of only inspecting files from the shell.",
+          options.sandboxId
+            ? `The current Daytona sandbox id is ${options.sandboxId}. Reuse this sandbox for preview and computer-use actions instead of creating a different one unless the task requires it.`
+            : "Use the current sandbox for preview and computer-use actions whenever possible.",
+          "If you need to verify UI behavior, start the app server, expose the right port with Daytona preview, open the app in a browser through Daytona computer use, interact with it using clicks and typing, and take screenshots before finishing.",
+        ]
+      : []),
     "",
     "User task:",
     userPrompt.trim(),
@@ -398,10 +402,15 @@ const getProviderScopedModelId = (model: string) => {
   return model;
 };
 
-const buildOpenCodeConfigContent = (model: string) => {
+const buildOpenCodeConfigContent = (
+  model: string,
+  options?: {
+    enableDaytonaMcp?: boolean;
+  },
+) => {
   const providerScopedModelId = getProviderScopedModelId(model);
 
-  return JSON.stringify({
+  const config: Record<string, unknown> = {
     $schema: "https://opencode.ai/config.json",
     model,
     permission: {
@@ -419,10 +428,45 @@ const buildOpenCodeConfigContent = (model: string) => {
         options: {},
       },
     },
-  });
+  };
+
+  if (options?.enableDaytonaMcp) {
+    config.mcp = {
+      daytona: {
+        type: "local",
+        command: ["daytona", "mcp", "start"],
+        enabled: true,
+        timeout: 15_000,
+      },
+    };
+    config.tools = {
+      "daytona_*": false,
+    };
+    config.agent = {
+      frontend: {
+        tools: {
+          "daytona_*": true,
+        },
+      },
+    };
+  }
+
+  return JSON.stringify(config);
 };
 
 const escapeForSingleQuotedShell = (value: string) => value.replace(/'/g, `'\\''`);
+
+const buildOpenCodeRunCommand = (
+  model: string,
+  prompt: string,
+  options?: {
+    agent?: string;
+  },
+) =>
+  [
+    SANDBOX_TOOL_PATH_EXPORT,
+    `opencode run --format json --model '${escapeForSingleQuotedShell(model)}'${options?.agent ? ` --agent '${escapeForSingleQuotedShell(options.agent)}'` : ""} "$(cat <<'EOF'\n${prompt}\nEOF\n)"`,
+  ].join("\n");
 
 type GitMetadataContext = {
   baseBranch: string;
@@ -674,6 +718,7 @@ const destroySandboxResources = async (
 
 const prepareSandboxWorkspace = async ({
   branch,
+  enableDaytonaMcp,
   githubAccessToken,
   jobId,
   repoId,
@@ -683,6 +728,7 @@ const prepareSandboxWorkspace = async ({
   viewer,
 }: {
   branch: string;
+  enableDaytonaMcp: boolean;
   githubAccessToken: string;
   jobId: string;
   repoId: string;
@@ -717,6 +763,16 @@ const prepareSandboxWorkspace = async ({
   await sandbox.git.clone(repoUrl, clonePath, branch, undefined, repoOwnerLogin, githubAccessToken);
 
   const authenticatedRemoteUrl = await getGithubAuthenticatedRemoteUrl(repoId);
+  const setupCommands = [
+    `git remote set-url origin '${escapeForSingleQuotedShell(authenticatedRemoteUrl)}'`,
+    `git config user.name '${escapeForSingleQuotedShell(viewer.name)}'`,
+    `git config user.email '${escapeForSingleQuotedShell(viewer.email)}'`,
+    OPENCODE_INSTALL_COMMAND,
+  ];
+
+  if (enableDaytonaMcp) {
+    setupCommands.push(DAYTONA_CLI_INSTALL_COMMAND);
+  }
 
   updateJob(jobId, {
     clonePath,
@@ -726,14 +782,15 @@ const prepareSandboxWorkspace = async ({
   await runSandboxCommand(
     sandbox,
     jobId,
-    [
-      `git remote set-url origin '${escapeForSingleQuotedShell(authenticatedRemoteUrl)}'`,
-      `git config user.name '${escapeForSingleQuotedShell(viewer.name)}'`,
-      `git config user.email '${escapeForSingleQuotedShell(viewer.email)}'`,
-      OPENCODE_INSTALL_COMMAND,
-    ].join("\n"),
+    setupCommands.join("\n"),
     clonePath,
-    undefined,
+    enableDaytonaMcp
+      ? {
+          DAYTONA_API_KEY: env.DAYTONA_API_KEY || "",
+          ...(env.DAYTONA_API_URL ? { DAYTONA_API_URL: env.DAYTONA_API_URL } : {}),
+          ...(env.DAYTONA_TARGET ? { DAYTONA_TARGET: env.DAYTONA_TARGET } : {}),
+        }
+      : undefined,
     900,
   );
 
@@ -781,8 +838,10 @@ const runRepoTaskJob = async (jobId: string, input: RepoTaskInput) => {
 
     const job = jobs.get(jobId);
     const sourceBranch = job?.sourceBranch || input.sourceBranch.trim() || repo.defaultBranch;
+    const enableDaytonaMcp = isFrontendTaskPrompt(input.prompt);
     const prepared = await prepareSandboxWorkspace({
       branch: sourceBranch,
+      enableDaytonaMcp,
       githubAccessToken,
       jobId,
       repoId: input.repoId,
@@ -798,15 +857,29 @@ const runRepoTaskJob = async (jobId: string, input: RepoTaskInput) => {
       stage: "Running OpenCode task",
     });
 
-    const openCodePrompt = buildOpenCodePrompt(input.prompt);
+    const openCodePrompt = buildOpenCodePrompt(input.prompt, {
+      enableDaytonaMcp,
+      sandboxId: sandbox.id,
+    });
     const openCodeResponse = await runSandboxCommand(
       sandbox,
       jobId,
-      `opencode run --format json --model '${escapeForSingleQuotedShell(openCode.model)}' "$(cat <<'EOF'\n${openCodePrompt}\nEOF\n)"`,
+      buildOpenCodeRunCommand(openCode.model, openCodePrompt, {
+        agent: enableDaytonaMcp ? "frontend" : undefined,
+      }),
       clonePath,
       {
         OPENROUTER_API_KEY: openCode.apiKey,
-        OPENCODE_CONFIG_CONTENT: buildOpenCodeConfigContent(openCode.model),
+        OPENCODE_CONFIG_CONTENT: buildOpenCodeConfigContent(openCode.model, {
+          enableDaytonaMcp,
+        }),
+        ...(enableDaytonaMcp
+          ? {
+              DAYTONA_API_KEY: env.DAYTONA_API_KEY || "",
+              ...(env.DAYTONA_API_URL ? { DAYTONA_API_URL: env.DAYTONA_API_URL } : {}),
+              ...(env.DAYTONA_TARGET ? { DAYTONA_TARGET: env.DAYTONA_TARGET } : {}),
+            }
+          : {}),
       },
       3600,
     );
@@ -1045,6 +1118,7 @@ export const runFollowUpOnSandbox = async (jobId: string, prompt: string, userId
   const followUpId = crypto.randomUUID();
   const startedAt = new Date().toISOString();
   const trimmedPrompt = prompt.trim();
+  const enableDaytonaMcp = isFrontendTaskPrompt(trimmedPrompt);
   const job = requireJob(jobId, userId);
 
   updateJob(jobId, {
@@ -1089,6 +1163,7 @@ export const runFollowUpOnSandbox = async (jobId: string, prompt: string, userId
 
         const prepared = await prepareSandboxWorkspace({
           branch: followUpTarget.branch,
+          enableDaytonaMcp,
           githubAccessToken,
           jobId,
           repoId: job.repoId,
@@ -1112,6 +1187,7 @@ export const runFollowUpOnSandbox = async (jobId: string, prompt: string, userId
 
       const prepared = await prepareSandboxWorkspace({
         branch: followUpTarget.branch,
+        enableDaytonaMcp,
         githubAccessToken,
         jobId,
         repoId: job.repoId,
@@ -1129,6 +1205,30 @@ export const runFollowUpOnSandbox = async (jobId: string, prompt: string, userId
       throw new Error("No sandbox workspace available for follow-up.");
     }
 
+    if (enableDaytonaMcp) {
+      updateJob(jobId, {
+        stage: "Preparing Daytona MCP runtime",
+      });
+      updateFollowUpEntry(jobId, followUpId, (entry) => ({
+        ...entry,
+        stage: "Preparing Daytona MCP runtime",
+      }));
+
+      await runSandboxCommand(
+        sandbox,
+        jobId,
+        DAYTONA_CLI_INSTALL_COMMAND,
+        clonePath,
+        {
+          DAYTONA_API_KEY: env.DAYTONA_API_KEY || "",
+          ...(env.DAYTONA_API_URL ? { DAYTONA_API_URL: env.DAYTONA_API_URL } : {}),
+          ...(env.DAYTONA_TARGET ? { DAYTONA_TARGET: env.DAYTONA_TARGET } : {}),
+        },
+        900,
+        { followUpId },
+      );
+    }
+
     updateJob(jobId, {
       stage: "Running follow-up task",
     });
@@ -1137,15 +1237,29 @@ export const runFollowUpOnSandbox = async (jobId: string, prompt: string, userId
       stage: "Running follow-up task",
     }));
 
-    const openCodePrompt = buildOpenCodePrompt(prompt);
+    const openCodePrompt = buildOpenCodePrompt(prompt, {
+      enableDaytonaMcp,
+      sandboxId: sandbox.id,
+    });
     const followUpResponse = await runSandboxCommand(
       sandbox,
       jobId,
-      `opencode run --format json --model '${escapeForSingleQuotedShell(openCode.model)}' "$(cat <<'EOF'\n${openCodePrompt}\nEOF\n)"`,
+      buildOpenCodeRunCommand(openCode.model, openCodePrompt, {
+        agent: enableDaytonaMcp ? "frontend" : undefined,
+      }),
       clonePath,
       {
         OPENROUTER_API_KEY: openCode.apiKey,
-        OPENCODE_CONFIG_CONTENT: buildOpenCodeConfigContent(openCode.model),
+        OPENCODE_CONFIG_CONTENT: buildOpenCodeConfigContent(openCode.model, {
+          enableDaytonaMcp,
+        }),
+        ...(enableDaytonaMcp
+          ? {
+              DAYTONA_API_KEY: env.DAYTONA_API_KEY || "",
+              ...(env.DAYTONA_API_URL ? { DAYTONA_API_URL: env.DAYTONA_API_URL } : {}),
+              ...(env.DAYTONA_TARGET ? { DAYTONA_TARGET: env.DAYTONA_TARGET } : {}),
+            }
+          : {}),
       },
       3600,
       { followUpId },
