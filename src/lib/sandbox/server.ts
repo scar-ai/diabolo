@@ -11,11 +11,7 @@ import {
 import { buildOpenCodeConfigContent, ensureOpenCodeConfig } from "@/lib/opencode/config";
 import { didGitMetadataGenerationTimeout, generateGitMetadata } from "@/lib/opencode/git-metadata";
 import { getSandboxProvider } from "@/lib/sandbox/daytona-provider";
-import {
-  buildOpenCodePrompt,
-  buildOpenCodeRunCommand,
-  opencodeInstallCommand,
-} from "@/lib/sandbox/opencode";
+import { buildOpenCodePrompt, buildOpenCodeRunCommand } from "@/lib/sandbox/opencode";
 import {
   appendAgentMessage,
   appendFollowUpAgentMessage,
@@ -32,6 +28,7 @@ import {
   type SandboxTaskJob,
 } from "@/lib/sandbox/task";
 import type { SandboxSession } from "@/lib/sandbox/types";
+import { SandboxWorkspace } from "@/lib/sandbox/workspace";
 const sandboxProvider = getSandboxProvider();
 
 const readCommandOutput = (value: string) => value.trim();
@@ -569,187 +566,12 @@ const destroySandboxResources = async (
     stage?: string;
     userId?: string;
   },
-) => {
-  const job = requireJob(jobId, options?.userId);
-
-  if (!job.sandboxId) {
-    return;
-  }
-
-  try {
-    await sandboxProvider.destroyWorkspace(job.sandboxId);
-  } catch {}
-
-  updateJob(jobId, {
-    sandboxPath: undefined,
-    sandboxId: undefined,
-    sandboxName: undefined,
-    stage: options?.stage ?? "Sandbox stopped",
+) =>
+  SandboxWorkspace.destroy(sandboxProvider, requireJob(jobId, options?.userId), updateJob, {
+    stage: options?.stage,
   });
-};
-
-const prepareSandboxWorkspace = async ({
-  branch,
-  enableDaytonaTools,
-  githubAccessToken,
-  jobId,
-  repoId,
-  repoName,
-  repoOwnerLogin,
-  repoUrl,
-  viewer,
-}: {
-  branch: string;
-  enableDaytonaTools: boolean;
-  githubAccessToken: string;
-  jobId: string;
-  repoId: string;
-  repoName: string;
-  repoOwnerLogin: string;
-  repoUrl: string;
-  viewer: Awaited<ReturnType<typeof getSignedInGithubViewer>>;
-}) => {
-  updateJob(jobId, {
-    stage: "Booting Daytona sandbox",
-    status: "running",
-  });
-
-  const sandbox = await sandboxProvider.createWorkspace(repoName);
-  const sandboxId = sandbox.id;
-  const sandboxName = sandbox.name;
-
-  updateJob(jobId, {
-    sandboxId,
-    sandboxName,
-    stage: "Resolving sandbox workspace",
-  });
-
-  const workDir = await sandbox.getWorkspaceRoot();
-  const sandboxPath = `${workDir.replace(/\/$/, "")}/${repoName}`;
-
-  updateJob(jobId, {
-    sandboxPath,
-    stage: "Cloning repository into sandbox",
-  });
-
-  await sandbox.cloneRepository({
-    accessToken: githubAccessToken,
-    branch,
-    ownerLogin: repoOwnerLogin,
-    targetPath: sandboxPath,
-    url: repoUrl,
-  });
-
-  const authenticatedRemoteUrl = await getGithubAuthenticatedRemoteUrl(repoId);
-  const setupCommands = [
-    `git remote set-url origin '${escapeForSingleQuotedShell(authenticatedRemoteUrl)}'`,
-    `git config user.name '${escapeForSingleQuotedShell(viewer.name)}'`,
-    `git config user.email '${escapeForSingleQuotedShell(viewer.email)}'`,
-    opencodeInstallCommand,
-  ];
-
-  if (enableDaytonaTools) {
-    setupCommands.push(buildDaytonaCustomToolSetupCommand());
-  }
-
-  updateJob(jobId, {
-    sandboxPath,
-    stage: "Preparing git branch and OpenCode runtime",
-  });
-
-  await runSandboxCommand(
-    sandbox,
-    jobId,
-    setupCommands.join("\n"),
-    sandboxPath,
-    enableDaytonaTools
-      ? {
-          DAYTONA_API_KEY: env.DAYTONA_API_KEY || "",
-          ...(env.DAYTONA_API_URL ? { DAYTONA_API_URL: env.DAYTONA_API_URL } : {}),
-          ...(env.DAYTONA_TARGET ? { DAYTONA_TARGET: env.DAYTONA_TARGET } : {}),
-        }
-      : undefined,
-    900,
-  );
-
-  return {
-    sandbox,
-    sandboxId,
-    sandboxName,
-    sandboxPath,
-  };
-};
-
-const getFollowUpBranch = async (repoId: string, branchName?: string) => {
-  const repo = await getSignedInGithubRepo(repoId);
-
-  if (!repo) {
-    throw new Error("Unknown repository selection.");
-  }
-
-  return {
-    branch: branchName?.trim() || repo.defaultBranch,
-    repo,
-  };
-};
-
-const markFollowUpRecreation = (jobId: string, followUpId: string) => {
-  updateJob(jobId, {
-    stage: "Recreating sandbox for follow-up",
-  });
-  updateFollowUp(jobId, followUpId, (entry) => ({
-    ...entry,
-    stage: "Recreating sandbox for follow-up",
-  }));
-};
-
-const getOrCreateFollowUpWorkspace = async ({
-  enableDaytonaTools,
-  followUpId,
-  followUpTarget,
-  githubAccessToken,
-  job,
-  viewer,
-}: {
-  enableDaytonaTools: boolean;
-  followUpId: string;
-  followUpTarget: Awaited<ReturnType<typeof getFollowUpBranch>>;
-  githubAccessToken: string;
-  job: SandboxTaskJob;
-  viewer: Awaited<ReturnType<typeof getSignedInGithubViewer>>;
-}) => {
-  if (job.sandboxId && job.sandboxPath) {
-    try {
-      return {
-        sandbox: await sandboxProvider.getWorkspace(job.sandboxId),
-        sandboxPath: job.sandboxPath,
-      };
-    } catch {}
-  }
-
-  markFollowUpRecreation(job.id, followUpId);
-
-  const prepared = await prepareSandboxWorkspace({
-    branch: followUpTarget.branch,
-    enableDaytonaTools,
-    githubAccessToken,
-    jobId: job.id,
-    repoId: job.repoId,
-    repoName: followUpTarget.repo.name,
-    repoOwnerLogin: followUpTarget.repo.ownerLogin,
-    repoUrl: followUpTarget.repo.cloneUrl,
-    viewer,
-  });
-
-  return {
-    sandbox: prepared.sandbox,
-    sandboxPath: prepared.sandboxPath,
-  };
-};
 
 const runSandboxTaskJob = async (jobId: string, input: SandboxTaskInput) => {
-  let sandbox: SandboxSession | undefined;
-
   try {
     const [repo, githubAccessToken, viewer] = await Promise.all([
       getSignedInGithubRepo(input.repoId),
@@ -771,18 +593,27 @@ const runSandboxTaskJob = async (jobId: string, input: SandboxTaskInput) => {
     const job = jobs.get(jobId);
     const sourceBranch = job?.sourceBranch || input.sourceBranch.trim() || repo.defaultBranch;
     const enableDaytonaTools = isFrontendTaskPrompt(input.prompt);
-    const prepared = await prepareSandboxWorkspace({
+    const prepared = await SandboxWorkspace.prepare({
+      authenticatedRemoteUrl: await getGithubAuthenticatedRemoteUrl(input.repoId),
       branch: sourceBranch,
+      daytonaEnv: {
+        DAYTONA_API_KEY: env.DAYTONA_API_KEY || "",
+        ...(env.DAYTONA_API_URL ? { DAYTONA_API_URL: env.DAYTONA_API_URL } : {}),
+        ...(env.DAYTONA_TARGET ? { DAYTONA_TARGET: env.DAYTONA_TARGET } : {}),
+      },
       enableDaytonaTools,
       githubAccessToken,
       jobId,
-      repoId: input.repoId,
+      provider: sandboxProvider,
       repoName: repo.name,
       repoOwnerLogin: repo.ownerLogin,
       repoUrl: repo.cloneUrl,
+      run: runSandboxCommand,
+      setupTools: enableDaytonaTools ? buildDaytonaCustomToolSetupCommand() : undefined,
+      update: updateJob,
       viewer,
     });
-    sandbox = prepared.sandbox;
+    const activeSandbox = prepared.sandbox;
     const sandboxPath = prepared.sandboxPath;
 
     updateJob(jobId, {
@@ -791,10 +622,10 @@ const runSandboxTaskJob = async (jobId: string, input: SandboxTaskInput) => {
 
     const openCodePrompt = buildOpenCodePrompt(input.prompt, {
       enableDaytonaTools,
-      sandboxId: sandbox.id,
+      sandboxId: activeSandbox.id,
     });
     const openCodeResponse = await runSandboxCommand(
-      sandbox,
+      activeSandbox,
       jobId,
       buildOpenCodeRunCommand(openCode.model, openCodePrompt, {
         agent: enableDaytonaTools ? "frontend" : undefined,
@@ -808,7 +639,7 @@ const runSandboxTaskJob = async (jobId: string, input: SandboxTaskInput) => {
         ...(enableDaytonaTools
           ? {
               DAYTONA_API_KEY: env.DAYTONA_API_KEY || "",
-              DAYTONA_SANDBOX_ID: sandbox.id,
+              DAYTONA_SANDBOX_ID: activeSandbox.id,
               ...(env.DAYTONA_API_URL ? { DAYTONA_API_URL: env.DAYTONA_API_URL } : {}),
               ...(env.DAYTONA_TARGET ? { DAYTONA_TARGET: env.DAYTONA_TARGET } : {}),
             }
@@ -824,7 +655,7 @@ const runSandboxTaskJob = async (jobId: string, input: SandboxTaskInput) => {
     });
 
     const changeCheck = await runSandboxCommand(
-      sandbox,
+      activeSandbox,
       jobId,
       "git status --porcelain",
       sandboxPath,
@@ -841,8 +672,15 @@ const runSandboxTaskJob = async (jobId: string, input: SandboxTaskInput) => {
     });
 
     const [diffSummaryResult, changedFilesResult] = await Promise.all([
-      runSandboxCommand(sandbox, jobId, "git diff --stat --summary", sandboxPath, undefined, 60),
-      runSandboxCommand(sandbox, jobId, "git status --short", sandboxPath, undefined, 60),
+      runSandboxCommand(
+        activeSandbox,
+        jobId,
+        "git diff --stat --summary",
+        sandboxPath,
+        undefined,
+        60,
+      ),
+      runSandboxCommand(activeSandbox, jobId, "git status --short", sandboxPath, undefined, 60),
     ]);
 
     updateJob(jobId, {
@@ -875,7 +713,7 @@ const runSandboxTaskJob = async (jobId: string, input: SandboxTaskInput) => {
     });
 
     await runSandboxCommand(
-      sandbox,
+      activeSandbox,
       jobId,
       [
         `git checkout -b '${escapeForSingleQuotedShell(metadata.branchName)}'`,
@@ -1063,17 +901,34 @@ export const runSandboxTaskFollowUp = async (jobId: string, prompt: string, user
   });
 
   try {
-    const [viewer, githubAccessToken, followUpTarget] = await Promise.all([
+    const [viewer, githubAccessToken, repo, authenticatedRemoteUrl] = await Promise.all([
       getSignedInGithubViewer(),
       getSignedInGithubAccessToken(),
-      getFollowUpBranch(job.repoId, job.branchName),
+      getSignedInGithubRepo(job.repoId),
+      getGithubAuthenticatedRemoteUrl(job.repoId),
     ]);
-    const { sandbox, sandboxPath } = await getOrCreateFollowUpWorkspace({
+
+    if (!repo) {
+      throw new Error("Unknown repository selection.");
+    }
+
+    const { sandbox, sandboxPath } = await SandboxWorkspace.getOrCreateFollowUp({
+      authenticatedRemoteUrl,
+      daytonaEnv: {
+        DAYTONA_API_KEY: env.DAYTONA_API_KEY || "",
+        ...(env.DAYTONA_API_URL ? { DAYTONA_API_URL: env.DAYTONA_API_URL } : {}),
+        ...(env.DAYTONA_TARGET ? { DAYTONA_TARGET: env.DAYTONA_TARGET } : {}),
+      },
       enableDaytonaTools,
       followUpId,
-      followUpTarget,
       githubAccessToken,
       job,
+      provider: sandboxProvider,
+      repo,
+      run: runSandboxCommand,
+      setupTools: enableDaytonaTools ? buildDaytonaCustomToolSetupCommand() : undefined,
+      update: updateJob,
+      updateFollowUp,
       viewer,
     });
 
