@@ -1,10 +1,16 @@
 import "@tanstack/react-start/server-only";
+import { ResultAsync } from "neverthrow";
+
 import { Github } from "@/lib/github";
+import { Log } from "@/lib/log";
 import { ensureOpenCodeConfig } from "@/lib/opencode/config";
+import { fromPromise, toError } from "@/lib/result";
 import { getSandboxProvider } from "@/lib/sandbox/daytona-provider";
 import { buildDaytonaCustomToolSetupCommand } from "@/lib/sandbox/daytona-tools";
 import { SandboxRun } from "@/lib/sandbox/run";
 import { jobs, requireJob, updateJob } from "@/lib/sandbox/state";
+
+const log = Log.create({ ns: "sandbox" });
 
 const sandboxProvider = getSandboxProvider();
 
@@ -21,7 +27,7 @@ export namespace Sandbox {
     sourceBranch: string;
   };
 
-  export type TaskStatus = "queued" | "running" | "succeeded" | "failed";
+  export type TaskStatus = "failed" | "queued" | "running" | "succeeded";
 
   export type AgentMessage = {
     text: string;
@@ -43,7 +49,6 @@ export namespace Sandbox {
   export type TaskJob = {
     agentMessages: AgentMessage[];
     branchName?: string;
-    sandboxPath?: string;
     completedAt?: string;
     error?: string;
     followUpHistory: FollowUpEntry[];
@@ -56,13 +61,14 @@ export namespace Sandbox {
     repoId: string;
     repoName?: string;
     repoUrl?: string;
-    sourceBranch: string;
-    userId: string;
     sandboxId?: string;
     sandboxName?: string;
+    sandboxPath?: string;
+    sourceBranch: string;
     stage: string;
     startedAt: string;
     status: TaskStatus;
+    userId: string;
   };
 
   export type CommandOptions = {
@@ -85,12 +91,12 @@ export namespace Sandbox {
   };
 
   export interface Session {
-    id: string;
-    name: string;
     cloneRepository(options: CloneRepositoryOptions): Promise<void>;
     delete(timeoutSeconds?: number): Promise<void>;
     executeCommand(command: string, options?: CommandOptions): Promise<CommandResult>;
     getWorkspaceRoot(): Promise<string>;
+    id: string;
+    name: string;
     stop(timeoutSeconds?: number): Promise<void>;
   }
 
@@ -103,94 +109,105 @@ export namespace Sandbox {
 
   export const isFrontendTaskPrompt = (prompt: string) => FRONTEND_TASK_PATTERN.test(prompt);
 
-  export const startTask = async (input: TaskInput, userId: string) => {
-    const prompt = input.prompt.trim();
+  export const startTask = (input: TaskInput, userId: string): ResultAsync<TaskJob, Error> =>
+    fromPromise(
+      (async () => {
+        const prompt = input.prompt.trim();
+        if (!prompt) throw new Error("Prompt is required.");
+        if (prompt.length < 10) throw new Error("Prompt must be at least 10 characters.");
 
-    if (!prompt) {
-      throw new Error("Prompt is required.");
-    }
+        const repo = await Github.getRepo(input.repoId).match(
+          (r) => r,
+          (e) => {
+            throw e;
+          },
+        );
 
-    if (prompt.length < 10) {
-      throw new Error("Prompt must be at least 10 characters.");
-    }
+        ensureOpenCodeConfig();
 
-    const repo = await Github.getRepo(input.repoId);
-    ensureOpenCodeConfig();
+        if (!repo) throw new Error("Unknown repository selection.");
 
-    if (!repo) {
-      throw new Error("Unknown repository selection.");
-    }
-
-    const jobId = makeJobId();
-    const startedAt = new Date().toISOString();
-    const sourceBranch = input.sourceBranch.trim() || repo.defaultBranch;
-    const job: TaskJob = {
-      agentMessages: [],
-      followUpHistory: [],
-      id: jobId,
-      prompt,
-      quickTask: input.quickTask,
-      repoId: input.repoId,
-      sourceBranch,
-      stage: "Queued",
-      startedAt,
-      status: "queued",
-      userId,
-    };
-
-    jobs.set(jobId, job);
-
-    queueMicrotask(() => {
-      void SandboxRun.task(
-        jobId,
-        {
+        const jobId = makeJobId();
+        const startedAt = new Date().toISOString();
+        const sourceBranch = input.sourceBranch.trim() || repo.defaultBranch;
+        const job: TaskJob = {
+          agentMessages: [],
+          followUpHistory: [],
+          id: jobId,
           prompt,
           quickTask: input.quickTask,
           repoId: input.repoId,
-          sourceBranch: input.sourceBranch,
-        },
+          sourceBranch,
+          stage: "Queued",
+          startedAt,
+          status: "queued",
+          userId,
+        };
+
+        jobs.set(jobId, job);
+        log.info("task queued", { jobId, repoId: input.repoId, quickTask: input.quickTask });
+
+        queueMicrotask(() => {
+          void SandboxRun.task(
+            jobId,
+            {
+              prompt,
+              quickTask: input.quickTask,
+              repoId: input.repoId,
+              sourceBranch: input.sourceBranch,
+            },
+            sandboxProvider,
+            buildDaytonaCustomToolSetupCommand(),
+          );
+        });
+
+        return job;
+      })(),
+    );
+
+  export const getTask = (jobId: string, userId?: string): ResultAsync<TaskJob, Error> =>
+    ResultAsync.fromSafePromise(Promise.resolve(requireJob(jobId, userId)));
+
+  export const terminateTask = (jobId: string): ResultAsync<void, Error> =>
+    ResultAsync.fromSafePromise(
+      Promise.resolve().then(() => {
+        const job = jobs.get(jobId);
+        if (!job) return;
+
+        updateJob(jobId, {
+          completedAt: new Date().toISOString(),
+          error: "Task was terminated by user.",
+          stage: "Terminated",
+          status: "failed",
+        });
+
+        log.info("task terminated", { jobId });
+      }),
+    );
+
+  export const destroyTaskSandbox = (jobId: string, userId?: string): ResultAsync<void, Error> =>
+    fromPromise(SandboxRun.destroy(jobId, sandboxProvider, "Sandbox stopped", userId));
+
+  export const destroySandbox = (sandboxId: string): ResultAsync<void, Error> =>
+    ResultAsync.fromPromise(
+      sandboxProvider.destroyWorkspace(sandboxId).catch(() => {}),
+      toError,
+    ).map(() => {
+      log.info("sandbox destroyed", { sandboxId });
+    });
+
+  export const runTaskFollowUp = (
+    jobId: string,
+    prompt: string,
+    userId?: string,
+  ): ResultAsync<void, Error> =>
+    fromPromise(
+      SandboxRun.followUp(
+        jobId,
+        prompt,
         sandboxProvider,
         buildDaytonaCustomToolSetupCommand(),
-      );
-    });
-
-    return job;
-  };
-
-  export const getTask = async (jobId: string, userId?: string) => requireJob(jobId, userId);
-
-  export const terminateTask = async (jobId: string) => {
-    const job = jobs.get(jobId);
-
-    if (!job) {
-      return;
-    }
-
-    updateJob(jobId, {
-      completedAt: new Date().toISOString(),
-      error: "Task was terminated by user.",
-      stage: "Terminated",
-      status: "failed",
-    });
-  };
-
-  export const destroyTaskSandbox = async (jobId: string, userId?: string) => {
-    await SandboxRun.destroy(jobId, sandboxProvider, "Sandbox stopped", userId);
-  };
-
-  export const destroySandbox = async (sandboxId: string) => {
-    try {
-      await sandboxProvider.destroyWorkspace(sandboxId);
-    } catch {}
-  };
-
-  export const runTaskFollowUp = async (jobId: string, prompt: string, userId?: string) => {
-    return SandboxRun.followUp(
-      jobId,
-      prompt,
-      sandboxProvider,
-      buildDaytonaCustomToolSetupCommand(),
-      userId,
+        userId,
+      ),
     );
-  };
 }

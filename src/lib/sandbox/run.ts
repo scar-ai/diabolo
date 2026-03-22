@@ -1,5 +1,8 @@
+import { type ResultAsync } from "neverthrow";
+
 import { env } from "@/env/server";
 import { Github } from "@/lib/github";
+import { Log } from "@/lib/log";
 import { buildOpenCodeConfigContent, ensureOpenCodeConfig } from "@/lib/opencode/config";
 import { didGitMetadataGenerationTimeout, generateGitMetadata } from "@/lib/opencode/git-metadata";
 import { Sandbox } from "@/lib/sandbox";
@@ -15,6 +18,8 @@ import {
   updateJob,
 } from "@/lib/sandbox/state";
 import { SandboxWorkspace } from "@/lib/sandbox/workspace";
+
+const log = Log.create({ ns: "sandbox.run" });
 
 const read = (value: string) => value.trim();
 const escape = (value: string) => value.replace(/'/g, `'\\''`);
@@ -80,6 +85,12 @@ const parse = (jobId: string, output: string, followUpId?: string) => {
   }
 };
 
+const unwrapResult = async <T>(result: ResultAsync<T, Error>): Promise<T> => {
+  const res = await result;
+  if (res.isErr()) throw res.error;
+  return res.value;
+};
+
 export namespace SandboxRun {
   export const destroy = async (
     jobId: string,
@@ -94,18 +105,22 @@ export namespace SandboxRun {
     provider: Sandbox.Provider,
     setupTools?: string,
   ) => {
+    const op = log.child({ jobId });
+
     try {
       const [repo, githubAccessToken, viewer, authenticatedRemoteUrl] = await Promise.all([
-        Github.getRepo(input.repoId),
-        Github.getAccessToken(),
-        Github.getViewer(),
-        Github.getAuthenticatedRemoteUrl(input.repoId),
+        unwrapResult<Github.Repo | null>(Github.getRepo(input.repoId)),
+        unwrapResult<string>(Github.getAccessToken()),
+        unwrapResult<{ email: string; login: string; name: string }>(Github.getViewer()),
+        unwrapResult<string>(Github.getAuthenticatedRemoteUrl(input.repoId)),
       ]);
       const openCode = ensureOpenCodeConfig();
 
       if (!repo) {
         throw new Error("Unknown repository selection.");
       }
+
+      op.info("task running", { repo: repo.fullName });
 
       updateJob(jobId, {
         repoName: repo.fullName,
@@ -222,6 +237,7 @@ export namespace SandboxRun {
           jobId,
           "Git metadata generation timed out; using fallback branch, commit, and PR metadata.\n",
         );
+        op.warn("git metadata generation timed out");
       }
 
       updateJob(jobId, {
@@ -247,13 +263,15 @@ export namespace SandboxRun {
         stage: "Opening pull request",
       });
 
-      const pr = await Github.createPullRequest({
-        base: sourceBranch,
-        body: metadata.prBody,
-        head: metadata.branchName,
-        repoId: input.repoId,
-        title: metadata.prTitle,
-      });
+      const pr = await unwrapResult<{ number: number; url: string }>(
+        Github.createPullRequest({
+          base: sourceBranch,
+          body: metadata.prBody,
+          head: metadata.branchName,
+          repoId: input.repoId,
+          title: metadata.prTitle,
+        }),
+      );
 
       if (metadata.prComment.trim()) {
         updateJob(jobId, {
@@ -261,16 +279,19 @@ export namespace SandboxRun {
         });
 
         try {
-          await Github.createPullRequestComment({
-            body: metadata.prComment,
-            prNumber: pr.number,
-            repoId: input.repoId,
-          });
+          await unwrapResult<void>(
+            Github.createPullRequestComment({
+              body: metadata.prComment,
+              prNumber: pr.number,
+              repoId: input.repoId,
+            }),
+          );
         } catch (err) {
           appendJobLog(
             jobId,
             `Failed to post pull request comment: ${provider.formatError(err)}\n`,
           );
+          op.warn("failed to post pr comment", { error: err });
         }
       }
 
@@ -281,6 +302,8 @@ export namespace SandboxRun {
         stage: "Task completed",
         status: "succeeded",
       });
+
+      op.info("task completed", { pr: pr.number });
     } catch (err) {
       updateJob(jobId, {
         completedAt: new Date().toISOString(),
@@ -288,6 +311,7 @@ export namespace SandboxRun {
         stage: "Task failed",
         status: "failed",
       });
+      op.error("task failed", { error: err });
     } finally {
       const current = jobs.get(jobId);
 
@@ -312,6 +336,7 @@ export namespace SandboxRun {
             jobId,
             `Failed to destroy quick task sandbox: ${provider.formatError(err)}\n`,
           );
+          op.warn("failed to destroy quick task sandbox", { error: err });
         }
       }
     }
@@ -324,12 +349,15 @@ export namespace SandboxRun {
     setupTools?: string,
     userId?: string,
   ) => {
+    const op = log.child({ jobId });
     const openCode = ensureOpenCodeConfig();
     const followUpId = crypto.randomUUID();
     const startedAt = new Date().toISOString();
     const trimmedPrompt = prompt.trim();
     const enableDaytonaTools = Sandbox.isFrontendTaskPrompt(trimmedPrompt);
     const job = requireJob(jobId, userId);
+
+    op.info("follow-up started", { followUpId });
 
     updateJob(jobId, {
       completedAt: undefined,
@@ -351,10 +379,10 @@ export namespace SandboxRun {
 
     try {
       const [viewer, githubAccessToken, repo, authenticatedRemoteUrl] = await Promise.all([
-        Github.getViewer(),
-        Github.getAccessToken(),
-        Github.getRepo(job.repoId),
-        Github.getAuthenticatedRemoteUrl(job.repoId),
+        unwrapResult<{ email: string; login: string; name: string }>(Github.getViewer()),
+        unwrapResult<string>(Github.getAccessToken()),
+        unwrapResult<Github.Repo | null>(Github.getRepo(job.repoId)),
+        unwrapResult<string>(Github.getAuthenticatedRemoteUrl(job.repoId)),
       ]);
 
       if (!repo) {
@@ -445,6 +473,8 @@ export namespace SandboxRun {
         stage: "Follow-up completed",
         status: "succeeded",
       }));
+
+      op.info("follow-up completed", { followUpId });
     } catch (err) {
       updateJob(jobId, {
         completedAt: new Date().toISOString(),
@@ -459,6 +489,8 @@ export namespace SandboxRun {
         stage: "Follow-up failed",
         status: "failed",
       }));
+
+      op.error("follow-up failed", { followUpId, error: err });
     }
   };
 }

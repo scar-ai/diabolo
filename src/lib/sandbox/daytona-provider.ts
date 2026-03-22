@@ -7,8 +7,11 @@ import {
 } from "@daytonaio/sdk";
 
 import { env } from "@/env/server";
+import { Log } from "@/lib/log";
 
 import type { Sandbox } from "./index";
+
+const log = Log.create({ ns: "daytona" });
 
 const LEGACY_UNSUPPORTED_IMAGES = new Set(["daytonaio/workspace", "daytonaio/workspace:latest"]);
 
@@ -109,13 +112,16 @@ export const getSandboxProvider = (): Sandbox.Provider => {
   return {
     async createWorkspace(repoName) {
       const daytona = getDaytonaClient();
+      const name = makeSandboxName(repoName);
       const baseParams: CreateSandboxBaseParams = {
         autoDeleteInterval: 0,
         autoStopInterval: 30,
         language: CodeLanguage.TYPESCRIPT,
-        name: makeSandboxName(repoName),
+        name,
       };
       const configuredImage = getConfiguredDaytonaImage();
+
+      log.info("creating sandbox", { name, image: configuredImage ?? "default" });
 
       if (configuredImage) {
         const imageParams: CreateSandboxFromImageParams = {

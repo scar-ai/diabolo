@@ -1,13 +1,19 @@
 import { and, desc, eq, inArray } from "drizzle-orm";
+import { errAsync, okAsync, ResultAsync } from "neverthrow";
+import * as R from "remeda";
 
 import { db } from "@/lib/db";
 import { Github } from "@/lib/github";
+import { Log } from "@/lib/log";
+import { fromPromise, toError } from "@/lib/result";
 import { Sandbox } from "@/lib/sandbox";
 
 import { project, task } from "./project.sql";
 
 export type ProjectId = string & { __brand: "ProjectId" };
 export type TaskId = string & { __brand: "TaskId" };
+
+const log = Log.create({ ns: "project" });
 
 export namespace Project {
   export type ProjectRecord = typeof project.$inferSelect;
@@ -24,6 +30,22 @@ export namespace Project {
   // ---------------------------------------------------------------------------
 
   const RUNNING_TASK_STATUSES = new Set(["queued", "running"]);
+
+  const TASK_SUMMARY_KEYS = [
+    "branchName",
+    "completedAt",
+    "createdAt",
+    "id",
+    "projectId",
+    "prompt",
+    "quickTask",
+    "repoName",
+    "sandboxId",
+    "stage",
+    "startedAt",
+    "status",
+    "updatedAt",
+  ] as const;
 
   const taskSummarySelection = {
     branchName: task.branchName,
@@ -133,40 +155,29 @@ export namespace Project {
       .then((rows) => rows[0]);
 
   // ---------------------------------------------------------------------------
-  // Internal helpers
+  // Internal helpers — ResultAsync guards
   // ---------------------------------------------------------------------------
 
-  const requireUserProject = async (projectId: string, userId: string) => {
-    const result = await findProject(projectId, userId);
+  const requireUserProject = (projectId: string, userId: string) =>
+    fromPromise(findProject(projectId, userId)).andThen((value) =>
+      value ? okAsync(value) : errAsync(new Error("Project not found.")),
+    );
 
-    if (!result) {
-      throw new Error("Project not found.");
-    }
+  const requireTaskForProject = (projectId: string, taskId: string) =>
+    fromPromise(findProjectTask(taskId, projectId)).andThen((value) =>
+      value ? okAsync(value) : errAsync(new Error("Task not found.")),
+    );
 
-    return result;
-  };
+  const requireTaskForUser = (taskId: string, userId: string) =>
+    fromPromise(findUserTask(taskId, userId)).andThen((value) =>
+      value ? okAsync(value) : errAsync(new Error("Task not found.")),
+    );
 
-  const requireTaskForProject = async (projectId: string, taskId: string) => {
-    const result = await findProjectTask(taskId, projectId);
+  // ---------------------------------------------------------------------------
+  // Internal helpers — serialization
+  // ---------------------------------------------------------------------------
 
-    if (!result) {
-      throw new Error("Task not found.");
-    }
-
-    return result;
-  };
-
-  const requireTaskForUser = async (taskId: string, userId: string) => {
-    const result = await findUserTask(taskId, userId);
-
-    if (!result) {
-      throw new Error("Task not found.");
-    }
-
-    return result;
-  };
-
-  const toSerializedJobPatch = (job: Awaited<ReturnType<typeof Sandbox.getTask>>) => ({
+  const toSerializedJobPatch = (job: Sandbox.TaskJob) => ({
     agentMessages: job.agentMessages.length > 0 ? JSON.stringify(job.agentMessages) : null,
     branchName: job.branchName ?? job.sourceBranch ?? null,
     completedAt: job.completedAt ? new Date(job.completedAt) : null,
@@ -201,13 +212,10 @@ export namespace Project {
   });
 
   const syncTaskWithJob = async (t: TaskRecord, userId?: string) => {
-    try {
-      const job = await Sandbox.getTask(t.id, userId);
-      return updateTask(t.id, toSerializedJobPatch(job));
-    } catch {
-      if (!RUNNING_TASK_STATUSES.has(t.status)) {
-        return t;
-      }
+    const result = await Sandbox.getTask(t.id, userId);
+
+    if (result.isErr()) {
+      if (!RUNNING_TASK_STATUSES.has(t.status)) return t;
 
       return updateTask(t.id, {
         completedAt: new Date(),
@@ -216,15 +224,18 @@ export namespace Project {
         status: "failed",
       });
     }
+
+    return updateTask(t.id, toSerializedJobPatch(result.value));
   };
 
   const syncTaskSummaryWithJob = async (t: TaskSummaryRecord, userId?: string) =>
     pickTaskSummary(await syncTaskWithJob(t as TaskRecord, userId));
 
   const terminateTaskRecord = async (taskId: string) => {
-    try {
-      await Sandbox.terminateTask(taskId);
-    } catch {}
+    await Sandbox.terminateTask(taskId).match(
+      () => {},
+      () => {},
+    );
 
     return updateTask(taskId, {
       completedAt: new Date(),
@@ -235,204 +246,295 @@ export namespace Project {
   };
 
   // ---------------------------------------------------------------------------
-  // Exported service functions
+  // Exported service functions — all return ResultAsync
   // ---------------------------------------------------------------------------
 
-  export const createProjectForUser = (input: { name: string; repoId: string; userId: string }) =>
-    insertProject({
-      id: crypto.randomUUID(),
-      name: input.name,
-      repoId: input.repoId,
-      userId: input.userId,
+  export const createProjectForUser = (input: {
+    name: string;
+    repoId: string;
+    userId: string;
+  }): ResultAsync<ProjectRecord, Error> =>
+    fromPromise(
+      insertProject({
+        id: crypto.randomUUID(),
+        name: input.name,
+        repoId: input.repoId,
+        userId: input.userId,
+      }),
+    ).map((p) => {
+      log.info("project created", { projectId: p.id });
+      return p;
     });
 
-  export const listProjectsForUser = (userId: string) => listProjects(userId);
+  export const listProjectsForUser = (userId: string): ResultAsync<ProjectRecord[], Error> =>
+    fromPromise(listProjects(userId));
 
-  export const getProjectForUser = async (projectId: string, userId: string) => {
-    const p = await requireUserProject(projectId, userId);
-    const repo = await Github.getRepo(p.repoId);
+  export const getProjectForUser = (
+    projectId: string,
+    userId: string,
+  ): ResultAsync<
+    ProjectRecord & {
+      repoDefaultBranch: string | null;
+      repoDescription: string | null;
+      repoFullName: string | null;
+      repoHtmlUrl: string | null;
+    },
+    Error
+  > =>
+    requireUserProject(projectId, userId).andThen((p) =>
+      Github.getRepo(p.repoId).map((repo) => ({
+        ...p,
+        repoDefaultBranch: repo?.defaultBranch ?? null,
+        repoDescription: repo?.description ?? null,
+        repoFullName: repo?.fullName ?? null,
+        repoHtmlUrl: repo?.htmlUrl ?? null,
+      })),
+    );
 
-    return {
-      ...p,
-      repoDefaultBranch: repo?.defaultBranch ?? null,
-      repoDescription: repo?.description ?? null,
-      repoFullName: repo?.fullName ?? null,
-      repoHtmlUrl: repo?.htmlUrl ?? null,
-    };
-  };
+  export const deleteProjectForUser = (
+    projectId: string,
+    userId: string,
+  ): ResultAsync<void, Error> =>
+    requireUserProject(projectId, userId)
+      .andThen(() => fromPromise(deleteProject(projectId)))
+      .map(() => {
+        log.info("project deleted", { projectId });
+      });
 
-  export const deleteProjectForUser = async (projectId: string, userId: string) => {
-    await requireUserProject(projectId, userId);
-    await deleteProject(projectId);
-  };
-
-  export const createTaskForUser = async (input: {
+  export const createTaskForUser = (input: {
     projectId: string;
     prompt: string;
     quickTask: boolean;
     sourceBranch: string;
     userId: string;
-  }) => {
-    const p = await requireUserProject(input.projectId, input.userId);
+  }): ResultAsync<TaskRecord, Error> => {
+    const op = log.child({ projectId: input.projectId, userId: input.userId });
 
-    const job = await Sandbox.startTask(
-      {
-        prompt: input.prompt,
-        quickTask: input.quickTask,
-        repoId: p.repoId,
-        sourceBranch: input.sourceBranch,
-      },
-      input.userId,
-    );
-
-    return insertTask({
-      branchName: job.sourceBranch,
-      id: job.id,
-      projectId: input.projectId,
-      prompt: job.prompt,
-      quickTask: job.quickTask,
-      repoId: job.repoId,
-      stage: job.stage,
-      startedAt: new Date(job.startedAt),
-      status: job.status,
-    });
+    return requireUserProject(input.projectId, input.userId)
+      .andThen((p) =>
+        Sandbox.startTask(
+          {
+            prompt: input.prompt,
+            quickTask: input.quickTask,
+            repoId: p.repoId,
+            sourceBranch: input.sourceBranch,
+          },
+          input.userId,
+        ),
+      )
+      .andThen((job) =>
+        fromPromise(
+          insertTask({
+            branchName: job.sourceBranch,
+            id: job.id,
+            projectId: input.projectId,
+            prompt: job.prompt,
+            quickTask: job.quickTask,
+            repoId: job.repoId,
+            stage: job.stage,
+            startedAt: new Date(job.startedAt),
+            status: job.status,
+          }),
+        ),
+      )
+      .map((t) => {
+        op.info("task created", { taskId: t.id });
+        return t;
+      });
   };
 
-  export const listTasksForProject = async (projectId: string, userId: string) => {
-    await requireUserProject(projectId, userId);
-    return listProjectTasks(projectId);
-  };
+  export const listTasksForProject = (
+    projectId: string,
+    userId: string,
+  ): ResultAsync<TaskRecord[], Error> =>
+    requireUserProject(projectId, userId).andThen(() => fromPromise(listProjectTasks(projectId)));
 
-  export const getTaskForProject = async (projectId: string, taskId: string, userId: string) => {
-    await requireUserProject(projectId, userId);
-    return syncTaskWithJob(await requireTaskForProject(projectId, taskId), userId);
-  };
-
-  export const deleteTaskForProject = async (projectId: string, taskId: string, userId: string) => {
-    await requireUserProject(projectId, userId);
-
-    const t = await requireTaskForProject(projectId, taskId);
-
-    if (RUNNING_TASK_STATUSES.has(t.status)) {
-      throw new Error("Running sessions cannot be removed.");
-    }
-
-    await deleteTask(taskId, projectId);
-  };
-
-  export const terminateTaskForProject = async (
+  export const getTaskForProject = (
     projectId: string,
     taskId: string,
     userId: string,
-  ) => {
-    await requireUserProject(projectId, userId);
-    await requireTaskForProject(projectId, taskId);
-    return terminateTaskRecord(taskId);
-  };
+  ): ResultAsync<TaskRecord, Error> =>
+    requireUserProject(projectId, userId)
+      .andThen(() => requireTaskForProject(projectId, taskId))
+      .andThen((t) => fromPromise(syncTaskWithJob(t, userId)));
 
-  export const getTaskForUser = async (taskId: string, userId: string) => {
-    const { task: t } = await requireTaskForUser(taskId, userId);
-    return syncTaskWithJob(t, userId);
-  };
+  export const deleteTaskForProject = (
+    projectId: string,
+    taskId: string,
+    userId: string,
+  ): ResultAsync<void, Error> =>
+    requireUserProject(projectId, userId)
+      .andThen(() => requireTaskForProject(projectId, taskId))
+      .andThen((t) => {
+        if (RUNNING_TASK_STATUSES.has(t.status)) {
+          return errAsync(new Error("Running sessions cannot be removed."));
+        }
+        return fromPromise(deleteTask(taskId, projectId));
+      })
+      .map(() => {
+        log.info("task deleted", { taskId, projectId });
+      });
 
-  export const terminateTaskForUser = async (taskId: string, userId: string) => {
-    const { task: t } = await requireTaskForUser(taskId, userId);
-    return terminateTaskRecord(t.id);
-  };
+  export const terminateTaskForProject = (
+    projectId: string,
+    taskId: string,
+    userId: string,
+  ): ResultAsync<TaskRecord, Error> =>
+    requireUserProject(projectId, userId)
+      .andThen(() => requireTaskForProject(projectId, taskId))
+      .andThen(() => fromPromise(terminateTaskRecord(taskId)))
+      .map((t) => {
+        log.info("task terminated", { taskId, projectId });
+        return t;
+      });
 
-  export const terminateQuickTaskForUser = async (taskId: string, userId: string) => {
-    const { task: t } = await requireTaskForUser(taskId, userId);
-
-    if (!t.quickTask) {
-      throw new Error("This action is only available for quick tasks.");
-    }
-
-    try {
-      await Sandbox.terminateTask(t.id);
-    } catch {}
-
-    if (t.sandboxId) {
-      try {
-        await Sandbox.destroySandbox(t.sandboxId);
-      } catch {}
-    }
-
-    return updateTask(t.id, {
-      completedAt: new Date(),
-      error: "Quick task was stopped by user.",
-      sandboxId: null,
-      sandboxName: null,
-      sandboxPath: null,
-      stage: "Quick task stopped",
-      status: "failed",
-    });
-  };
-
-  export const destroyTaskSandboxForUser = async (taskId: string, userId: string) => {
-    const { task: t } = await requireTaskForUser(taskId, userId);
-
-    if (t.sandboxId) {
-      await Sandbox.destroySandbox(t.sandboxId);
-    }
-
-    return updateTask(t.id, {
-      sandboxId: null,
-      sandboxName: null,
-      sandboxPath: null,
-      stage: "Sandbox stopped",
-    });
-  };
-
-  export const runTaskFollowUpForUser = async (taskId: string, prompt: string, userId: string) => {
-    const { task: t } = await requireTaskForUser(taskId, userId);
-
-    if (t.quickTask) {
-      throw new Error("Quick tasks are read-only.");
-    }
-
-    await updateTask(t.id, {
-      stage: "Running follow-up task",
-      status: "running",
-    });
-
-    await Sandbox.runTaskFollowUp(t.id, prompt.trim(), userId);
-
-    const latestTask = await findTask(t.id);
-
-    if (!latestTask) {
-      throw new Error("Task not found.");
-    }
-
-    return syncTaskWithJob(latestTask, userId);
-  };
-
-  export const listAllTasksForUser = async (userId: string) => {
-    const projectIds = await listProjectIds(userId);
-
-    if (projectIds.length === 0) {
-      return [];
-    }
-
-    const tasks = await listUserTasks(projectIds.map(({ id }) => id));
-
-    return Promise.all(
-      tasks.map((t) => (RUNNING_TASK_STATUSES.has(t.status) ? syncTaskWithJob(t, userId) : t)),
+  export const getTaskForUser = (taskId: string, userId: string): ResultAsync<TaskRecord, Error> =>
+    requireTaskForUser(taskId, userId).andThen(({ task: t }) =>
+      fromPromise(syncTaskWithJob(t, userId)),
     );
-  };
 
-  export const listAllTaskSummariesForUser = async (userId: string) => {
-    const projectIds = await listProjectIds(userId);
+  export const terminateTaskForUser = (
+    taskId: string,
+    userId: string,
+  ): ResultAsync<TaskRecord, Error> =>
+    requireTaskForUser(taskId, userId).andThen(({ task: t }) =>
+      fromPromise(terminateTaskRecord(t.id)).map((updated) => {
+        log.info("task terminated by user", { taskId });
+        return updated;
+      }),
+    );
 
-    if (projectIds.length === 0) {
-      return [];
-    }
+  export const terminateQuickTaskForUser = (
+    taskId: string,
+    userId: string,
+  ): ResultAsync<TaskRecord, Error> =>
+    requireTaskForUser(taskId, userId).andThen(({ task: t }) => {
+      if (!t.quickTask) {
+        return errAsync(new Error("This action is only available for quick tasks."));
+      }
 
-    const tasks = await listUserTaskSummaries(projectIds.map(({ id }) => id));
+      return fromPromise(
+        (async () => {
+          await Sandbox.terminateTask(t.id).match(
+            () => {},
+            () => {},
+          );
 
-    return Promise.all(
-      tasks.map((t) =>
-        RUNNING_TASK_STATUSES.has(t.status) ? syncTaskSummaryWithJob(t, userId) : t,
+          if (t.sandboxId) {
+            await Sandbox.destroySandbox(t.sandboxId).match(
+              () => {},
+              () => {},
+            );
+          }
+
+          return updateTask(t.id, {
+            completedAt: new Date(),
+            error: "Quick task was stopped by user.",
+            sandboxId: null,
+            sandboxName: null,
+            sandboxPath: null,
+            stage: "Quick task stopped",
+            status: "failed",
+          });
+        })(),
+      ).map((updated) => {
+        log.info("quick task terminated", { taskId });
+        return updated;
+      });
+    });
+
+  export const destroyTaskSandboxForUser = (
+    taskId: string,
+    userId: string,
+  ): ResultAsync<TaskRecord, Error> =>
+    requireTaskForUser(taskId, userId).andThen(({ task: t }) =>
+      fromPromise(
+        (async () => {
+          if (t.sandboxId) {
+            await Sandbox.destroySandbox(t.sandboxId).match(
+              () => {},
+              () => {},
+            );
+          }
+
+          return updateTask(t.id, {
+            sandboxId: null,
+            sandboxName: null,
+            sandboxPath: null,
+            stage: "Sandbox stopped",
+          });
+        })(),
       ),
     );
-  };
+
+  export const runTaskFollowUpForUser = (
+    taskId: string,
+    prompt: string,
+    userId: string,
+  ): ResultAsync<TaskRecord, Error> =>
+    requireTaskForUser(taskId, userId).andThen(({ task: t }) => {
+      if (t.quickTask) {
+        return errAsync(new Error("Quick tasks are read-only."));
+      }
+
+      return fromPromise(
+        (async () => {
+          await updateTask(t.id, {
+            stage: "Running follow-up task",
+            status: "running",
+          });
+
+          await Sandbox.runTaskFollowUp(t.id, prompt.trim(), userId).match(
+            () => {},
+            (e) => {
+              throw e;
+            },
+          );
+
+          const latest = await findTask(t.id);
+          if (!latest) throw new Error("Task not found.");
+
+          return syncTaskWithJob(latest, userId);
+        })(),
+      ).map((updated) => {
+        log.info("follow-up completed", { taskId });
+        return updated;
+      });
+    });
+
+  export const listAllTasksForUser = (userId: string): ResultAsync<TaskRecord[], Error> =>
+    fromPromise(listProjectIds(userId)).andThen((ids) => {
+      if (ids.length === 0) return okAsync([] as TaskRecord[]);
+
+      const projectIds = R.map(ids, R.prop("id"));
+
+      return fromPromise(listUserTasks(projectIds)).andThen((tasks) =>
+        fromPromise(
+          Promise.all(
+            R.map(tasks, (t) =>
+              RUNNING_TASK_STATUSES.has(t.status) ? syncTaskWithJob(t, userId) : t,
+            ),
+          ),
+        ),
+      );
+    });
+
+  export const listAllTaskSummariesForUser = (
+    userId: string,
+  ): ResultAsync<TaskSummaryRecord[], Error> =>
+    fromPromise(listProjectIds(userId)).andThen((ids) => {
+      if (ids.length === 0) return okAsync([] as TaskSummaryRecord[]);
+
+      const projectIds = R.map(ids, R.prop("id"));
+
+      return fromPromise(listUserTaskSummaries(projectIds)).andThen((tasks) =>
+        fromPromise(
+          Promise.all(
+            R.map(tasks, (t) =>
+              RUNNING_TASK_STATUSES.has(t.status) ? syncTaskSummaryWithJob(t, userId) : t,
+            ),
+          ),
+        ),
+      );
+    });
 }

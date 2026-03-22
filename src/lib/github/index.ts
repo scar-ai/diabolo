@@ -1,21 +1,27 @@
 import "@tanstack/react-start/server-only";
+import { errAsync, okAsync, ResultAsync } from "neverthrow";
 import { Octokit } from "octokit";
+import * as R from "remeda";
 
 import { _getUser } from "@/lib/auth/functions.server";
 import { db } from "@/lib/db";
+import { Log } from "@/lib/log";
+import { fromPromise } from "@/lib/result";
+
+const log = Log.create({ ns: "github" });
 
 export namespace Github {
   export type Repo = {
+    cloneUrl: string;
+    defaultBranch: string;
+    description: string | null;
+    fullName: string;
+    htmlUrl: string;
     id: string;
     name: string;
-    fullName: string;
-    description: string | null;
-    cloneUrl: string;
-    htmlUrl: string;
     ownerLogin: string;
-    visibility: "public" | "private";
-    defaultBranch: string;
     updatedAt: string;
+    visibility: "private" | "public";
   };
 
   type GithubAccount = {
@@ -27,18 +33,18 @@ export namespace Github {
   };
 
   type GithubRepoApiItem = {
+    clone_url: string;
+    default_branch: string;
+    description: string | null;
+    full_name: string;
+    html_url: string;
     id: number;
     name: string;
-    full_name: string;
-    description: string | null;
-    clone_url: string;
-    html_url: string;
-    private: boolean;
-    default_branch: string;
-    updated_at: string;
     owner: {
       login: string;
     };
+    private: boolean;
+    updated_at: string;
   };
 
   const fetchGithub = async <TData>(path: string, accessToken: string): Promise<TData> => {
@@ -57,14 +63,6 @@ export namespace Github {
     return response.json() as Promise<TData>;
   };
 
-  const getOctokit = async () => {
-    const { accessToken } = await getAccount();
-
-    return new Octokit({
-      auth: accessToken,
-    });
-  };
-
   const getAccount = async (): Promise<GithubAccount> => {
     const user = await _getUser({ disableCookieCache: true });
     if (!user) {
@@ -80,134 +78,139 @@ export namespace Github {
       throw new Error("Connect a GitHub account to load your repositories.");
     }
 
-    return {
-      accessToken: githubAccount.accessToken,
-    };
+    return { accessToken: githubAccount.accessToken };
+  };
+
+  const getOctokit = async () => {
+    const { accessToken } = await getAccount();
+    return new Octokit({ auth: accessToken });
   };
 
   const mapRepo = (repo: GithubRepoApiItem): Repo => ({
+    cloneUrl: repo.clone_url,
+    defaultBranch: repo.default_branch,
+    description: repo.description,
+    fullName: repo.full_name,
+    htmlUrl: repo.html_url,
     id: String(repo.id),
     name: repo.name,
-    fullName: repo.full_name,
-    description: repo.description,
-    cloneUrl: repo.clone_url,
-    htmlUrl: repo.html_url,
     ownerLogin: repo.owner.login,
-    visibility: repo.private ? "private" : "public",
-    defaultBranch: repo.default_branch,
     updatedAt: repo.updated_at,
+    visibility: repo.private ? "private" : "public",
   });
 
-  export const listRepos = async (): Promise<Repo[]> => {
-    const octokit = await getOctokit();
-    const repos = (await octokit.paginate(octokit.rest.repos.listForAuthenticatedUser, {
-      affiliation: "owner,collaborator,organization_member",
-      per_page: 100,
-      sort: "updated",
-      visibility: "all",
-    })) as GithubRepoApiItem[];
+  // ---------------------------------------------------------------------------
+  // Public API — all return ResultAsync
+  // ---------------------------------------------------------------------------
 
-    return repos.map(mapRepo);
-  };
+  export const listRepos = (): ResultAsync<Repo[], Error> =>
+    fromPromise(
+      (async () => {
+        const octokit = await getOctokit();
+        const repos = (await octokit.paginate(octokit.rest.repos.listForAuthenticatedUser, {
+          affiliation: "owner,collaborator,organization_member",
+          per_page: 100,
+          sort: "updated",
+          visibility: "all",
+        })) as GithubRepoApiItem[];
 
-  export const getRepo = async (repoId: string): Promise<Repo | null> => {
-    const repos = await listRepos();
-    return repos.find((repo) => repo.id === repoId) ?? null;
-  };
+        log.info("repos listed", { count: repos.length });
+        return R.map(repos, mapRepo);
+      })(),
+    );
 
-  export const getAccessToken = async () => {
-    const account = await getAccount();
-    return account.accessToken;
-  };
+  export const getRepo = (repoId: string): ResultAsync<Repo | null, Error> =>
+    listRepos().map((repos) => {
+      const found = repos.find((repo) => repo.id === repoId) ?? null;
+      if (!found) log.warn("repo not found", { repoId });
+      return found;
+    });
 
-  export const getViewer = async () => {
-    const octokit = await getOctokit();
-    const { data: viewer } = await octokit.rest.users.getAuthenticated();
+  export const requireRepo = (repoId: string): ResultAsync<Repo, Error> =>
+    getRepo(repoId).andThen((repo) =>
+      repo ? okAsync(repo) : errAsync(new Error("Unknown repository selection.")),
+    );
 
-    return {
-      email: viewer.email || `${viewer.login}@users.noreply.github.com`,
-      login: viewer.login,
-      name: viewer.name || viewer.login,
-    };
-  };
+  export const getAccessToken = (): ResultAsync<string, Error> =>
+    fromPromise(getAccount().then((a) => a.accessToken));
 
-  export const getAuthenticatedRemoteUrl = async (repoId: string) => {
-    const [repo, accessToken] = await Promise.all([getRepo(repoId), getAccessToken()]);
+  export const getViewer = (): ResultAsync<{ email: string; login: string; name: string }, Error> =>
+    fromPromise(
+      (async () => {
+        const octokit = await getOctokit();
+        const { data: viewer } = await octokit.rest.users.getAuthenticated();
 
-    if (!repo) {
-      throw new Error("Unknown repository selection.");
-    }
+        return {
+          email: viewer.email || `${viewer.login}@users.noreply.github.com`,
+          login: viewer.login,
+          name: viewer.name || viewer.login,
+        };
+      })(),
+    );
 
-    const encodedToken = encodeURIComponent(accessToken);
+  export const getAuthenticatedRemoteUrl = (repoId: string): ResultAsync<string, Error> =>
+    ResultAsync.combine([requireRepo(repoId), getAccessToken()]).map(([repo, token]) => {
+      const encoded = encodeURIComponent(token);
+      return `https://x-access-token:${encoded}@github.com/${repo.fullName}.git`;
+    });
 
-    return `https://x-access-token:${encodedToken}@github.com/${repo.fullName}.git`;
-  };
-
-  export const createPullRequest = async ({
-    base,
-    body,
-    head,
-    repoId,
-    title,
-  }: {
+  export const createPullRequest = (input: {
     base: string;
     body: string;
     head: string;
     repoId: string;
     title: string;
-  }) => {
-    const [repo, octokit] = await Promise.all([getRepo(repoId), getOctokit()]);
+  }): ResultAsync<{ number: number; url: string }, Error> =>
+    ResultAsync.combine([requireRepo(input.repoId), fromPromise(getOctokit())]).andThen(
+      ([repo, octokit]) =>
+        fromPromise(
+          octokit.rest.pulls
+            .create({
+              base: input.base,
+              body: input.body,
+              head: input.head,
+              owner: repo.ownerLogin,
+              repo: repo.name,
+              title: input.title,
+            })
+            .then(({ data }) => {
+              log.info("pull request created", { pr: data.number, repo: repo.fullName });
+              return { number: data.number, url: data.html_url };
+            }),
+        ),
+    );
 
-    if (!repo) {
-      throw new Error("Unknown repository selection.");
-    }
-
-    const { data: pullRequest } = await octokit.rest.pulls.create({
-      base,
-      body,
-      head,
-      owner: repo.ownerLogin,
-      repo: repo.name,
-      title,
-    });
-
-    return {
-      number: pullRequest.number,
-      url: pullRequest.html_url,
-    };
-  };
-
-  export const createPullRequestComment = async ({
-    body,
-    prNumber,
-    repoId,
-  }: {
+  export const createPullRequestComment = (input: {
     body: string;
     prNumber: number;
     repoId: string;
-  }) => {
-    const [repo, octokit] = await Promise.all([getRepo(repoId), getOctokit()]);
-
-    if (!repo) {
-      throw new Error("Unknown repository selection.");
-    }
-
-    await octokit.rest.issues.createComment({
-      body,
-      issue_number: prNumber,
-      owner: repo.ownerLogin,
-      repo: repo.name,
-    });
-  };
-
-  export const listBranches = async (repoFullName: string) => {
-    const { accessToken } = await getAccount();
-
-    const branches = await fetchGithub<GithubBranch[]>(
-      `/repos/${repoFullName}/branches?per_page=100`,
-      accessToken,
+  }): ResultAsync<void, Error> =>
+    ResultAsync.combine([requireRepo(input.repoId), fromPromise(getOctokit())]).andThen(
+      ([repo, octokit]) =>
+        fromPromise(
+          octokit.rest.issues
+            .createComment({
+              body: input.body,
+              issue_number: input.prNumber,
+              owner: repo.ownerLogin,
+              repo: repo.name,
+            })
+            .then(() => {
+              log.info("pr comment posted", { pr: input.prNumber });
+            }),
+        ),
     );
 
-    return branches.map((branch) => ({ name: branch.name }));
-  };
+  export const listBranches = (repoFullName: string): ResultAsync<Array<{ name: string }>, Error> =>
+    fromPromise(
+      (async () => {
+        const { accessToken } = await getAccount();
+        const branches = await fetchGithub<GithubBranch[]>(
+          `/repos/${repoFullName}/branches?per_page=100`,
+          accessToken,
+        );
+
+        return R.map(branches, (b) => ({ name: b.name }));
+      })(),
+    );
 }
