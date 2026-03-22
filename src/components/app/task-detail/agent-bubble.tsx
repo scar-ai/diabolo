@@ -6,17 +6,15 @@ import { cn } from "@/lib/utils";
 
 import type { TaskData } from "./types";
 
-const THINKING_TEXT = "Thinking...";
-const WAVE_CHARS = THINKING_TEXT.split("");
-
-function ThinkingWave() {
+function ThinkingWave({ text = "Thinking..." }: { text?: string }) {
+  const chars = text.split("");
   return (
-    <span className="text-sm font-medium" aria-label="Thinking">
-      {WAVE_CHARS.map((char, i) => (
+    <span className="text-sm font-medium" aria-label={text}>
+      {chars.map((char, i) => (
         <span
           key={i}
           className={cn(
-            "inline-block animate-[wave_2.2s_ease-in-out_infinite] text-white",
+            "inline-block animate-[wave_2.2s_ease-in-out_infinite] text-foreground",
             char === " " && "w-1",
           )}
           style={{ animationDelay: `${i * 0.08}s` }}
@@ -28,30 +26,18 @@ function ThinkingWave() {
   );
 }
 
-export function AgentBubble({
-  task,
-  isRunning,
-  hideStage,
-}: {
-  task: TaskData;
-  isRunning: boolean;
-  hideStage?: boolean;
-}) {
+export function AgentBubble({ task, isRunning }: { task: TaskData; isRunning: boolean }) {
   const [logsOpen, setLogsOpen] = useState(false);
   const combinedText = task.combinedAgentText;
 
   return (
     <div className="flex w-full flex-col gap-3">
-      {task.stage && !hideStage ? (
-        <span className="text-xs text-muted-foreground">{task.stage}</span>
-      ) : null}
-
       {combinedText ? (
         <div className="text-sm leading-relaxed text-foreground">
           <Markdown content={combinedText} />
         </div>
       ) : isRunning ? (
-        <ThinkingWave />
+        <ThinkingWave text={task.stage ? `${task.stage}...` : undefined} />
       ) : null}
 
       {task.error ? (

@@ -34,7 +34,7 @@ export function TaskFollowUpComposer({
   return (
     <>
       <div
-        className={`pointer-events-none fixed inset-x-0 bottom-0 bg-gradient-to-t from-background from-40% to-transparent ${task.prUrl ? "h-72" : "h-48"}`}
+        className={`pointer-events-none fixed inset-x-0 bottom-0 bg-linear-to-t from-background from-40% to-transparent ${task.prUrl ? "h-72" : "h-48"}`}
       />
       <div className="fixed inset-x-0 bottom-6 flex justify-center px-4">
         <div className="w-full max-w-3xl">
