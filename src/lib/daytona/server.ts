@@ -69,31 +69,14 @@ export type RepoTaskJob = {
 
 const jobs = new Map<string, RepoTaskJob>();
 const MAX_LOG_LENGTH = 16_000;
+const SANDBOX_TOOL_PATH_EXPORT =
+  'export PATH="$HOME/.local/bin:$HOME/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/bin:$(npm config get prefix)/bin:$PATH"';
 const OPENCODE_INSTALL_COMMAND = [
-  'export PATH="$(npm config get prefix)/bin:$PATH"',
+  SANDBOX_TOOL_PATH_EXPORT,
   "if ! command -v opencode >/dev/null 2>&1; then npm install -g opencode-ai; fi",
   "opencode --version",
 ].join("\n");
 const DEFAULT_OPENCODE_MODEL = "openrouter/openai/gpt-5-codex";
-const KNOWN_NON_OPENROUTER_PROVIDERS = new Set([
-  "amazon-bedrock",
-  "anthropic",
-  "azure",
-  "azure-openai",
-  "cerebras",
-  "deepseek",
-  "fireworks",
-  "google",
-  "google-vertex",
-  "groq",
-  "lmstudio",
-  "ollama",
-  "openai",
-  "openrouter",
-  "opencode",
-  "together",
-  "xai",
-]);
 const LEGACY_UNSUPPORTED_IMAGES = new Set(["daytonaio/workspace", "daytonaio/workspace:latest"]);
 
 const getDaytonaClient = () => {
@@ -135,17 +118,7 @@ const normalizeOpenRouterModel = (value: string) => {
     return model;
   }
 
-  const providerPrefix = model.split("/", 1)[0];
-
-  if (!providerPrefix || !KNOWN_NON_OPENROUTER_PROVIDERS.has(providerPrefix)) {
-    return `openrouter/${model}`;
-  }
-
-  if (providerPrefix === "openrouter") {
-    return model;
-  }
-
-  return model;
+  return `openrouter/${model}`;
 };
 
 const getConfiguredOpenCodeModel = () =>
@@ -377,7 +350,471 @@ const parseOpenCodeJsonOutputForTarget = (jobId: string, output: string, followU
   }
 };
 
-const buildOpenCodePrompt = (userPrompt: string) =>
+const FRONTEND_TASK_PATTERN =
+  /\b(frontend|ui|ux|browser|screenshot|screen shot|visual|css|tailwind|layout|responsive|component|shadcn|page|modal|dialog|dropdown|form|button|input|navbar|sidebar|header|footer|computer use|computer-use|desktop|gui|click|type|typing|keyboard|mouse|preview|daytona mcp|use daytona|daytona tool|sandbox browser|open the browser|open browser|checkout the file|check out the file)\b/i;
+
+const isFrontendTaskPrompt = (prompt: string) => FRONTEND_TASK_PATTERN.test(prompt);
+
+const buildDaytonaCustomToolContent = () =>
+  String.raw`import { mkdir, writeFile } from "node:fs/promises";
+import path from "node:path";
+
+import { Daytona } from "@daytonaio/sdk";
+import { z } from "zod";
+
+const json = (value: unknown) => JSON.stringify(value, null, 2);
+
+const requireEnv = (envName: string) => {
+  const value = process.env[envName]?.trim();
+
+  if (!value) {
+    throw new Error(envName + " is not configured for Daytona custom tools.");
+  }
+
+  return value;
+};
+
+const resolveSandboxId = (value?: string) => {
+  const sandboxId = value?.trim() || process.env.DAYTONA_SANDBOX_ID?.trim();
+
+  if (!sandboxId) {
+    throw new Error("No Daytona sandbox id was provided.");
+  }
+
+  return sandboxId;
+};
+
+const getClient = () =>
+  new Daytona({
+    apiKey: requireEnv("DAYTONA_API_KEY"),
+    apiUrl: process.env.DAYTONA_API_URL?.trim() || undefined,
+    target: process.env.DAYTONA_TARGET?.trim() || undefined,
+  });
+
+const getSandbox = async (sandboxId?: string) => {
+  return getClient().get(resolveSandboxId(sandboxId));
+};
+
+const quoteShellArg = (value: string) => "'" + value.replaceAll("'", "'\\\\''") + "'";
+
+const normalizeScreenshotExtension = (format?: string) => {
+  const normalized = format?.trim().toLowerCase();
+
+  if (!normalized) {
+    return "png";
+  }
+
+  if (normalized === "jpg") {
+    return "jpeg";
+  }
+
+  return normalized;
+};
+
+const maybePersistScreenshot = async (
+  screenshot: Record<string, unknown>,
+  context: { directory?: string; worktree?: string },
+  format?: string,
+) => {
+  const worktree = context.worktree || context.directory;
+
+  if (!worktree) {
+    return {
+      filePath: null,
+      screenshot,
+    };
+  }
+
+  let imageKey: string | undefined;
+  let imageValue: string | undefined;
+
+  for (const [key, value] of Object.entries(screenshot)) {
+    if (typeof value === "string" && value.length > 1_000) {
+      imageKey = key;
+      imageValue = value;
+      break;
+    }
+  }
+
+  if (!imageKey || !imageValue) {
+    return {
+      filePath: null,
+      screenshot,
+    };
+  }
+
+  const artifactDir = path.join(worktree, ".opencode", "artifacts");
+  await mkdir(artifactDir, { recursive: true });
+
+  let base64Payload = imageValue;
+  let extension = normalizeScreenshotExtension(format);
+  const dataUrlMatch = /^data:image\/([a-zA-Z0-9.+-]+);base64,(.+)$/.exec(imageValue);
+
+  if (dataUrlMatch) {
+    extension = normalizeScreenshotExtension(dataUrlMatch[1]);
+    base64Payload = dataUrlMatch[2];
+  }
+
+  const filePath = path.join(artifactDir, "daytona-screenshot-" + Date.now() + "." + extension);
+  await writeFile(filePath, Buffer.from(base64Payload, "base64"));
+
+  return {
+    filePath,
+    screenshot: {
+      ...screenshot,
+      [imageKey]: "saved:" + filePath,
+    },
+  };
+};
+
+const ensureComputerUse = async (sandboxId?: string) => {
+  const sandbox = await getSandbox(sandboxId);
+  const status = await sandbox.computerUse.getStatus().catch(() => null);
+
+  if (status?.status !== "running") {
+    await sandbox.computerUse.start();
+  }
+
+  return sandbox;
+};
+
+const sandboxIdArg = z
+  .string()
+  .optional()
+  .describe("Optional Daytona sandbox id. Defaults to the current task sandbox.");
+
+const screenRegionArgs = {
+  height: z.number().int().positive().optional().describe("Region height in pixels."),
+  width: z.number().int().positive().optional().describe("Region width in pixels."),
+  x: z.number().int().nonnegative().optional().describe("Left coordinate in pixels."),
+  y: z.number().int().nonnegative().optional().describe("Top coordinate in pixels."),
+};
+
+export const preview = {
+  description: "Get the Daytona preview URL for a port in the current sandbox.",
+  args: {
+    port: z.number().int().positive().describe("Sandbox port to expose."),
+    sandboxId: sandboxIdArg,
+  },
+  async execute(args: { port: number; sandboxId?: string }) {
+    const sandbox = await getSandbox(args.sandboxId);
+    return json(await sandbox.getPreviewLink(args.port));
+  },
+};
+
+export const open_preview = {
+  description: "Open a Daytona preview URL in the sandbox desktop browser.",
+  args: {
+    port: z.number().int().positive().describe("Sandbox port to expose and open."),
+    sandboxId: sandboxIdArg,
+  },
+  async execute(args: { port: number; sandboxId?: string }) {
+    const sandbox = await ensureComputerUse(args.sandboxId);
+    const preview = await sandbox.getPreviewLink(args.port);
+    await sandbox.process.executeCommand("xdg-open " + quoteShellArg(preview.url), undefined, undefined, 60);
+    return json(preview);
+  },
+};
+
+export const open_url = {
+  description: "Open a URL in the sandbox desktop browser.",
+  args: {
+    sandboxId: sandboxIdArg,
+    url: z.string().url().describe("URL to open in the sandbox browser."),
+  },
+  async execute(args: { sandboxId?: string; url: string }) {
+    const sandbox = await ensureComputerUse(args.sandboxId);
+    await sandbox.process.executeCommand("xdg-open " + quoteShellArg(args.url), undefined, undefined, 60);
+    return json({ opened: args.url });
+  },
+};
+
+export const computer_start = {
+  description: "Start Daytona computer-use services for the current sandbox.",
+  args: {
+    sandboxId: sandboxIdArg,
+  },
+  async execute(args: { sandboxId?: string }) {
+    const sandbox = await getSandbox(args.sandboxId);
+    return json(await sandbox.computerUse.start());
+  },
+};
+
+export const computer_status = {
+  description: "Get Daytona computer-use process status for the current sandbox.",
+  args: {
+    sandboxId: sandboxIdArg,
+  },
+  async execute(args: { sandboxId?: string }) {
+    const sandbox = await getSandbox(args.sandboxId);
+    return json(await sandbox.computerUse.getStatus());
+  },
+};
+
+export const display_info = {
+  description: "Get display information for the sandbox desktop.",
+  args: {
+    sandboxId: sandboxIdArg,
+  },
+  async execute(args: { sandboxId?: string }) {
+    const sandbox = await ensureComputerUse(args.sandboxId);
+    return json(await sandbox.computerUse.display.getInfo());
+  },
+};
+
+export const display_windows = {
+  description: "List currently open windows in the sandbox desktop.",
+  args: {
+    sandboxId: sandboxIdArg,
+  },
+  async execute(args: { sandboxId?: string }) {
+    const sandbox = await ensureComputerUse(args.sandboxId);
+    return json(await sandbox.computerUse.display.getWindows());
+  },
+};
+
+export const screenshot = {
+  description: "Capture a Daytona computer-use screenshot and save it under .opencode/artifacts.",
+  args: {
+    format: z.enum(["png", "jpeg", "webp"]).optional().describe("Optional screenshot format."),
+    quality: z.number().int().min(1).max(100).optional().describe("Compression quality when supported."),
+    sandboxId: sandboxIdArg,
+    scale: z.number().positive().optional().describe("Optional screenshot scaling factor."),
+    showCursor: z.boolean().optional().describe("Whether to show the mouse cursor."),
+    ...screenRegionArgs,
+  },
+  async execute(
+    args: {
+      format?: "jpeg" | "png" | "webp";
+      height?: number;
+      quality?: number;
+      sandboxId?: string;
+      scale?: number;
+      showCursor?: boolean;
+      width?: number;
+      x?: number;
+      y?: number;
+    },
+    context: { directory?: string; worktree?: string },
+  ) {
+    const sandbox = await ensureComputerUse(args.sandboxId);
+    const hasRegion =
+      typeof args.x === "number" &&
+      typeof args.y === "number" &&
+      typeof args.width === "number" &&
+      typeof args.height === "number";
+
+    const screenshot = hasRegion
+      ? args.format || args.quality || args.scale || args.showCursor
+        ? await sandbox.computerUse.screenshot.takeCompressedRegion(
+            {
+              height: args.height,
+              width: args.width,
+              x: args.x,
+              y: args.y,
+            },
+            {
+              format: args.format,
+              quality: args.quality,
+              scale: args.scale,
+              showCursor: args.showCursor,
+            },
+          )
+        : await sandbox.computerUse.screenshot.takeRegion(
+            {
+              height: args.height,
+              width: args.width,
+              x: args.x,
+              y: args.y,
+            },
+            args.showCursor,
+          )
+      : args.format || args.quality || args.scale || args.showCursor
+        ? await sandbox.computerUse.screenshot.takeCompressed({
+            format: args.format,
+            quality: args.quality,
+            scale: args.scale,
+            showCursor: args.showCursor,
+          })
+        : await sandbox.computerUse.screenshot.takeFullScreen(args.showCursor);
+
+    const persisted = await maybePersistScreenshot(
+      screenshot as Record<string, unknown>,
+      context,
+      args.format,
+    );
+
+    return json({
+      filePath: persisted.filePath,
+      screenshot: persisted.screenshot,
+    });
+  },
+};
+
+export const mouse_move = {
+  description: "Move the mouse cursor in the sandbox desktop.",
+  args: {
+    sandboxId: sandboxIdArg,
+    x: z.number().int().nonnegative().describe("Destination x coordinate."),
+    y: z.number().int().nonnegative().describe("Destination y coordinate."),
+  },
+  async execute(args: { sandboxId?: string; x: number; y: number }) {
+    const sandbox = await ensureComputerUse(args.sandboxId);
+    return json(await sandbox.computerUse.mouse.move(args.x, args.y));
+  },
+};
+
+export const mouse_click = {
+  description: "Click in the sandbox desktop at specific coordinates.",
+  args: {
+    button: z.enum(["left", "middle", "right"]).optional().describe("Mouse button to use."),
+    double: z.boolean().optional().describe("Whether to double-click."),
+    sandboxId: sandboxIdArg,
+    x: z.number().int().nonnegative().describe("Click x coordinate."),
+    y: z.number().int().nonnegative().describe("Click y coordinate."),
+  },
+  async execute(
+    args: {
+      button?: "left" | "middle" | "right";
+      double?: boolean;
+      sandboxId?: string;
+      x: number;
+      y: number;
+    },
+  ) {
+    const sandbox = await ensureComputerUse(args.sandboxId);
+    return json(
+      await sandbox.computerUse.mouse.click(args.x, args.y, args.button, args.double),
+    );
+  },
+};
+
+export const mouse_drag = {
+  description: "Drag the mouse in the sandbox desktop.",
+  args: {
+    button: z.enum(["left", "middle", "right"]).optional().describe("Mouse button to hold."),
+    endX: z.number().int().nonnegative().describe("Ending x coordinate."),
+    endY: z.number().int().nonnegative().describe("Ending y coordinate."),
+    sandboxId: sandboxIdArg,
+    startX: z.number().int().nonnegative().describe("Starting x coordinate."),
+    startY: z.number().int().nonnegative().describe("Starting y coordinate."),
+  },
+  async execute(
+    args: {
+      button?: "left" | "middle" | "right";
+      endX: number;
+      endY: number;
+      sandboxId?: string;
+      startX: number;
+      startY: number;
+    },
+  ) {
+    const sandbox = await ensureComputerUse(args.sandboxId);
+    return json(
+      await sandbox.computerUse.mouse.drag(
+        args.startX,
+        args.startY,
+        args.endX,
+        args.endY,
+        args.button,
+      ),
+    );
+  },
+};
+
+export const mouse_scroll = {
+  description: "Scroll the mouse wheel in the sandbox desktop.",
+  args: {
+    amount: z.number().int().positive().optional().describe("Scroll amount."),
+    direction: z.enum(["down", "up"]).describe("Scroll direction."),
+    sandboxId: sandboxIdArg,
+    x: z.number().int().nonnegative().describe("Scroll x coordinate."),
+    y: z.number().int().nonnegative().describe("Scroll y coordinate."),
+  },
+  async execute(
+    args: {
+      amount?: number;
+      direction: "down" | "up";
+      sandboxId?: string;
+      x: number;
+      y: number;
+    },
+  ) {
+    const sandbox = await ensureComputerUse(args.sandboxId);
+    return json(
+      await sandbox.computerUse.mouse.scroll(args.x, args.y, args.direction, args.amount),
+    );
+  },
+};
+
+export const keyboard_type = {
+  description: "Type text in the sandbox desktop.",
+  args: {
+    delay: z.number().int().nonnegative().optional().describe("Delay between characters in milliseconds."),
+    sandboxId: sandboxIdArg,
+    text: z.string().describe("Text to type."),
+  },
+  async execute(args: { delay?: number; sandboxId?: string; text: string }) {
+    const sandbox = await ensureComputerUse(args.sandboxId);
+    await sandbox.computerUse.keyboard.type(args.text, args.delay);
+    return json({ typed: args.text.length });
+  },
+};
+
+export const keyboard_press = {
+  description: "Press a key with optional modifiers in the sandbox desktop.",
+  args: {
+    key: z.string().describe("Key to press."),
+    modifiers: z.array(z.string()).optional().describe("Optional modifier keys."),
+    sandboxId: sandboxIdArg,
+  },
+  async execute(args: { key: string; modifiers?: string[]; sandboxId?: string }) {
+    const sandbox = await ensureComputerUse(args.sandboxId);
+    await sandbox.computerUse.keyboard.press(args.key, args.modifiers);
+    return json({ key: args.key, modifiers: args.modifiers || [] });
+  },
+};
+
+export const keyboard_hotkey = {
+  description: "Press a hotkey combination in the sandbox desktop.",
+  args: {
+    keys: z.string().describe("Hotkey string such as ctrl+l or alt+tab."),
+    sandboxId: sandboxIdArg,
+  },
+  async execute(args: { keys: string; sandboxId?: string }) {
+    const sandbox = await ensureComputerUse(args.sandboxId);
+    await sandbox.computerUse.keyboard.hotkey(args.keys);
+    return json({ keys: args.keys });
+  },
+};`;
+
+const buildDaytonaCustomToolSetupCommand = () => {
+  const toolContent = buildDaytonaCustomToolContent();
+  const packageJson = JSON.stringify({
+    name: "daytona-opencode-tools",
+    private: true,
+    type: "module",
+  });
+
+  return [
+    SANDBOX_TOOL_PATH_EXPORT,
+    "mkdir -p .opencode/tools .opencode/artifacts",
+    `cat <<'EOF' > .opencode/package.json\n${packageJson}\nEOF`,
+    "npm install --prefix .opencode --no-save @daytonaio/sdk zod",
+    "mkdir -p .git/info",
+    "touch .git/info/exclude",
+    "if ! grep -qxF '.opencode/' .git/info/exclude; then printf '\\n.opencode/\\n' >> .git/info/exclude; fi",
+    `cat <<'EOF' > .opencode/tools/daytona.ts\n${toolContent}\nEOF`,
+  ].join("\n");
+};
+
+const buildOpenCodePrompt = (
+  userPrompt: string,
+  options?: {
+    enableDaytonaTools?: boolean;
+    sandboxId?: string;
+  },
+) =>
   [
     "You are working inside a cloned GitHub repository.",
     "Complete the user's task fully before you stop.",
@@ -385,6 +822,19 @@ const buildOpenCodePrompt = (userPrompt: string) =>
     "Fix any issues you find during verification before finishing.",
     "Do not create commits, branches, or pull requests yourself.",
     "Leave the repository with uncommitted file changes only.",
+    ...(options?.enableDaytonaTools
+      ? [
+          "",
+          "Frontend validation instructions:",
+          "Use the Daytona custom tools for preview, browser automation, screenshots, and computer use when the task touches frontend behavior.",
+          "If the user explicitly asks for computer use, the desktop, the browser, screenshots, clicking, typing, preview links, or similar interactive actions, you must use the Daytona custom tools instead of relying only on shell inspection.",
+          options.sandboxId
+            ? `The current Daytona sandbox id is ${options.sandboxId}. Reuse this sandbox for Daytona custom tools instead of creating a different one unless the task requires it.`
+            : "Use the current sandbox for preview and computer-use actions whenever possible.",
+          "Key tools available include daytona_preview, daytona_open_preview, daytona_open_url, daytona_display_info, daytona_display_windows, daytona_screenshot, daytona_mouse_click, daytona_mouse_drag, daytona_mouse_move, daytona_mouse_scroll, daytona_keyboard_type, daytona_keyboard_press, and daytona_keyboard_hotkey.",
+          "If you need to verify UI behavior, start the app server, expose the right port with daytona_open_preview or daytona_preview, interact through Daytona computer use, and capture screenshots before finishing.",
+        ]
+      : []),
     "",
     "User task:",
     userPrompt.trim(),
@@ -398,10 +848,15 @@ const getProviderScopedModelId = (model: string) => {
   return model;
 };
 
-const buildOpenCodeConfigContent = (model: string) => {
+const buildOpenCodeConfigContent = (
+  model: string,
+  options?: {
+    enableDaytonaTools?: boolean;
+  },
+) => {
   const providerScopedModelId = getProviderScopedModelId(model);
 
-  return JSON.stringify({
+  const config: Record<string, unknown> = {
     $schema: "https://opencode.ai/config.json",
     model,
     permission: {
@@ -419,10 +874,37 @@ const buildOpenCodeConfigContent = (model: string) => {
         options: {},
       },
     },
-  });
+  };
+
+  if (options?.enableDaytonaTools) {
+    config.tools = {
+      "daytona_*": false,
+    };
+    config.agent = {
+      frontend: {
+        tools: {
+          "daytona_*": true,
+        },
+      },
+    };
+  }
+
+  return JSON.stringify(config);
 };
 
 const escapeForSingleQuotedShell = (value: string) => value.replace(/'/g, `'\\''`);
+
+const buildOpenCodeRunCommand = (
+  model: string,
+  prompt: string,
+  options?: {
+    agent?: string;
+  },
+) =>
+  [
+    SANDBOX_TOOL_PATH_EXPORT,
+    `opencode run --format json --model '${escapeForSingleQuotedShell(model)}'${options?.agent ? ` --agent '${escapeForSingleQuotedShell(options.agent)}'` : ""} "$(cat <<'EOF'\n${prompt}\nEOF\n)"`,
+  ].join("\n");
 
 type GitMetadataContext = {
   baseBranch: string;
@@ -674,6 +1156,7 @@ const destroySandboxResources = async (
 
 const prepareSandboxWorkspace = async ({
   branch,
+  enableDaytonaTools,
   githubAccessToken,
   jobId,
   repoId,
@@ -683,6 +1166,7 @@ const prepareSandboxWorkspace = async ({
   viewer,
 }: {
   branch: string;
+  enableDaytonaTools: boolean;
   githubAccessToken: string;
   jobId: string;
   repoId: string;
@@ -717,6 +1201,16 @@ const prepareSandboxWorkspace = async ({
   await sandbox.git.clone(repoUrl, clonePath, branch, undefined, repoOwnerLogin, githubAccessToken);
 
   const authenticatedRemoteUrl = await getGithubAuthenticatedRemoteUrl(repoId);
+  const setupCommands = [
+    `git remote set-url origin '${escapeForSingleQuotedShell(authenticatedRemoteUrl)}'`,
+    `git config user.name '${escapeForSingleQuotedShell(viewer.name)}'`,
+    `git config user.email '${escapeForSingleQuotedShell(viewer.email)}'`,
+    OPENCODE_INSTALL_COMMAND,
+  ];
+
+  if (enableDaytonaTools) {
+    setupCommands.push(buildDaytonaCustomToolSetupCommand());
+  }
 
   updateJob(jobId, {
     clonePath,
@@ -726,14 +1220,15 @@ const prepareSandboxWorkspace = async ({
   await runSandboxCommand(
     sandbox,
     jobId,
-    [
-      `git remote set-url origin '${escapeForSingleQuotedShell(authenticatedRemoteUrl)}'`,
-      `git config user.name '${escapeForSingleQuotedShell(viewer.name)}'`,
-      `git config user.email '${escapeForSingleQuotedShell(viewer.email)}'`,
-      OPENCODE_INSTALL_COMMAND,
-    ].join("\n"),
+    setupCommands.join("\n"),
     clonePath,
-    undefined,
+    enableDaytonaTools
+      ? {
+          DAYTONA_API_KEY: env.DAYTONA_API_KEY || "",
+          ...(env.DAYTONA_API_URL ? { DAYTONA_API_URL: env.DAYTONA_API_URL } : {}),
+          ...(env.DAYTONA_TARGET ? { DAYTONA_TARGET: env.DAYTONA_TARGET } : {}),
+        }
+      : undefined,
     900,
   );
 
@@ -781,8 +1276,10 @@ const runRepoTaskJob = async (jobId: string, input: RepoTaskInput) => {
 
     const job = jobs.get(jobId);
     const sourceBranch = job?.sourceBranch || input.sourceBranch.trim() || repo.defaultBranch;
+    const enableDaytonaTools = isFrontendTaskPrompt(input.prompt);
     const prepared = await prepareSandboxWorkspace({
       branch: sourceBranch,
+      enableDaytonaTools,
       githubAccessToken,
       jobId,
       repoId: input.repoId,
@@ -798,15 +1295,30 @@ const runRepoTaskJob = async (jobId: string, input: RepoTaskInput) => {
       stage: "Running OpenCode task",
     });
 
-    const openCodePrompt = buildOpenCodePrompt(input.prompt);
+    const openCodePrompt = buildOpenCodePrompt(input.prompt, {
+      enableDaytonaTools,
+      sandboxId: sandbox.id,
+    });
     const openCodeResponse = await runSandboxCommand(
       sandbox,
       jobId,
-      `opencode run --format json --model '${escapeForSingleQuotedShell(openCode.model)}' "$(cat <<'EOF'\n${openCodePrompt}\nEOF\n)"`,
+      buildOpenCodeRunCommand(openCode.model, openCodePrompt, {
+        agent: enableDaytonaTools ? "frontend" : undefined,
+      }),
       clonePath,
       {
         OPENROUTER_API_KEY: openCode.apiKey,
-        OPENCODE_CONFIG_CONTENT: buildOpenCodeConfigContent(openCode.model),
+        OPENCODE_CONFIG_CONTENT: buildOpenCodeConfigContent(openCode.model, {
+          enableDaytonaTools,
+        }),
+        ...(enableDaytonaTools
+          ? {
+              DAYTONA_API_KEY: env.DAYTONA_API_KEY || "",
+              DAYTONA_SANDBOX_ID: sandbox.id,
+              ...(env.DAYTONA_API_URL ? { DAYTONA_API_URL: env.DAYTONA_API_URL } : {}),
+              ...(env.DAYTONA_TARGET ? { DAYTONA_TARGET: env.DAYTONA_TARGET } : {}),
+            }
+          : {}),
       },
       3600,
     );
@@ -1045,6 +1557,7 @@ export const runFollowUpOnSandbox = async (jobId: string, prompt: string, userId
   const followUpId = crypto.randomUUID();
   const startedAt = new Date().toISOString();
   const trimmedPrompt = prompt.trim();
+  const enableDaytonaTools = isFrontendTaskPrompt(trimmedPrompt);
   const job = requireJob(jobId, userId);
 
   updateJob(jobId, {
@@ -1089,6 +1602,7 @@ export const runFollowUpOnSandbox = async (jobId: string, prompt: string, userId
 
         const prepared = await prepareSandboxWorkspace({
           branch: followUpTarget.branch,
+          enableDaytonaTools,
           githubAccessToken,
           jobId,
           repoId: job.repoId,
@@ -1112,6 +1626,7 @@ export const runFollowUpOnSandbox = async (jobId: string, prompt: string, userId
 
       const prepared = await prepareSandboxWorkspace({
         branch: followUpTarget.branch,
+        enableDaytonaTools,
         githubAccessToken,
         jobId,
         repoId: job.repoId,
@@ -1129,6 +1644,30 @@ export const runFollowUpOnSandbox = async (jobId: string, prompt: string, userId
       throw new Error("No sandbox workspace available for follow-up.");
     }
 
+    if (enableDaytonaTools) {
+      updateJob(jobId, {
+        stage: "Preparing Daytona custom tools",
+      });
+      updateFollowUpEntry(jobId, followUpId, (entry) => ({
+        ...entry,
+        stage: "Preparing Daytona custom tools",
+      }));
+
+      await runSandboxCommand(
+        sandbox,
+        jobId,
+        buildDaytonaCustomToolSetupCommand(),
+        clonePath,
+        {
+          DAYTONA_API_KEY: env.DAYTONA_API_KEY || "",
+          ...(env.DAYTONA_API_URL ? { DAYTONA_API_URL: env.DAYTONA_API_URL } : {}),
+          ...(env.DAYTONA_TARGET ? { DAYTONA_TARGET: env.DAYTONA_TARGET } : {}),
+        },
+        900,
+        { followUpId },
+      );
+    }
+
     updateJob(jobId, {
       stage: "Running follow-up task",
     });
@@ -1137,15 +1676,30 @@ export const runFollowUpOnSandbox = async (jobId: string, prompt: string, userId
       stage: "Running follow-up task",
     }));
 
-    const openCodePrompt = buildOpenCodePrompt(prompt);
+    const openCodePrompt = buildOpenCodePrompt(prompt, {
+      enableDaytonaTools,
+      sandboxId: sandbox.id,
+    });
     const followUpResponse = await runSandboxCommand(
       sandbox,
       jobId,
-      `opencode run --format json --model '${escapeForSingleQuotedShell(openCode.model)}' "$(cat <<'EOF'\n${openCodePrompt}\nEOF\n)"`,
+      buildOpenCodeRunCommand(openCode.model, openCodePrompt, {
+        agent: enableDaytonaTools ? "frontend" : undefined,
+      }),
       clonePath,
       {
         OPENROUTER_API_KEY: openCode.apiKey,
-        OPENCODE_CONFIG_CONTENT: buildOpenCodeConfigContent(openCode.model),
+        OPENCODE_CONFIG_CONTENT: buildOpenCodeConfigContent(openCode.model, {
+          enableDaytonaTools,
+        }),
+        ...(enableDaytonaTools
+          ? {
+              DAYTONA_API_KEY: env.DAYTONA_API_KEY || "",
+              DAYTONA_SANDBOX_ID: sandbox.id,
+              ...(env.DAYTONA_API_URL ? { DAYTONA_API_URL: env.DAYTONA_API_URL } : {}),
+              ...(env.DAYTONA_TARGET ? { DAYTONA_TARGET: env.DAYTONA_TARGET } : {}),
+            }
+          : {}),
       },
       3600,
       { followUpId },
