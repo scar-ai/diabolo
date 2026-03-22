@@ -13,6 +13,36 @@ export type AllUserTaskSummariesResult = Awaited<ReturnType<typeof $listAllUserT
 export type ProjectsResult = Awaited<ReturnType<typeof $listProjects>>;
 export type ProjectDetailResult = Awaited<ReturnType<typeof $getProject>>;
 
+const formatTaskSummaryDate = (value: Date | string) =>
+  new Date(value).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+
+const getTaskPromptPreview = (prompt: string, maxLength: number) =>
+  prompt.split("\n")[0]?.slice(0, maxLength) ?? "";
+
+const createTaskSummaryLine = ({
+  branchName,
+  repoName,
+  stage,
+  status,
+}: {
+  branchName: string | null;
+  repoName: string | null;
+  stage: string;
+  status: string;
+}) => {
+  const parts = [repoName, branchName].filter(Boolean);
+
+  if ((status === "queued" || status === "running") && stage) {
+    parts.push(stage);
+  }
+
+  return parts.join(" · ");
+};
+
 type ParsedAgentMessage = { text: string; timestamp: number };
 
 type ParsedFollowUp = {
@@ -77,6 +107,17 @@ const selectParsedTaskDetail = (task: NonNullable<Awaited<ReturnType<typeof $get
 
 export type TaskDetailResult = ReturnType<typeof selectParsedTaskDetail>;
 
+const selectTaskSummaries = (tasks: AllUserTaskSummariesResult) =>
+  tasks.map((task) => ({
+    ...task,
+    promptPreview: getTaskPromptPreview(task.prompt, 80),
+    runningSummaryLine: `${task.repoName ?? "-"} · ${task.stage}`,
+    sessionSummaryLine: createTaskSummaryLine(task),
+    startedAtLabel: formatTaskSummaryDate(task.startedAt),
+  }));
+
+export type TaskSummaryResult = ReturnType<typeof selectTaskSummaries>[number];
+
 export const projectKeys = {
   all: ["projects"] as const,
   detail: (projectId: string) => [...projectKeys.all, "detail", projectId] as const,
@@ -115,6 +156,7 @@ export const allUserTaskSummariesQueryOptions = (userId: string) =>
   queryOptions({
     queryKey: taskKeys.summaryList(userId),
     queryFn: ({ signal }) => $listAllUserTaskSummaries({ signal }),
+    select: selectTaskSummaries,
     staleTime: 5_000,
   });
 
