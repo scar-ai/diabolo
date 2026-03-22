@@ -2,7 +2,6 @@ import { ChevronDownIcon, ChevronRightIcon, LoaderIcon, TerminalIcon } from "luc
 import { useState } from "react";
 
 import { Markdown } from "@/components/app/markdown";
-import { TaskStatusBadge } from "@/components/app/task-status-badge";
 
 import type { ParsedFollowUp } from "./types";
 
@@ -13,10 +12,7 @@ export function FollowUpAgentBubble({ followUp }: { followUp: ParsedFollowUp }) 
 
   return (
     <div className="flex w-full flex-col gap-3">
-      <div className="flex items-center gap-2">
-        <TaskStatusBadge status={followUp.status} />
-        <span className="text-xs text-muted-foreground">{followUp.stage}</span>
-      </div>
+      <span className="text-xs text-muted-foreground">{followUp.stage}</span>
 
       {combinedText ? (
         <div className="text-sm leading-relaxed text-foreground">

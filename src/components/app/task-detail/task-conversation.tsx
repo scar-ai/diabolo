@@ -48,7 +48,7 @@ export function TaskConversation({
           )}
         >
           <UserBubble text={task.prompt} timestamp={task.startedAt} />
-          <AgentBubble task={task} isRunning={taskIsRunning} />
+          <AgentBubble task={task} isRunning={taskIsRunning} hideStage={followUps.length > 0} />
           {followUps.map((followUp) => (
             <div key={followUp.id} className="flex flex-col gap-10">
               <UserBubble text={followUp.prompt} timestamp={followUp.startedAt} />

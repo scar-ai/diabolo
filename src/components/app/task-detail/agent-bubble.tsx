@@ -28,13 +28,23 @@ function ThinkingWave() {
   );
 }
 
-export function AgentBubble({ task, isRunning }: { task: TaskData; isRunning: boolean }) {
+export function AgentBubble({
+  task,
+  isRunning,
+  hideStage,
+}: {
+  task: TaskData;
+  isRunning: boolean;
+  hideStage?: boolean;
+}) {
   const [logsOpen, setLogsOpen] = useState(false);
   const combinedText = task.combinedAgentText;
 
   return (
     <div className="flex w-full flex-col gap-3">
-      {task.stage ? <span className="text-xs text-muted-foreground">{task.stage}</span> : null}
+      {task.stage && !hideStage ? (
+        <span className="text-xs text-muted-foreground">{task.stage}</span>
+      ) : null}
 
       {combinedText ? (
         <div className="text-sm leading-relaxed text-foreground">
