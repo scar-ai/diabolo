@@ -1,0 +1,472 @@
+import { env } from "@/env/server";
+import {
+  createPullRequestCommentForSignedInGithubRepo,
+  createPullRequestForSignedInGithubRepo,
+  getGithubAuthenticatedRemoteUrl,
+  getSignedInGithubAccessToken,
+  getSignedInGithubRepo,
+  getSignedInGithubViewer,
+} from "@/lib/github/server";
+import { buildOpenCodeConfigContent, ensureOpenCodeConfig } from "@/lib/opencode/config";
+import { didGitMetadataGenerationTimeout, generateGitMetadata } from "@/lib/opencode/git-metadata";
+import { buildOpenCodePrompt, buildOpenCodeRunCommand } from "@/lib/sandbox/opencode";
+import {
+  appendAgentMessage,
+  appendFollowUpAgentMessage,
+  appendFollowUpLog,
+  appendJobLog,
+  jobs,
+  requireJob,
+  updateFollowUp,
+  updateJob,
+} from "@/lib/sandbox/state";
+import { isFrontendTaskPrompt, type SandboxTaskInput } from "@/lib/sandbox/task";
+import type { SandboxProvider, SandboxSession } from "@/lib/sandbox/types";
+import { SandboxWorkspace } from "@/lib/sandbox/workspace";
+
+const read = (value: string) => value.trim();
+const escape = (value: string) => value.replace(/'/g, `'\\''`);
+
+const daytonaEnv = () => ({
+  DAYTONA_API_KEY: env.DAYTONA_API_KEY || "",
+  ...(env.DAYTONA_API_URL ? { DAYTONA_API_URL: env.DAYTONA_API_URL } : {}),
+  ...(env.DAYTONA_TARGET ? { DAYTONA_TARGET: env.DAYTONA_TARGET } : {}),
+});
+
+const run = async (
+  sandbox: SandboxSession,
+  jobId: string,
+  command: string,
+  cwd?: string,
+  envVars?: Record<string, string>,
+  timeout = 0,
+  options?: {
+    followUpId?: string;
+  },
+) => {
+  const response = await sandbox.executeCommand(command, {
+    cwd,
+    envVars,
+    timeoutSeconds: timeout,
+  });
+
+  if (response.output) {
+    if (options?.followUpId) appendFollowUpLog(jobId, options.followUpId, `${response.output}\n`);
+    else appendJobLog(jobId, `${response.output}\n`);
+  }
+
+  if (response.exitCode !== 0) {
+    throw new Error(read(response.output) || `Command failed with exit code ${response.exitCode}.`);
+  }
+
+  return response;
+};
+
+const parse = (jobId: string, output: string, followUpId?: string) => {
+  for (const line of output.split("\n")) {
+    const trimmed = line.trim();
+
+    if (!trimmed) continue;
+
+    try {
+      const event = JSON.parse(trimmed);
+
+      if (event.type !== "text" || !event.part?.text) continue;
+
+      if (followUpId) {
+        appendFollowUpAgentMessage(
+          jobId,
+          followUpId,
+          event.part.text,
+          event.timestamp ?? Date.now(),
+        );
+        continue;
+      }
+
+      appendAgentMessage(jobId, event.part.text, event.timestamp ?? Date.now());
+    } catch {}
+  }
+};
+
+export namespace SandboxRun {
+  export const destroy = async (
+    jobId: string,
+    provider: SandboxProvider,
+    stage?: string,
+    userId?: string,
+  ) => SandboxWorkspace.destroy(provider, requireJob(jobId, userId), updateJob, { stage });
+
+  export const task = async (
+    jobId: string,
+    input: SandboxTaskInput,
+    provider: SandboxProvider,
+    setupTools?: string,
+  ) => {
+    try {
+      const [repo, githubAccessToken, viewer, authenticatedRemoteUrl] = await Promise.all([
+        getSignedInGithubRepo(input.repoId),
+        getSignedInGithubAccessToken(),
+        getSignedInGithubViewer(),
+        getGithubAuthenticatedRemoteUrl(input.repoId),
+      ]);
+      const openCode = ensureOpenCodeConfig();
+
+      if (!repo) {
+        throw new Error("Unknown repository selection.");
+      }
+
+      updateJob(jobId, {
+        repoName: repo.fullName,
+        repoUrl: repo.htmlUrl,
+        status: "running",
+      });
+
+      const sourceBranch =
+        jobs.get(jobId)?.sourceBranch || input.sourceBranch.trim() || repo.defaultBranch;
+      const enableDaytonaTools = isFrontendTaskPrompt(input.prompt);
+      const prepared = await SandboxWorkspace.prepare({
+        authenticatedRemoteUrl,
+        branch: sourceBranch,
+        daytonaEnv: daytonaEnv(),
+        enableDaytonaTools,
+        githubAccessToken,
+        jobId,
+        provider,
+        repoName: repo.name,
+        repoOwnerLogin: repo.ownerLogin,
+        repoUrl: repo.cloneUrl,
+        run,
+        setupTools: enableDaytonaTools ? setupTools : undefined,
+        update: updateJob,
+        viewer,
+      });
+
+      updateJob(jobId, {
+        stage: "Running OpenCode task",
+      });
+
+      const prompt = buildOpenCodePrompt(input.prompt, {
+        enableDaytonaTools,
+        sandboxId: prepared.sandbox.id,
+      });
+      const response = await run(
+        prepared.sandbox,
+        jobId,
+        buildOpenCodeRunCommand(openCode.model, prompt, {
+          agent: enableDaytonaTools ? "frontend" : undefined,
+        }),
+        prepared.sandboxPath,
+        {
+          OPENROUTER_API_KEY: openCode.apiKey,
+          OPENCODE_CONFIG_CONTENT: buildOpenCodeConfigContent(openCode.model, {
+            enableDaytonaTools,
+          }),
+          ...(enableDaytonaTools
+            ? {
+                DAYTONA_API_KEY: env.DAYTONA_API_KEY || "",
+                DAYTONA_SANDBOX_ID: prepared.sandbox.id,
+                ...(env.DAYTONA_API_URL ? { DAYTONA_API_URL: env.DAYTONA_API_URL } : {}),
+                ...(env.DAYTONA_TARGET ? { DAYTONA_TARGET: env.DAYTONA_TARGET } : {}),
+              }
+            : {}),
+        },
+        3600,
+      );
+
+      parse(jobId, response.output);
+
+      updateJob(jobId, {
+        stage: "Checking generated changes",
+      });
+
+      const changes = await run(
+        prepared.sandbox,
+        jobId,
+        "git status --porcelain",
+        prepared.sandboxPath,
+        undefined,
+        60,
+      );
+
+      if (!read(changes.output)) {
+        throw new Error("OpenCode finished without producing repository changes.");
+      }
+
+      updateJob(jobId, {
+        stage: "Collecting change summary",
+      });
+
+      const [diffSummary, changedFiles] = await Promise.all([
+        run(
+          prepared.sandbox,
+          jobId,
+          "git diff --stat --summary",
+          prepared.sandboxPath,
+          undefined,
+          60,
+        ),
+        run(prepared.sandbox, jobId, "git status --short", prepared.sandboxPath, undefined, 60),
+      ]);
+
+      updateJob(jobId, {
+        stage: "Generating branch, pull request, and comment metadata",
+      });
+
+      const started = Date.now();
+      const metadata = await generateGitMetadata(
+        {
+          baseBranch: sourceBranch,
+          changedFiles: changedFiles.output,
+          diffSummary: diffSummary.output,
+          repoFullName: repo.fullName,
+          userPrompt: input.prompt,
+        },
+        openCode.apiKey,
+        openCode.model,
+      );
+
+      if (didGitMetadataGenerationTimeout(started)) {
+        appendJobLog(
+          jobId,
+          "Git metadata generation timed out; using fallback branch, commit, and PR metadata.\n",
+        );
+      }
+
+      updateJob(jobId, {
+        branchName: metadata.branchName,
+        stage: "Committing and pushing branch",
+      });
+
+      await run(
+        prepared.sandbox,
+        jobId,
+        [
+          `git checkout -b '${escape(metadata.branchName)}'`,
+          "git add -A",
+          `git -c core.hooksPath=/dev/null commit --no-verify -m '${escape(metadata.commitTitle)}'`,
+          `GIT_TERMINAL_PROMPT=0 git push --porcelain -u origin '${escape(metadata.branchName)}'`,
+        ].join("\n"),
+        prepared.sandboxPath,
+        undefined,
+        900,
+      );
+
+      updateJob(jobId, {
+        stage: "Opening pull request",
+      });
+
+      const pr = await createPullRequestForSignedInGithubRepo({
+        base: sourceBranch,
+        body: metadata.prBody,
+        head: metadata.branchName,
+        repoId: input.repoId,
+        title: metadata.prTitle,
+      });
+
+      if (metadata.prComment.trim()) {
+        updateJob(jobId, {
+          stage: "Posting pull request comment",
+        });
+
+        try {
+          await createPullRequestCommentForSignedInGithubRepo({
+            body: metadata.prComment,
+            prNumber: pr.number,
+            repoId: input.repoId,
+          });
+        } catch (err) {
+          appendJobLog(
+            jobId,
+            `Failed to post pull request comment: ${provider.formatError(err)}\n`,
+          );
+        }
+      }
+
+      updateJob(jobId, {
+        completedAt: new Date().toISOString(),
+        prNumber: pr.number,
+        prUrl: pr.url,
+        stage: "Task completed",
+        status: "succeeded",
+      });
+    } catch (err) {
+      updateJob(jobId, {
+        completedAt: new Date().toISOString(),
+        error: provider.formatError(err),
+        stage: "Task failed",
+        status: "failed",
+      });
+    } finally {
+      const current = jobs.get(jobId);
+
+      if (current && current.status !== "failed" && current.status !== "succeeded") {
+        updateJob(jobId, {
+          completedAt: new Date().toISOString(),
+          stage: "Task completed",
+          status: "succeeded",
+        });
+      }
+
+      if (input.quickTask) {
+        const stage =
+          jobs.get(jobId)?.status === "failed"
+            ? "Quick task failed; sandbox destroyed"
+            : "Quick task completed; sandbox destroyed";
+
+        try {
+          await SandboxWorkspace.destroy(provider, requireJob(jobId), updateJob, { stage });
+        } catch (err) {
+          appendJobLog(
+            jobId,
+            `Failed to destroy quick task sandbox: ${provider.formatError(err)}\n`,
+          );
+        }
+      }
+    }
+  };
+
+  export const followUp = async (
+    jobId: string,
+    prompt: string,
+    provider: SandboxProvider,
+    setupTools?: string,
+    userId?: string,
+  ) => {
+    const openCode = ensureOpenCodeConfig();
+    const followUpId = crypto.randomUUID();
+    const startedAt = new Date().toISOString();
+    const trimmedPrompt = prompt.trim();
+    const enableDaytonaTools = isFrontendTaskPrompt(trimmedPrompt);
+    const job = requireJob(jobId, userId);
+
+    updateJob(jobId, {
+      completedAt: undefined,
+      error: undefined,
+      followUpHistory: [
+        ...job.followUpHistory,
+        {
+          id: followUpId,
+          prompt: trimmedPrompt,
+          responseMessages: [],
+          stage: "Running follow-up task",
+          startedAt,
+          status: "running",
+        },
+      ],
+      stage: "Running follow-up task",
+      status: "running",
+    });
+
+    try {
+      const [viewer, githubAccessToken, repo, authenticatedRemoteUrl] = await Promise.all([
+        getSignedInGithubViewer(),
+        getSignedInGithubAccessToken(),
+        getSignedInGithubRepo(job.repoId),
+        getGithubAuthenticatedRemoteUrl(job.repoId),
+      ]);
+
+      if (!repo) {
+        throw new Error("Unknown repository selection.");
+      }
+
+      const prepared = await SandboxWorkspace.getOrCreateFollowUp({
+        authenticatedRemoteUrl,
+        daytonaEnv: daytonaEnv(),
+        enableDaytonaTools,
+        followUpId,
+        githubAccessToken,
+        job,
+        provider,
+        repo,
+        run,
+        setupTools: enableDaytonaTools ? setupTools : undefined,
+        update: updateJob,
+        updateFollowUp,
+        viewer,
+      });
+
+      if (!prepared.sandboxPath) {
+        throw new Error("No sandbox workspace available for follow-up.");
+      }
+
+      if (enableDaytonaTools && setupTools) {
+        updateJob(jobId, {
+          stage: "Preparing Daytona custom tools",
+        });
+        updateFollowUp(jobId, followUpId, (entry) => ({
+          ...entry,
+          stage: "Preparing Daytona custom tools",
+        }));
+
+        await run(prepared.sandbox, jobId, setupTools, prepared.sandboxPath, daytonaEnv(), 900, {
+          followUpId,
+        });
+      }
+
+      updateJob(jobId, {
+        stage: "Running follow-up task",
+      });
+      updateFollowUp(jobId, followUpId, (entry) => ({
+        ...entry,
+        stage: "Running follow-up task",
+      }));
+
+      const followUpPrompt = buildOpenCodePrompt(prompt, {
+        enableDaytonaTools,
+        sandboxId: prepared.sandbox.id,
+      });
+      const response = await run(
+        prepared.sandbox,
+        jobId,
+        buildOpenCodeRunCommand(openCode.model, followUpPrompt, {
+          agent: enableDaytonaTools ? "frontend" : undefined,
+        }),
+        prepared.sandboxPath,
+        {
+          OPENROUTER_API_KEY: openCode.apiKey,
+          OPENCODE_CONFIG_CONTENT: buildOpenCodeConfigContent(openCode.model, {
+            enableDaytonaTools,
+          }),
+          ...(enableDaytonaTools
+            ? {
+                DAYTONA_API_KEY: env.DAYTONA_API_KEY || "",
+                DAYTONA_SANDBOX_ID: prepared.sandbox.id,
+                ...(env.DAYTONA_API_URL ? { DAYTONA_API_URL: env.DAYTONA_API_URL } : {}),
+                ...(env.DAYTONA_TARGET ? { DAYTONA_TARGET: env.DAYTONA_TARGET } : {}),
+              }
+            : {}),
+        },
+        3600,
+        { followUpId },
+      );
+
+      parse(jobId, response.output, followUpId);
+
+      updateJob(jobId, {
+        completedAt: new Date().toISOString(),
+        stage: "Follow-up completed",
+        status: "succeeded",
+      });
+      updateFollowUp(jobId, followUpId, (entry) => ({
+        ...entry,
+        completedAt: new Date().toISOString(),
+        stage: "Follow-up completed",
+        status: "succeeded",
+      }));
+    } catch (err) {
+      updateJob(jobId, {
+        completedAt: new Date().toISOString(),
+        error: provider.formatError(err),
+        stage: "Follow-up failed",
+        status: "failed",
+      });
+      updateFollowUp(jobId, followUpId, (entry) => ({
+        ...entry,
+        completedAt: new Date().toISOString(),
+        error: provider.formatError(err),
+        stage: "Follow-up failed",
+        status: "failed",
+      }));
+    }
+  };
+}
