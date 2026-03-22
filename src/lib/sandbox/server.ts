@@ -11,184 +11,34 @@ import {
 import { buildOpenCodeConfigContent, ensureOpenCodeConfig } from "@/lib/opencode/config";
 import { didGitMetadataGenerationTimeout, generateGitMetadata } from "@/lib/opencode/git-metadata";
 import { getSandboxProvider } from "@/lib/sandbox/daytona-provider";
+import {
+  buildOpenCodePrompt,
+  buildOpenCodeRunCommand,
+  opencodeInstallCommand,
+} from "@/lib/sandbox/opencode";
+import {
+  appendAgentMessage,
+  appendFollowUpAgentMessage,
+  appendFollowUpLog,
+  appendJobLog,
+  jobs,
+  requireJob,
+  updateFollowUp,
+  updateJob,
+} from "@/lib/sandbox/state";
+import {
+  isFrontendTaskPrompt,
+  type SandboxTaskInput,
+  type SandboxTaskJob,
+} from "@/lib/sandbox/task";
 import type { SandboxSession } from "@/lib/sandbox/types";
-
-type SandboxTaskInput = {
-  prompt: string;
-  quickTask: boolean;
-  repoId: string;
-  sourceBranch: string;
-};
-
-type SandboxTaskStatus = "queued" | "running" | "succeeded" | "failed";
-
-export type AgentMessage = {
-  text: string;
-  timestamp: number;
-};
-
-export type FollowUpEntry = {
-  completedAt?: string;
-  error?: string;
-  id: string;
-  logs?: string;
-  prompt: string;
-  responseMessages: AgentMessage[];
-  stage: string;
-  startedAt: string;
-  status: SandboxTaskStatus;
-};
-
-export type SandboxTaskJob = {
-  agentMessages: AgentMessage[];
-  branchName?: string;
-  sandboxPath?: string;
-  completedAt?: string;
-  error?: string;
-  followUpHistory: FollowUpEntry[];
-  id: string;
-  logs?: string;
-  prNumber?: number;
-  prUrl?: string;
-  prompt: string;
-  quickTask: boolean;
-  repoId: string;
-  repoName?: string;
-  repoUrl?: string;
-  sourceBranch: string;
-  userId: string;
-  sandboxId?: string;
-  sandboxName?: string;
-  stage: string;
-  startedAt: string;
-  status: SandboxTaskStatus;
-};
-
-const jobs = new Map<string, SandboxTaskJob>();
-const MAX_LOG_LENGTH = 16_000;
-const SANDBOX_TOOL_PATH_EXPORT =
-  'export PATH="$HOME/.local/bin:$HOME/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/bin:$(npm config get prefix)/bin:$PATH"';
-const OPENCODE_INSTALL_COMMAND = [
-  SANDBOX_TOOL_PATH_EXPORT,
-  "if ! command -v opencode >/dev/null 2>&1; then npm install -g opencode-ai; fi",
-  "opencode --version",
-].join("\n");
 const sandboxProvider = getSandboxProvider();
 
 const readCommandOutput = (value: string) => value.trim();
 const makeJobId = () => `tk-${crypto.randomUUID()}`;
-
-const MAX_AGENT_MESSAGES = 200;
-
-const appendJobLog = (jobId: string, chunk: string) => {
-  const job = jobs.get(jobId);
-
-  if (!job || !chunk) {
-    return;
-  }
-
-  const nextLogs = `${job.logs || ""}${chunk}`.slice(-MAX_LOG_LENGTH);
-  jobs.set(jobId, {
-    ...job,
-    logs: nextLogs,
-  });
-};
-
-const updateFollowUpEntry = (
-  jobId: string,
-  followUpId: string,
-  updater: (entry: FollowUpEntry) => FollowUpEntry,
-) => {
-  const job = jobs.get(jobId);
-
-  if (!job) {
-    return;
-  }
-
-  let found = false;
-  const followUpHistory = job.followUpHistory.map((entry) => {
-    if (entry.id !== followUpId) {
-      return entry;
-    }
-
-    found = true;
-    return updater(entry);
-  });
-
-  if (!found) {
-    return;
-  }
-
-  jobs.set(jobId, {
-    ...job,
-    followUpHistory,
-  });
-};
-
-const appendFollowUpLog = (jobId: string, followUpId: string, chunk: string) => {
-  if (!chunk) {
-    return;
-  }
-
-  updateFollowUpEntry(jobId, followUpId, (entry) => ({
-    ...entry,
-    logs: `${entry.logs || ""}${chunk}`.slice(-MAX_LOG_LENGTH),
-  }));
-};
-
-const appendAgentMessage = (jobId: string, text: string, timestamp: number) => {
-  const job = jobs.get(jobId);
-
-  if (!job || !text.trim()) {
-    return;
-  }
-
-  const messages = [...job.agentMessages, { text: text.trim(), timestamp }].slice(
-    -MAX_AGENT_MESSAGES,
-  );
-  jobs.set(jobId, { ...job, agentMessages: messages });
-};
-
-const appendFollowUpAgentMessage = (
-  jobId: string,
-  followUpId: string,
-  text: string,
-  timestamp: number,
-) => {
-  if (!text.trim()) {
-    return;
-  }
-
-  updateFollowUpEntry(jobId, followUpId, (entry) => ({
-    ...entry,
-    responseMessages: [...entry.responseMessages, { text: text.trim(), timestamp }].slice(
-      -MAX_AGENT_MESSAGES,
-    ),
-  }));
-};
-
-const updateJob = (jobId: string, patch: Partial<SandboxTaskJob>) => {
-  const job = jobs.get(jobId);
-
-  if (!job) {
-    return;
-  }
-
-  jobs.set(jobId, {
-    ...job,
-    ...patch,
-  });
-};
-
-const requireJob = (jobId: string, userId?: string) => {
-  const job = jobs.get(jobId);
-
-  if (!job || (userId && job.userId !== userId)) {
-    throw new Error("Task not found.");
-  }
-
-  return job;
-};
+const SANDBOX_TOOL_PATH_EXPORT =
+  'export PATH="$HOME/.local/bin:$HOME/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/bin:$(npm config get prefix)/bin:$PATH"';
+const escapeForSingleQuotedShell = (value: string) => value.replace(/'/g, `'\\''`);
 
 const runSandboxCommand = async (
   sandbox: SandboxSession,
@@ -259,11 +109,6 @@ const parseOpenCodeJsonOutputForTarget = (jobId: string, output: string, followU
     }
   }
 };
-
-const FRONTEND_TASK_PATTERN =
-  /\b(frontend|ui|ux|browser|screenshot|screen shot|visual|css|tailwind|layout|responsive|component|shadcn|page|modal|dialog|dropdown|form|button|input|navbar|sidebar|header|footer|computer use|computer-use|desktop|gui|click|type|typing|keyboard|mouse|preview|daytona mcp|use daytona|daytona tool|sandbox browser|open the browser|open browser|checkout the file|check out the file)\b/i;
-
-const isFrontendTaskPrompt = (prompt: string) => FRONTEND_TASK_PATTERN.test(prompt);
 
 const buildDaytonaCustomToolContent = () =>
   String.raw`import { mkdir, writeFile } from "node:fs/promises";
@@ -718,51 +563,6 @@ const buildDaytonaCustomToolSetupCommand = () => {
   ].join("\n");
 };
 
-const buildOpenCodePrompt = (
-  userPrompt: string,
-  options?: {
-    enableDaytonaTools?: boolean;
-    sandboxId?: string;
-  },
-) =>
-  [
-    "You are working inside a cloned GitHub repository.",
-    "Complete the user's task fully before you stop.",
-    "Inspect the codebase first, make the required changes, and run the relevant verification commands.",
-    "Fix any issues you find during verification before finishing.",
-    "Do not create commits, branches, or pull requests yourself.",
-    "Leave the repository with uncommitted file changes only.",
-    ...(options?.enableDaytonaTools
-      ? [
-          "",
-          "Frontend validation instructions:",
-          "Use the Daytona custom tools for preview, browser automation, screenshots, and computer use when the task touches frontend behavior.",
-          "If the user explicitly asks for computer use, the desktop, the browser, screenshots, clicking, typing, preview links, or similar interactive actions, you must use the Daytona custom tools instead of relying only on shell inspection.",
-          options.sandboxId
-            ? `The current Daytona sandbox id is ${options.sandboxId}. Reuse this sandbox for Daytona custom tools instead of creating a different one unless the task requires it.`
-            : "Use the current sandbox for preview and computer-use actions whenever possible.",
-          "Key tools available include daytona_preview, daytona_open_preview, daytona_open_url, daytona_display_info, daytona_display_windows, daytona_screenshot, daytona_mouse_click, daytona_mouse_drag, daytona_mouse_move, daytona_mouse_scroll, daytona_keyboard_type, daytona_keyboard_press, and daytona_keyboard_hotkey.",
-          "If you need to verify UI behavior, start the app server, expose the right port with daytona_open_preview or daytona_preview, interact through Daytona computer use, and capture screenshots before finishing.",
-        ]
-      : []),
-    "",
-    "User task:",
-    userPrompt.trim(),
-  ].join("\n");
-
-const escapeForSingleQuotedShell = (value: string) => value.replace(/'/g, `'\\''`);
-
-const buildOpenCodeRunCommand = (
-  model: string,
-  prompt: string,
-  options?: {
-    agent?: string;
-  },
-) =>
-  [
-    SANDBOX_TOOL_PATH_EXPORT,
-    `opencode run --format json --model '${escapeForSingleQuotedShell(model)}'${options?.agent ? ` --agent '${escapeForSingleQuotedShell(options.agent)}'` : ""} "$(cat <<'EOF'\n${prompt}\nEOF\n)"`,
-  ].join("\n");
 const destroySandboxResources = async (
   jobId: string,
   options?: {
@@ -845,7 +645,7 @@ const prepareSandboxWorkspace = async ({
     `git remote set-url origin '${escapeForSingleQuotedShell(authenticatedRemoteUrl)}'`,
     `git config user.name '${escapeForSingleQuotedShell(viewer.name)}'`,
     `git config user.email '${escapeForSingleQuotedShell(viewer.email)}'`,
-    OPENCODE_INSTALL_COMMAND,
+    opencodeInstallCommand,
   ];
 
   if (enableDaytonaTools) {
@@ -897,7 +697,7 @@ const markFollowUpRecreation = (jobId: string, followUpId: string) => {
   updateJob(jobId, {
     stage: "Recreating sandbox for follow-up",
   });
-  updateFollowUpEntry(jobId, followUpId, (entry) => ({
+  updateFollowUp(jobId, followUpId, (entry) => ({
     ...entry,
     stage: "Recreating sandbox for follow-up",
   }));
@@ -1285,7 +1085,7 @@ export const runSandboxTaskFollowUp = async (jobId: string, prompt: string, user
       updateJob(jobId, {
         stage: "Preparing Daytona custom tools",
       });
-      updateFollowUpEntry(jobId, followUpId, (entry) => ({
+      updateFollowUp(jobId, followUpId, (entry) => ({
         ...entry,
         stage: "Preparing Daytona custom tools",
       }));
@@ -1308,7 +1108,7 @@ export const runSandboxTaskFollowUp = async (jobId: string, prompt: string, user
     updateJob(jobId, {
       stage: "Running follow-up task",
     });
-    updateFollowUpEntry(jobId, followUpId, (entry) => ({
+    updateFollowUp(jobId, followUpId, (entry) => ({
       ...entry,
       stage: "Running follow-up task",
     }));
@@ -1349,7 +1149,7 @@ export const runSandboxTaskFollowUp = async (jobId: string, prompt: string, user
       stage: "Follow-up completed",
       status: "succeeded",
     });
-    updateFollowUpEntry(jobId, followUpId, (entry) => ({
+    updateFollowUp(jobId, followUpId, (entry) => ({
       ...entry,
       completedAt: new Date().toISOString(),
       stage: "Follow-up completed",
@@ -1362,7 +1162,7 @@ export const runSandboxTaskFollowUp = async (jobId: string, prompt: string, user
       stage: "Follow-up failed",
       status: "failed",
     });
-    updateFollowUpEntry(jobId, followUpId, (entry) => ({
+    updateFollowUp(jobId, followUpId, (entry) => ({
       ...entry,
       completedAt: new Date().toISOString(),
       error: sandboxProvider.formatError(error),
