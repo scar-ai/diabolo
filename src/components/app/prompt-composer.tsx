@@ -69,7 +69,7 @@ function PromptComposer({
 
       {/* Tray — sits behind the shell with negative top margin */}
       {footerLeft || note ? (
-        <div className="dock-tray relative z-0 -mt-3.5 overflow-hidden rounded-xl rounded-t-none border border-border/30 px-3 pt-5 pb-2">
+        <div className="dock-tray relative z-0 -mt-3.5 overflow-hidden rounded-xl rounded-t-none border border-white/20 px-3 pt-5 pb-2">
           {footerLeft ? <div className="flex items-center gap-1.5">{footerLeft}</div> : null}
           {note ? <p className="mt-1 text-xs text-muted-foreground/60">{note}</p> : null}
         </div>
