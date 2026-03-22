@@ -180,3 +180,17 @@
 .dark .dock-tray {
   background-color: #101010;
 }
+
+/* Thinking wave — opacity ripple across letters */
+@keyframes wave {
+  0%,
+  100% {
+    opacity: 0.25;
+  }
+  30% {
+    opacity: 1;
+  }
+  60% {
+    opacity: 0.25;
+  }
+}

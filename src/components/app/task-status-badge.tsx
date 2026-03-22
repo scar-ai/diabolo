@@ -1,4 +1,4 @@
-import { CheckCircle2Icon, CircleDotIcon, LoaderIcon, XCircleIcon } from "lucide-react";
+import { CheckCircle2Icon, CircleDotIcon, XCircleIcon } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
@@ -11,7 +11,7 @@ const statusConfig = {
   },
   running: {
     label: "Running",
-    icon: LoaderIcon,
+    icon: CircleDotIcon,
     variant: "info" as const,
   },
   succeeded: {
@@ -31,11 +31,9 @@ export type TaskStatus = keyof typeof statusConfig;
 export function TaskStatusBadge({ status, className }: { className?: string; status: string }) {
   const config = status in statusConfig ? statusConfig[status as TaskStatus] : statusConfig.queued;
   const StatusIcon = config.icon;
-  const isSpinning = status === "running";
-
   return (
     <Badge variant={config.variant} size="sm" className={cn("gap-1", className)}>
-      <StatusIcon className={`size-3 ${isSpinning ? "animate-spin" : ""}`} aria-hidden="true" />
+      <StatusIcon className="size-3" aria-hidden="true" />
       {config.label}
     </Badge>
   );

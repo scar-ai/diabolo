@@ -3,16 +3,37 @@ import {
   ChevronRightIcon,
   ExternalLinkIcon,
   GitPullRequestIcon,
-  LoaderIcon,
   TerminalIcon,
 } from "lucide-react";
 import { useState } from "react";
 
 import { Markdown } from "@/components/app/markdown";
-import { TaskStatusBadge } from "@/components/app/task-status-badge";
+import { cn } from "@/lib/utils";
 
 import { parseAgentMessages } from "./parsers";
 import type { TaskData } from "./types";
+
+const THINKING_TEXT = "Thinking...";
+const WAVE_CHARS = THINKING_TEXT.split("");
+
+function ThinkingWave() {
+  return (
+    <span className="text-sm font-medium" aria-label="Thinking">
+      {WAVE_CHARS.map((char, i) => (
+        <span
+          key={i}
+          className={cn(
+            "inline-block animate-[wave_2.2s_ease-in-out_infinite] text-white",
+            char === " " && "w-1",
+          )}
+          style={{ animationDelay: `${i * 0.08}s` }}
+        >
+          {char}
+        </span>
+      ))}
+    </span>
+  );
+}
 
 export function AgentBubble({ task, isRunning }: { task: TaskData; isRunning: boolean }) {
   const [logsOpen, setLogsOpen] = useState(false);
@@ -21,20 +42,14 @@ export function AgentBubble({ task, isRunning }: { task: TaskData; isRunning: bo
 
   return (
     <div className="flex w-full flex-col gap-3">
-      <div className="flex items-center gap-2">
-        <TaskStatusBadge status={task.status} />
-        <span className="text-xs text-muted-foreground">{task.stage}</span>
-      </div>
+      {task.stage ? <span className="text-xs text-muted-foreground">{task.stage}</span> : null}
 
       {combinedText ? (
         <div className="text-sm leading-relaxed text-foreground">
           <Markdown content={combinedText} />
         </div>
       ) : isRunning ? (
-        <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
-          <LoaderIcon className="size-3.5 animate-spin" />
-          <span>Thinking...</span>
-        </div>
+        <ThinkingWave />
       ) : null}
 
       {task.error ? (
