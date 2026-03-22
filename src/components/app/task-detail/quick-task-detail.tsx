@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
-import { formatTaskDate, parseAgentMessages } from "./parsers";
+import { formatTaskDate } from "./parsers";
 import type { TaskData } from "./types";
 
 export function QuickTaskDetail({
@@ -18,11 +18,7 @@ export function QuickTaskDetail({
   onStop: () => void;
   task: TaskData;
 }) {
-  const agentMessages = parseAgentMessages(task.agentMessages);
-  const responseText = agentMessages
-    .map((message) => message.text)
-    .join("\n\n")
-    .trim();
+  const responseText = task.combinedAgentText;
   const isRunning = task.status === "queued" || task.status === "running";
 
   return (
@@ -143,7 +139,7 @@ function ReadOnlySection({
       </CardHeader>
       <CardContent>
         <div
-          className={`max-h-[360px] overflow-auto rounded-xl border border-border/70 px-4 py-3 text-sm whitespace-pre-wrap ${
+          className={`max-h-90 overflow-auto rounded-xl border border-border/70 px-4 py-3 text-sm whitespace-pre-wrap ${
             mono
               ? "bg-[#0a0a0a] font-mono text-[11px] leading-relaxed text-emerald-400"
               : "bg-muted/20"

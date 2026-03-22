@@ -49,7 +49,7 @@
 }
 
 .dark {
-  --background: #101010;
+  --background: #151515;
   --foreground: rgba(255, 255, 255, 0.936);
   --card: #1c1c1c;
   --card-foreground: rgba(255, 255, 255, 0.936);
@@ -59,7 +59,7 @@
   --primary-foreground: #101010;
   --secondary: #1c1c1c;
   --secondary-foreground: rgba(255, 255, 255, 0.936);
-  --muted: #161616;
+  --muted: #0a0a0a;
   --muted-foreground: rgba(255, 255, 255, 0.618);
   --accent: #282828;
   --accent-foreground: rgba(255, 255, 255, 0.936);

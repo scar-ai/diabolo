@@ -3,16 +3,16 @@ import { and, desc, eq, inArray } from "drizzle-orm";
 import * as z from "zod";
 
 import { authMiddleware } from "@/lib/auth/middleware";
-import {
-  destroySandboxById,
-  getRepoTaskJob,
-  runFollowUpOnSandbox,
-  startRepoTaskJob,
-  terminateRepoTaskJob,
-} from "@/lib/daytona/server";
 import { db } from "@/lib/db";
 import { project, task } from "@/lib/db/schema";
 import { getSignedInGithubRepo } from "@/lib/github/server";
+import {
+  destroySandbox,
+  getSandboxTask,
+  runSandboxTaskFollowUp,
+  startSandboxTask,
+  terminateSandboxTask,
+} from "@/lib/sandbox/server";
 
 const createProjectInputSchema = z.object({
   name: z.string().min(1),
@@ -37,6 +37,22 @@ const getTaskInputSchema = z.object({
 
 const RUNNING_TASK_STATUSES = new Set(["queued", "running"]);
 
+const taskSummarySelection = {
+  branchName: task.branchName,
+  completedAt: task.completedAt,
+  createdAt: task.createdAt,
+  id: task.id,
+  projectId: task.projectId,
+  prompt: task.prompt,
+  quickTask: task.quickTask,
+  repoName: task.repoName,
+  sandboxId: task.sandboxId,
+  stage: task.stage,
+  startedAt: task.startedAt,
+  status: task.status,
+  updatedAt: task.updatedAt,
+} as const;
+
 const requireUserProject = async (projectId: string, userId: string) => {
   const row = await db
     .select()
@@ -53,7 +69,7 @@ const requireUserProject = async (projectId: string, userId: string) => {
 
 const syncTaskWithJob = async (row: typeof task.$inferSelect, userId?: string) => {
   try {
-    const job = await getRepoTaskJob(row.id, userId);
+    const job = await getSandboxTask(row.id, userId);
 
     const [updated] = await db
       .update(task)
@@ -67,7 +83,7 @@ const syncTaskWithJob = async (row: typeof task.$inferSelect, userId?: string) =
         error: job.error ?? null,
         completedAt: job.completedAt ? new Date(job.completedAt) : null,
         branchName: job.branchName ?? job.sourceBranch ?? null,
-        clonePath: job.clonePath ?? null,
+        sandboxPath: job.sandboxPath ?? null,
         sandboxId: job.sandboxId ?? null,
         sandboxName: job.sandboxName ?? null,
         repoName: job.repoName ?? null,
@@ -97,6 +113,29 @@ const syncTaskWithJob = async (row: typeof task.$inferSelect, userId?: string) =
 
     return row;
   }
+};
+
+const syncTaskSummaryWithJob = async (
+  row: Pick<typeof task.$inferSelect, keyof typeof taskSummarySelection>,
+  userId?: string,
+) => {
+  const updated = await syncTaskWithJob(row as typeof task.$inferSelect, userId);
+
+  return {
+    branchName: updated.branchName,
+    completedAt: updated.completedAt,
+    createdAt: updated.createdAt,
+    id: updated.id,
+    projectId: updated.projectId,
+    prompt: updated.prompt,
+    quickTask: updated.quickTask,
+    repoName: updated.repoName,
+    sandboxId: updated.sandboxId,
+    stage: updated.stage,
+    startedAt: updated.startedAt,
+    status: updated.status,
+    updatedAt: updated.updatedAt,
+  };
 };
 
 export const $createProject = createServerFn({ method: "POST" })
@@ -148,7 +187,7 @@ export const $createTask = createServerFn({ method: "POST" })
   .handler(async ({ context, data }) => {
     const proj = await requireUserProject(data.projectId, context.user.id);
 
-    const job = await startRepoTaskJob(
+    const job = await startSandboxTask(
       {
         prompt: data.prompt,
         quickTask: data.quickTask,
@@ -256,7 +295,7 @@ export const $terminateTask = createServerFn({ method: "POST" })
     }
 
     try {
-      await terminateRepoTaskJob(row.id);
+      await terminateSandboxTask(row.id);
     } catch {}
 
     const [updated] = await db
@@ -311,7 +350,7 @@ export const $terminateTaskById = createServerFn({ method: "POST" })
     }
 
     try {
-      await terminateRepoTaskJob(row.task.id);
+      await terminateSandboxTask(row.task.id);
     } catch {}
 
     const [updated] = await db
@@ -348,19 +387,19 @@ export const $terminateQuickTaskById = createServerFn({ method: "POST" })
     }
 
     try {
-      await terminateRepoTaskJob(row.task.id);
+      await terminateSandboxTask(row.task.id);
     } catch {}
 
     if (row.task.sandboxId) {
       try {
-        await destroySandboxById(row.task.sandboxId);
+        await destroySandbox(row.task.sandboxId);
       } catch {}
     }
 
     const [updated] = await db
       .update(task)
       .set({
-        clonePath: null,
+        sandboxPath: null,
         completedAt: new Date(),
         error: "Quick task was stopped by user.",
         sandboxId: null,
@@ -404,6 +443,36 @@ export const $listAllUserTasks = createServerFn({ method: "GET" })
     );
   });
 
+export const $listAllUserTaskSummaries = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    const userProjects = await db
+      .select({ id: project.id })
+      .from(project)
+      .where(eq(project.userId, context.user.id));
+
+    if (userProjects.length === 0) {
+      return [];
+    }
+
+    const tasks = await db
+      .select(taskSummarySelection)
+      .from(task)
+      .where(
+        inArray(
+          task.projectId,
+          userProjects.map((p) => p.id),
+        ),
+      )
+      .orderBy(desc(task.startedAt));
+
+    return Promise.all(
+      tasks.map((row) =>
+        RUNNING_TASK_STATUSES.has(row.status) ? syncTaskSummaryWithJob(row, context.user.id) : row,
+      ),
+    );
+  });
+
 const followUpInputSchema = z.object({
   prompt: z.string().min(10),
   taskId: z.string().min(1),
@@ -425,13 +494,13 @@ export const $destroyTaskSandboxById = createServerFn({ method: "POST" })
     }
 
     if (row.task.sandboxId) {
-      await destroySandboxById(row.task.sandboxId);
+      await destroySandbox(row.task.sandboxId);
     }
 
     const [updated] = await db
       .update(task)
       .set({
-        clonePath: null,
+        sandboxPath: null,
         sandboxId: null,
         sandboxName: null,
         stage: "Sandbox stopped",
@@ -466,7 +535,7 @@ export const $runFollowUpById = createServerFn({ method: "POST" })
       .set({ status: "running", stage: "Running follow-up task" })
       .where(eq(task.id, row.task.id));
 
-    await runFollowUpOnSandbox(row.task.id, data.prompt.trim(), context.user.id);
+    await runSandboxTaskFollowUp(row.task.id, data.prompt.trim(), context.user.id);
 
     const latestRow = await db
       .select()

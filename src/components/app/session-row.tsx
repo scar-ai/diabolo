@@ -17,20 +17,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { TableCell, TableRow } from "@/components/ui/table";
+import type { TaskSummaryResult } from "@/lib/project/queries";
 
-export type SessionRowData = {
-  id: string;
-  prompt: string;
-  quickTask: boolean;
-  repoName: string | null;
-  branchName: string | null;
-  stage: string;
-  startedAt: Date | string;
-  projectId: string;
-  status: string;
-};
-
-const runningStatuses = new Set(["queued", "running"]);
+export type SessionRowData = TaskSummaryResult;
 
 export function SessionRow({
   session,
@@ -46,7 +35,6 @@ export function SessionRow({
   isDeleting?: boolean;
 }) {
   const [deleteOpen, setDeleteOpen] = useState(false);
-  const isRunning = runningStatuses.has(session.status);
 
   return (
     <TableRow className="group">
@@ -72,7 +60,7 @@ export function SessionRow({
         >
           <div className="flex items-center gap-1.5">
             <span className="truncate text-sm font-medium text-foreground group-hover:underline">
-              {session.prompt.split("\n")[0]?.slice(0, 80)}
+              {session.promptPreview}
             </span>
             {session.quickTask ? (
               <Badge variant="outline" size="sm">
@@ -81,19 +69,7 @@ export function SessionRow({
             ) : null}
           </div>
           <div className="flex items-center gap-1.5 text-xs text-muted-foreground/50">
-            {session.repoName ? <span className="font-mono">{session.repoName}</span> : null}
-            {session.branchName ? (
-              <>
-                {session.repoName ? <span>·</span> : null}
-                <span className="font-mono">{session.branchName}</span>
-              </>
-            ) : null}
-            {isRunning && session.stage ? (
-              <>
-                <span>·</span>
-                <span className="italic">{session.stage}</span>
-              </>
-            ) : null}
+            {session.sessionSummaryLine ? <span>{session.sessionSummaryLine}</span> : null}
           </div>
         </Link>
       </TableCell>
@@ -101,13 +77,7 @@ export function SessionRow({
         <TaskStatusBadge status={session.status} />
       </TableCell>
       <TableCell className="w-28">
-        <span className="text-xs text-muted-foreground/60">
-          {new Date(session.startedAt).toLocaleDateString("en-US", {
-            month: "short",
-            day: "numeric",
-            year: "numeric",
-          })}
-        </span>
+        <span className="text-xs text-muted-foreground/60">{session.startedAtLabel}</span>
       </TableCell>
       <TableCell className="w-12 text-right">
         {onDelete ? (

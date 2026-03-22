@@ -18,12 +18,12 @@ import {
 import { Frame } from "@/components/ui/frame";
 import { Table, TableBody, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { $deleteTask } from "@/lib/project/functions";
-import { allUserTasksQueryOptions } from "@/lib/project/queries";
+import { allUserTaskSummariesQueryOptions, taskKeys } from "@/lib/project/queries";
 
 export const Route = createFileRoute("/_auth/app/sessions")({
   loader: async ({ context }) => {
     await context.queryClient.ensureQueryData({
-      ...allUserTasksQueryOptions(context.user.id),
+      ...allUserTaskSummariesQueryOptions(context.user.id),
       revalidateIfStale: true,
     });
   },
@@ -37,7 +37,7 @@ function SessionsPage() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const tasksQuery = useQuery({
-    ...allUserTasksQueryOptions(user.id),
+    ...allUserTaskSummariesQueryOptions(user.id),
     refetchInterval: 5_000,
   });
 
@@ -45,7 +45,7 @@ function SessionsPage() {
     mutationFn: ({ projectId, taskId }: { projectId: string; taskId: string }) =>
       deleteTask({ data: { projectId, taskId } }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["all-user-tasks"] });
+      queryClient.invalidateQueries({ queryKey: taskKeys.all });
       toast.success("Session removed.");
     },
     onError: (error) => {
@@ -58,7 +58,7 @@ function SessionsPage() {
       await Promise.all(ids.map((id) => deleteTask({ data: id })));
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["all-user-tasks"] });
+      queryClient.invalidateQueries({ queryKey: taskKeys.all });
       setSelectedIds(new Set());
       toast.success("Sessions removed.");
     },

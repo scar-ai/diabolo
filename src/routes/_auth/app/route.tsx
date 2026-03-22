@@ -36,8 +36,8 @@ function AppLayoutInner() {
   const headerSlots = useHeaderSlots();
 
   return (
-    <div className="flex min-h-svh flex-col bg-background">
-      <header className="relative flex items-center justify-between px-6 py-4">
+    <div className="flex h-svh flex-col overflow-hidden bg-background">
+      <header className="relative flex shrink-0 items-center justify-between px-6 py-4">
         <div className="flex items-center gap-3">
           <svg
             className="size-7 text-foreground"
@@ -106,7 +106,9 @@ function AppLayoutInner() {
         </div>
       </header>
 
-      <Outlet />
+      <div className="flex min-h-0 flex-1 flex-col">
+        <Outlet />
+      </div>
     </div>
   );
 }

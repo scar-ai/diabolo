@@ -9,6 +9,7 @@ function PromptComposer({
   className,
   disabled = false,
   footerLeft,
+  headerContent,
   note,
   onChange,
   onSubmit,
@@ -20,6 +21,7 @@ function PromptComposer({
   className?: string;
   disabled?: boolean;
   footerLeft?: ReactNode;
+  headerContent?: ReactNode;
   note?: ReactNode;
   onChange: (value: string) => void;
   onSubmit: () => void;
@@ -31,6 +33,12 @@ function PromptComposer({
 
   return (
     <div className={cn("flex w-full max-w-3xl flex-col", className)}>
+      {headerContent ? (
+        <div className="relative z-0 -mb-3.5 overflow-hidden rounded-xl rounded-b-none border border-emerald-500/30 bg-emerald-50 px-3 pt-2 pb-5 dark:bg-emerald-950">
+          {headerContent}
+        </div>
+      ) : null}
+
       {/* Shell — uses box-shadow for border so it overlaps tray cleanly */}
       <form
         id={formId}
@@ -69,7 +77,7 @@ function PromptComposer({
 
       {/* Tray — sits behind the shell with negative top margin */}
       {footerLeft || note ? (
-        <div className="dock-tray relative z-0 -mt-3.5 overflow-hidden rounded-xl rounded-t-none border border-white/20 px-3 pt-5 pb-2">
+        <div className="dock-tray relative z-0 -mt-3.5 overflow-hidden rounded-xl rounded-t-none border border-border px-3 pt-5 pb-2">
           {footerLeft ? <div className="flex items-center gap-1.5">{footerLeft}</div> : null}
           {note ? <p className="mt-1 text-xs text-muted-foreground/60">{note}</p> : null}
         </div>
