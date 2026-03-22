@@ -1,7 +1,7 @@
 import "@tanstack/react-start/server-only";
 import { Octokit } from "octokit";
 
-import { _getUser } from "@/lib/auth/functions";
+import { _getUser } from "@/lib/auth/functions.server";
 import { db } from "@/lib/db";
 import type { GithubRepo } from "@/lib/github/types";
 
