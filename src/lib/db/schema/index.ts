@@ -1,2 +1,2 @@
 export * from "./schema";
-export * from "./app.schema";
+export * from "@/lib/project/project.sql";

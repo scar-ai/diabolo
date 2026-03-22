@@ -7,13 +7,11 @@ import {
 } from "@daytonaio/sdk";
 
 import { env } from "@/env/server";
+import { Log } from "@/lib/log";
 
-import type {
-  CloneRepositoryOptions,
-  SandboxCommandOptions,
-  SandboxProvider,
-  SandboxSession,
-} from "./types";
+import type { Sandbox } from "./index";
+
+const log = Log.create({ ns: "daytona" });
 
 const LEGACY_UNSUPPORTED_IMAGES = new Set(["daytonaio/workspace", "daytonaio/workspace:latest"]);
 
@@ -49,10 +47,10 @@ const getDaytonaClient = () => {
   });
 };
 
-const wrapSandbox = (sandbox: Awaited<ReturnType<Daytona["create"]>>): SandboxSession => ({
+const wrapSandbox = (sandbox: Awaited<ReturnType<Daytona["create"]>>): Sandbox.Session => ({
   id: sandbox.id,
   name: sandbox.name,
-  async cloneRepository(options: CloneRepositoryOptions) {
+  async cloneRepository(options: Sandbox.CloneRepositoryOptions) {
     await sandbox.git.clone(
       options.url,
       options.targetPath,
@@ -65,7 +63,7 @@ const wrapSandbox = (sandbox: Awaited<ReturnType<Daytona["create"]>>): SandboxSe
   async delete(timeoutSeconds = 120) {
     await sandbox.delete(timeoutSeconds);
   },
-  async executeCommand(command: string, options?: SandboxCommandOptions) {
+  async executeCommand(command: string, options?: Sandbox.CommandOptions) {
     const response = await sandbox.process.executeCommand(
       command,
       options?.cwd,
@@ -105,7 +103,7 @@ export const formatDaytonaError = (error: unknown) => {
   return message;
 };
 
-export const getSandboxProvider = (): SandboxProvider => {
+export const getSandboxProvider = (): Sandbox.Provider => {
   const getWorkspace = async (id: string) => {
     const daytona = getDaytonaClient();
     return wrapSandbox(await daytona.get(id));
@@ -114,13 +112,16 @@ export const getSandboxProvider = (): SandboxProvider => {
   return {
     async createWorkspace(repoName) {
       const daytona = getDaytonaClient();
+      const name = makeSandboxName(repoName);
       const baseParams: CreateSandboxBaseParams = {
         autoDeleteInterval: 0,
         autoStopInterval: 30,
         language: CodeLanguage.TYPESCRIPT,
-        name: makeSandboxName(repoName),
+        name,
       };
       const configuredImage = getConfiguredDaytonaImage();
+
+      log.info("creating sandbox", { name, image: configuredImage ?? "default" });
 
       if (configuredImage) {
         const imageParams: CreateSandboxFromImageParams = {
