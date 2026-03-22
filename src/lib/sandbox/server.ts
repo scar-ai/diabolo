@@ -8,17 +8,19 @@ import {
   getSignedInGithubRepo,
   getSignedInGithubViewer,
 } from "@/lib/github/server";
+import { buildOpenCodeConfigContent, ensureOpenCodeConfig } from "@/lib/opencode/config";
+import { didGitMetadataGenerationTimeout, generateGitMetadata } from "@/lib/opencode/git-metadata";
 import { getSandboxProvider } from "@/lib/sandbox/daytona-provider";
 import type { SandboxSession } from "@/lib/sandbox/types";
 
-type RepoTaskInput = {
+type SandboxTaskInput = {
   prompt: string;
   quickTask: boolean;
   repoId: string;
   sourceBranch: string;
 };
 
-type RepoTaskJobStatus = "queued" | "running" | "succeeded" | "failed";
+type SandboxTaskStatus = "queued" | "running" | "succeeded" | "failed";
 
 export type AgentMessage = {
   text: string;
@@ -34,13 +36,13 @@ export type FollowUpEntry = {
   responseMessages: AgentMessage[];
   stage: string;
   startedAt: string;
-  status: RepoTaskJobStatus;
+  status: SandboxTaskStatus;
 };
 
-export type RepoTaskJob = {
+export type SandboxTaskJob = {
   agentMessages: AgentMessage[];
   branchName?: string;
-  clonePath?: string;
+  sandboxPath?: string;
   completedAt?: string;
   error?: string;
   followUpHistory: FollowUpEntry[];
@@ -59,10 +61,10 @@ export type RepoTaskJob = {
   sandboxName?: string;
   stage: string;
   startedAt: string;
-  status: RepoTaskJobStatus;
+  status: SandboxTaskStatus;
 };
 
-const jobs = new Map<string, RepoTaskJob>();
+const jobs = new Map<string, SandboxTaskJob>();
 const MAX_LOG_LENGTH = 16_000;
 const SANDBOX_TOOL_PATH_EXPORT =
   'export PATH="$HOME/.local/bin:$HOME/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/bin:$(npm config get prefix)/bin:$PATH"';
@@ -71,91 +73,10 @@ const OPENCODE_INSTALL_COMMAND = [
   "if ! command -v opencode >/dev/null 2>&1; then npm install -g opencode-ai; fi",
   "opencode --version",
 ].join("\n");
-const DEFAULT_OPENCODE_MODEL = "openrouter/openai/gpt-5-codex";
-const KNOWN_NON_OPENROUTER_PROVIDERS = new Set([
-  "amazon-bedrock",
-  "anthropic",
-  "azure",
-  "azure-openai",
-  "cerebras",
-  "deepseek",
-  "fireworks",
-  "google",
-  "google-vertex",
-  "groq",
-  "lmstudio",
-  "ollama",
-  "openai",
-  "openrouter",
-  "opencode",
-  "together",
-  "xai",
-]);
 const sandboxProvider = getSandboxProvider();
 
 const readCommandOutput = (value: string) => value.trim();
-
-const normalizeOpenRouterModel = (value: string) => {
-  const model = value.trim();
-
-  if (!model) {
-    return DEFAULT_OPENCODE_MODEL;
-  }
-
-  if (model.startsWith("openrouter/")) {
-    return model;
-  }
-
-  return `openrouter/${model}`;
-};
-
-const getConfiguredOpenCodeModel = () =>
-  normalizeOpenRouterModel(env.OPENCODE_MODEL?.trim() || DEFAULT_OPENCODE_MODEL);
-
-const ensureOpenCodeConfig = () => {
-  if (!env.OPENROUTER_API_KEY) {
-    throw new Error("OPENROUTER_API_KEY is not configured.");
-  }
-
-  return {
-    apiKey: env.OPENROUTER_API_KEY,
-    model: getConfiguredOpenCodeModel(),
-  };
-};
-
-const makeJobId = () => `repo-task-${crypto.randomUUID()}`;
-
-const sanitizeNamePart = (value: string) =>
-  value
-    .toLowerCase()
-    .replace(/[^a-z0-9-]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 40) || "repo";
-
-const makeFallbackTitle = (prompt: string) =>
-  prompt
-    .split("\n")
-    .map((line) => line.trim())
-    .find(Boolean)
-    ?.slice(0, 72) || "Apply requested changes";
-
-const makeFallbackBranchName = (prompt: string) =>
-  `diabolo/${sanitizeNamePart(makeFallbackTitle(prompt))}-${Date.now().toString(36)}`;
-
-const makeFallbackPrBody = (prompt: string) =>
-  ["Summary", "- Applies the requested repository changes.", "", "Context", prompt.trim()].join(
-    "\n",
-  );
-
-const GIT_METADATA_TIMEOUT_MS = 20_000;
-
-type GeneratedGitMetadata = {
-  branchName: string;
-  commitTitle: string;
-  prTitle: string;
-  prBody: string;
-  prComment: string;
-};
+const makeJobId = () => `tk-${crypto.randomUUID()}`;
 
 const MAX_AGENT_MESSAGES = 200;
 
@@ -246,7 +167,7 @@ const appendFollowUpAgentMessage = (
   }));
 };
 
-const updateJob = (jobId: string, patch: Partial<RepoTaskJob>) => {
+const updateJob = (jobId: string, patch: Partial<SandboxTaskJob>) => {
   const job = jobs.get(jobId);
 
   if (!job) {
@@ -829,58 +750,6 @@ const buildOpenCodePrompt = (
     userPrompt.trim(),
   ].join("\n");
 
-const getProviderScopedModelId = (model: string) => {
-  if (model.startsWith("openrouter/")) {
-    return model.slice("openrouter/".length);
-  }
-
-  return model;
-};
-
-const buildOpenCodeConfigContent = (
-  model: string,
-  options?: {
-    enableDaytonaTools?: boolean;
-  },
-) => {
-  const providerScopedModelId = getProviderScopedModelId(model);
-
-  const config: Record<string, unknown> = {
-    $schema: "https://opencode.ai/config.json",
-    model,
-    permission: {
-      bash: {
-        "*": "allow",
-      },
-      edit: "allow",
-      webfetch: "allow",
-    },
-    provider: {
-      openrouter: {
-        models: {
-          [providerScopedModelId]: {},
-        },
-        options: {},
-      },
-    },
-  };
-
-  if (options?.enableDaytonaTools) {
-    config.tools = {
-      "daytona_*": false,
-    };
-    config.agent = {
-      frontend: {
-        tools: {
-          "daytona_*": true,
-        },
-      },
-    };
-  }
-
-  return JSON.stringify(config);
-};
-
 const escapeForSingleQuotedShell = (value: string) => value.replace(/'/g, `'\\''`);
 
 const buildOpenCodeRunCommand = (
@@ -894,179 +763,6 @@ const buildOpenCodeRunCommand = (
     SANDBOX_TOOL_PATH_EXPORT,
     `opencode run --format json --model '${escapeForSingleQuotedShell(model)}'${options?.agent ? ` --agent '${escapeForSingleQuotedShell(options.agent)}'` : ""} "$(cat <<'EOF'\n${prompt}\nEOF\n)"`,
   ].join("\n");
-
-type GitMetadataContext = {
-  baseBranch: string;
-  changedFiles: string;
-  diffSummary: string;
-  repoFullName: string;
-  userPrompt: string;
-};
-
-const makeFallbackPrComment = (prompt: string) =>
-  ["Implemented the requested changes for this PR.", "", "Request context", prompt.trim()].join(
-    "\n",
-  );
-
-const getFallbackGitMetadata = (userPrompt: string): GeneratedGitMetadata => ({
-  branchName: makeFallbackBranchName(userPrompt),
-  commitTitle: makeFallbackTitle(userPrompt),
-  prBody: makeFallbackPrBody(userPrompt),
-  prComment: makeFallbackPrComment(userPrompt),
-  prTitle: makeFallbackTitle(userPrompt),
-});
-
-const tryParseJsonObject = (value: string) => {
-  const trimmed = value.trim();
-
-  if (!trimmed) {
-    return null;
-  }
-
-  const normalized = trimmed
-    .replace(/^```(?:json)?\s*/i, "")
-    .replace(/\s*```$/, "")
-    .trim();
-
-  try {
-    return JSON.parse(normalized) as Record<string, unknown>;
-  } catch {}
-
-  const firstBrace = normalized.indexOf("{");
-  const lastBrace = normalized.lastIndexOf("}");
-
-  if (firstBrace === -1 || lastBrace === -1 || lastBrace <= firstBrace) {
-    return null;
-  }
-
-  try {
-    return JSON.parse(normalized.slice(firstBrace, lastBrace + 1)) as Record<string, unknown>;
-  } catch {
-    return null;
-  }
-};
-
-const sanitizeGeneratedBranchName = (value: string, userPrompt: string) => {
-  const normalized = value
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9/-]+/g, "-")
-    .replace(/\/{2,}/g, "/")
-    .replace(/^-+|-+$/g, "")
-    .replace(/\/-+|-+\//g, "/")
-    .slice(0, 80);
-
-  return normalized || makeFallbackBranchName(userPrompt);
-};
-
-const generateGitMetadata = async (
-  context: GitMetadataContext,
-  apiKey: string,
-  model: string,
-): Promise<GeneratedGitMetadata> => {
-  const fallback = getFallbackGitMetadata(context.userPrompt);
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), GIT_METADATA_TIMEOUT_MS);
-
-  try {
-    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method: "POST",
-      signal: controller.signal,
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        messages: [
-          {
-            role: "system",
-            content: [
-              "You generate Git metadata for an automated coding task.",
-              "Return strict JSON only.",
-              "The JSON must include string fields: branchName, commitTitle, prTitle, prBody, prComment.",
-              "branchName must be lowercase and use only letters, numbers, slashes, and hyphens.",
-              "commitTitle must be a concise imperative git commit title under 72 characters.",
-              "prTitle must be concise and descriptive under 80 characters.",
-              "prBody must be valid markdown with a short summary and key changes.",
-              "prComment must be a custom PR thread comment in markdown, concise and specific to the request.",
-              "Do not mention that you are an AI or include code fences.",
-            ].join(" "),
-          },
-          {
-            role: "user",
-            content: [
-              `Repository: ${context.repoFullName}`,
-              `Base branch: ${context.baseBranch}`,
-              "",
-              "User request:",
-              context.userPrompt.trim(),
-              "",
-              "Diff summary:",
-              context.diffSummary.trim() || "No diff summary available.",
-              "",
-              "Changed files:",
-              context.changedFiles.trim() || "No changed files listed.",
-            ].join("\n"),
-          },
-        ],
-        model: getProviderScopedModelId(model),
-        temperature: 0.4,
-      }),
-    });
-
-    if (!response.ok) {
-      return fallback;
-    }
-
-    const data = (await response.json()) as {
-      choices?: Array<{
-        message?: {
-          content?: string;
-        };
-      }>;
-    };
-    const content = data.choices?.[0]?.message?.content;
-    const parsed = content ? tryParseJsonObject(content) : null;
-
-    if (!parsed) {
-      return fallback;
-    }
-
-    const branchName =
-      typeof parsed.branchName === "string"
-        ? sanitizeGeneratedBranchName(parsed.branchName, context.userPrompt)
-        : fallback.branchName;
-    const commitTitle =
-      typeof parsed.commitTitle === "string" && parsed.commitTitle.trim()
-        ? parsed.commitTitle.trim().slice(0, 72)
-        : fallback.commitTitle;
-    const prTitle =
-      typeof parsed.prTitle === "string" && parsed.prTitle.trim()
-        ? parsed.prTitle.trim().slice(0, 80)
-        : fallback.prTitle;
-    const prBody =
-      typeof parsed.prBody === "string" && parsed.prBody.trim()
-        ? parsed.prBody.trim()
-        : fallback.prBody;
-    const prComment =
-      typeof parsed.prComment === "string" && parsed.prComment.trim()
-        ? parsed.prComment.trim()
-        : fallback.prComment;
-
-    return {
-      branchName,
-      commitTitle,
-      prBody,
-      prComment,
-      prTitle,
-    };
-  } catch {
-    return fallback;
-  } finally {
-    clearTimeout(timeout);
-  }
-};
-
 const destroySandboxResources = async (
   jobId: string,
   options?: {
@@ -1085,7 +781,7 @@ const destroySandboxResources = async (
   } catch {}
 
   updateJob(jobId, {
-    clonePath: undefined,
+    sandboxPath: undefined,
     sandboxId: undefined,
     sandboxName: undefined,
     stage: options?.stage ?? "Sandbox stopped",
@@ -1129,10 +825,10 @@ const prepareSandboxWorkspace = async ({
   });
 
   const workDir = await sandbox.getWorkspaceRoot();
-  const clonePath = `${workDir.replace(/\/$/, "")}/${repoName}`;
+  const sandboxPath = `${workDir.replace(/\/$/, "")}/${repoName}`;
 
   updateJob(jobId, {
-    clonePath,
+    sandboxPath,
     stage: "Cloning repository into sandbox",
   });
 
@@ -1140,7 +836,7 @@ const prepareSandboxWorkspace = async ({
     accessToken: githubAccessToken,
     branch,
     ownerLogin: repoOwnerLogin,
-    targetPath: clonePath,
+    targetPath: sandboxPath,
     url: repoUrl,
   });
 
@@ -1157,7 +853,7 @@ const prepareSandboxWorkspace = async ({
   }
 
   updateJob(jobId, {
-    clonePath,
+    sandboxPath,
     stage: "Preparing git branch and OpenCode runtime",
   });
 
@@ -1165,7 +861,7 @@ const prepareSandboxWorkspace = async ({
     sandbox,
     jobId,
     setupCommands.join("\n"),
-    clonePath,
+    sandboxPath,
     enableDaytonaTools
       ? {
           DAYTONA_API_KEY: env.DAYTONA_API_KEY || "",
@@ -1177,10 +873,10 @@ const prepareSandboxWorkspace = async ({
   );
 
   return {
-    clonePath,
     sandbox,
     sandboxId,
     sandboxName,
+    sandboxPath,
   };
 };
 
@@ -1219,14 +915,14 @@ const getOrCreateFollowUpWorkspace = async ({
   followUpId: string;
   followUpTarget: Awaited<ReturnType<typeof getFollowUpBranch>>;
   githubAccessToken: string;
-  job: RepoTaskJob;
+  job: SandboxTaskJob;
   viewer: Awaited<ReturnType<typeof getSignedInGithubViewer>>;
 }) => {
-  if (job.sandboxId && job.clonePath) {
+  if (job.sandboxId && job.sandboxPath) {
     try {
       return {
-        clonePath: job.clonePath,
         sandbox: await sandboxProvider.getWorkspace(job.sandboxId),
+        sandboxPath: job.sandboxPath,
       };
     } catch {}
   }
@@ -1246,12 +942,12 @@ const getOrCreateFollowUpWorkspace = async ({
   });
 
   return {
-    clonePath: prepared.clonePath,
     sandbox: prepared.sandbox,
+    sandboxPath: prepared.sandboxPath,
   };
 };
 
-const runRepoTaskJob = async (jobId: string, input: RepoTaskInput) => {
+const runSandboxTaskJob = async (jobId: string, input: SandboxTaskInput) => {
   let sandbox: SandboxSession | undefined;
 
   try {
@@ -1287,7 +983,7 @@ const runRepoTaskJob = async (jobId: string, input: RepoTaskInput) => {
       viewer,
     });
     sandbox = prepared.sandbox;
-    const clonePath = prepared.clonePath;
+    const sandboxPath = prepared.sandboxPath;
 
     updateJob(jobId, {
       stage: "Running OpenCode task",
@@ -1303,7 +999,7 @@ const runRepoTaskJob = async (jobId: string, input: RepoTaskInput) => {
       buildOpenCodeRunCommand(openCode.model, openCodePrompt, {
         agent: enableDaytonaTools ? "frontend" : undefined,
       }),
-      clonePath,
+      sandboxPath,
       {
         OPENROUTER_API_KEY: openCode.apiKey,
         OPENCODE_CONFIG_CONTENT: buildOpenCodeConfigContent(openCode.model, {
@@ -1331,7 +1027,7 @@ const runRepoTaskJob = async (jobId: string, input: RepoTaskInput) => {
       sandbox,
       jobId,
       "git status --porcelain",
-      clonePath,
+      sandboxPath,
       undefined,
       60,
     );
@@ -1345,8 +1041,8 @@ const runRepoTaskJob = async (jobId: string, input: RepoTaskInput) => {
     });
 
     const [diffSummaryResult, changedFilesResult] = await Promise.all([
-      runSandboxCommand(sandbox, jobId, "git diff --stat --summary", clonePath, undefined, 60),
-      runSandboxCommand(sandbox, jobId, "git status --short", clonePath, undefined, 60),
+      runSandboxCommand(sandbox, jobId, "git diff --stat --summary", sandboxPath, undefined, 60),
+      runSandboxCommand(sandbox, jobId, "git status --short", sandboxPath, undefined, 60),
     ]);
 
     updateJob(jobId, {
@@ -1366,7 +1062,7 @@ const runRepoTaskJob = async (jobId: string, input: RepoTaskInput) => {
       openCode.model,
     );
 
-    if (Date.now() - metadataStartedAt >= GIT_METADATA_TIMEOUT_MS) {
+    if (didGitMetadataGenerationTimeout(metadataStartedAt)) {
       appendJobLog(
         jobId,
         "Git metadata generation timed out; using fallback branch, commit, and PR metadata.\n",
@@ -1387,7 +1083,7 @@ const runRepoTaskJob = async (jobId: string, input: RepoTaskInput) => {
         `git -c core.hooksPath=/dev/null commit --no-verify -m '${escapeForSingleQuotedShell(metadata.commitTitle)}'`,
         `GIT_TERMINAL_PROMPT=0 git push --porcelain -u origin '${escapeForSingleQuotedShell(metadata.branchName)}'`,
       ].join("\n"),
-      clonePath,
+      sandboxPath,
       undefined,
       900,
     );
@@ -1467,7 +1163,7 @@ const runRepoTaskJob = async (jobId: string, input: RepoTaskInput) => {
   }
 };
 
-export const startRepoTaskJob = async (input: RepoTaskInput, userId: string) => {
+export const startSandboxTask = async (input: SandboxTaskInput, userId: string) => {
   const prompt = input.prompt.trim();
 
   if (!prompt) {
@@ -1488,7 +1184,7 @@ export const startRepoTaskJob = async (input: RepoTaskInput, userId: string) => 
   const jobId = makeJobId();
   const startedAt = new Date().toISOString();
   const sourceBranch = input.sourceBranch.trim() || repo.defaultBranch;
-  const job: RepoTaskJob = {
+  const job: SandboxTaskJob = {
     agentMessages: [],
     followUpHistory: [],
     id: jobId,
@@ -1505,7 +1201,7 @@ export const startRepoTaskJob = async (input: RepoTaskInput, userId: string) => 
   jobs.set(jobId, job);
 
   queueMicrotask(() => {
-    void runRepoTaskJob(jobId, {
+    void runSandboxTaskJob(jobId, {
       prompt,
       quickTask: input.quickTask,
       repoId: input.repoId,
@@ -1516,9 +1212,9 @@ export const startRepoTaskJob = async (input: RepoTaskInput, userId: string) => 
   return job;
 };
 
-export const getRepoTaskJob = async (jobId: string, userId?: string) => requireJob(jobId, userId);
+export const getSandboxTask = async (jobId: string, userId?: string) => requireJob(jobId, userId);
 
-export const terminateRepoTaskJob = async (jobId: string) => {
+export const terminateSandboxTask = async (jobId: string) => {
   const job = jobs.get(jobId);
   if (!job) return;
 
@@ -1530,17 +1226,17 @@ export const terminateRepoTaskJob = async (jobId: string) => {
   });
 };
 
-export const destroyRepoTaskSandbox = async (jobId: string, userId?: string) => {
+export const destroyTaskSandbox = async (jobId: string, userId?: string) => {
   await destroySandboxResources(jobId, { stage: "Sandbox stopped", userId });
 };
 
-export const destroySandboxById = async (sandboxId: string) => {
+export const destroySandbox = async (sandboxId: string) => {
   try {
     await sandboxProvider.destroyWorkspace(sandboxId);
   } catch {}
 };
 
-export const runFollowUpOnSandbox = async (jobId: string, prompt: string, userId?: string) => {
+export const runSandboxTaskFollowUp = async (jobId: string, prompt: string, userId?: string) => {
   const openCode = ensureOpenCodeConfig();
   const followUpId = crypto.randomUUID();
   const startedAt = new Date().toISOString();
@@ -1572,7 +1268,7 @@ export const runFollowUpOnSandbox = async (jobId: string, prompt: string, userId
       getSignedInGithubAccessToken(),
       getFollowUpBranch(job.repoId, job.branchName),
     ]);
-    const { clonePath, sandbox } = await getOrCreateFollowUpWorkspace({
+    const { sandbox, sandboxPath } = await getOrCreateFollowUpWorkspace({
       enableDaytonaTools,
       followUpId,
       followUpTarget,
@@ -1581,7 +1277,7 @@ export const runFollowUpOnSandbox = async (jobId: string, prompt: string, userId
       viewer,
     });
 
-    if (!clonePath) {
+    if (!sandboxPath) {
       throw new Error("No sandbox workspace available for follow-up.");
     }
 
@@ -1598,7 +1294,7 @@ export const runFollowUpOnSandbox = async (jobId: string, prompt: string, userId
         sandbox,
         jobId,
         buildDaytonaCustomToolSetupCommand(),
-        clonePath,
+        sandboxPath,
         {
           DAYTONA_API_KEY: env.DAYTONA_API_KEY || "",
           ...(env.DAYTONA_API_URL ? { DAYTONA_API_URL: env.DAYTONA_API_URL } : {}),
@@ -1627,7 +1323,7 @@ export const runFollowUpOnSandbox = async (jobId: string, prompt: string, userId
       buildOpenCodeRunCommand(openCode.model, openCodePrompt, {
         agent: enableDaytonaTools ? "frontend" : undefined,
       }),
-      clonePath,
+      sandboxPath,
       {
         OPENROUTER_API_KEY: openCode.apiKey,
         OPENCODE_CONFIG_CONTENT: buildOpenCodeConfigContent(openCode.model, {

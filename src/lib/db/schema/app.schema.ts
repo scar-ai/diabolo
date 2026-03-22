@@ -38,7 +38,7 @@ export const task = pgTable(
     sandboxId: text("sandbox_id"),
     sandboxName: text("sandbox_name"),
     branchName: text("branch_name"),
-    clonePath: text("clone_path"),
+    sandboxPath: text("clone_path"),
     logs: text("logs"),
     agentMessages: text("agent_messages"),
     followUpHistory: text("follow_up_history"),
