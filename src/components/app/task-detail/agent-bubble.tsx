@@ -10,7 +10,6 @@ import { useState } from "react";
 import { Markdown } from "@/components/app/markdown";
 import { cn } from "@/lib/utils";
 
-import { parseAgentMessages } from "./parsers";
 import type { TaskData } from "./types";
 
 const THINKING_TEXT = "Thinking...";
@@ -37,8 +36,7 @@ function ThinkingWave() {
 
 export function AgentBubble({ task, isRunning }: { task: TaskData; isRunning: boolean }) {
   const [logsOpen, setLogsOpen] = useState(false);
-  const agentMessages = parseAgentMessages(task.agentMessages);
-  const combinedText = agentMessages.map((m) => m.text).join("\n\n");
+  const combinedText = task.combinedAgentText;
 
   return (
     <div className="flex w-full flex-col gap-3">
@@ -93,7 +91,7 @@ export function AgentBubble({ task, isRunning }: { task: TaskData; isRunning: bo
             )}
           </button>
           {logsOpen ? (
-            <div className="max-h-[300px] overflow-auto rounded-lg bg-[#0a0a0a] p-3 font-mono text-[11px] leading-relaxed text-emerald-400">
+            <div className="max-h-75 overflow-auto rounded-lg bg-[#0a0a0a] p-3 font-mono text-[11px] leading-relaxed text-emerald-400">
               <pre className="break-all whitespace-pre-wrap">{task.logs}</pre>
             </div>
           ) : null}

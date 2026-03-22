@@ -37,6 +37,22 @@ const getTaskInputSchema = z.object({
 
 const RUNNING_TASK_STATUSES = new Set(["queued", "running"]);
 
+const taskSummarySelection = {
+  branchName: task.branchName,
+  completedAt: task.completedAt,
+  createdAt: task.createdAt,
+  id: task.id,
+  projectId: task.projectId,
+  prompt: task.prompt,
+  quickTask: task.quickTask,
+  repoName: task.repoName,
+  sandboxId: task.sandboxId,
+  stage: task.stage,
+  startedAt: task.startedAt,
+  status: task.status,
+  updatedAt: task.updatedAt,
+} as const;
+
 const requireUserProject = async (projectId: string, userId: string) => {
   const row = await db
     .select()
@@ -97,6 +113,29 @@ const syncTaskWithJob = async (row: typeof task.$inferSelect, userId?: string) =
 
     return row;
   }
+};
+
+const syncTaskSummaryWithJob = async (
+  row: Pick<typeof task.$inferSelect, keyof typeof taskSummarySelection>,
+  userId?: string,
+) => {
+  const updated = await syncTaskWithJob(row as typeof task.$inferSelect, userId);
+
+  return {
+    branchName: updated.branchName,
+    completedAt: updated.completedAt,
+    createdAt: updated.createdAt,
+    id: updated.id,
+    projectId: updated.projectId,
+    prompt: updated.prompt,
+    quickTask: updated.quickTask,
+    repoName: updated.repoName,
+    sandboxId: updated.sandboxId,
+    stage: updated.stage,
+    startedAt: updated.startedAt,
+    status: updated.status,
+    updatedAt: updated.updatedAt,
+  };
 };
 
 export const $createProject = createServerFn({ method: "POST" })
@@ -400,6 +439,36 @@ export const $listAllUserTasks = createServerFn({ method: "GET" })
     return Promise.all(
       tasks.map((row) =>
         RUNNING_TASK_STATUSES.has(row.status) ? syncTaskWithJob(row, context.user.id) : row,
+      ),
+    );
+  });
+
+export const $listAllUserTaskSummaries = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    const userProjects = await db
+      .select({ id: project.id })
+      .from(project)
+      .where(eq(project.userId, context.user.id));
+
+    if (userProjects.length === 0) {
+      return [];
+    }
+
+    const tasks = await db
+      .select(taskSummarySelection)
+      .from(task)
+      .where(
+        inArray(
+          task.projectId,
+          userProjects.map((p) => p.id),
+        ),
+      )
+      .orderBy(desc(task.startedAt));
+
+    return Promise.all(
+      tasks.map((row) =>
+        RUNNING_TASK_STATUSES.has(row.status) ? syncTaskSummaryWithJob(row, context.user.id) : row,
       ),
     );
   });

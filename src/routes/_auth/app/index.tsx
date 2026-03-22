@@ -39,9 +39,11 @@ import { Label } from "@/components/ui/label";
 import { githubBranchesQueryOptions, githubReposQueryOptions } from "@/lib/github/queries";
 import { $createProject, $createTask } from "@/lib/project/functions";
 import {
-  allUserTasksQueryOptions,
+  allUserTaskSummariesQueryOptions,
   projectDetailQueryOptions,
+  projectKeys,
   projectsQueryOptions,
+  taskKeys,
 } from "@/lib/project/queries";
 
 export const Route = createFileRoute("/_auth/app/")({
@@ -53,7 +55,7 @@ export const Route = createFileRoute("/_auth/app/")({
         revalidateIfStale: true,
       }),
       context.queryClient.ensureQueryData({
-        ...allUserTasksQueryOptions(userId),
+        ...allUserTaskSummariesQueryOptions(userId),
         revalidateIfStale: true,
       }),
     ]);
@@ -139,7 +141,7 @@ function AppHome() {
       });
     },
     onSuccess: (project) => {
-      queryClient.invalidateQueries({ queryKey: ["projects"] });
+      queryClient.invalidateQueries({ queryKey: projectKeys.all });
       toast.success("Project created.");
       setCreateProjectOpen(false);
       setCreateProjectSearch("");
@@ -153,7 +155,7 @@ function AppHome() {
   });
 
   const recentTasksQuery = useQuery({
-    ...allUserTasksQueryOptions(user.id),
+    ...allUserTaskSummariesQueryOptions(user.id),
     refetchInterval: (query) => {
       const tasks = query.state.data ?? [];
       return tasks.some((task) => task.status === "queued" || task.status === "running")
@@ -181,7 +183,7 @@ function AppHome() {
       });
     },
     onSuccess: (newTask) => {
-      queryClient.invalidateQueries({ queryKey: ["all-user-tasks"] });
+      queryClient.invalidateQueries({ queryKey: taskKeys.all });
       toast.success("Background task started.");
       setInputValue("");
       setQuickTask(false);
@@ -256,7 +258,7 @@ function AppHome() {
               <DropdownMenu>
                 <DropdownMenuTrigger className="flex cursor-pointer items-center gap-1 rounded-lg px-2 py-1 text-sm text-muted-foreground/60 transition-colors hover:bg-accent hover:text-muted-foreground">
                   <BookMarkedIcon className="size-3.5 shrink-0" aria-hidden="true" />
-                  <span className="max-w-[160px] truncate">{projectLabel}</span>
+                  <span className="max-w-40 truncate">{projectLabel}</span>
                   <ChevronDownIcon className="size-3 shrink-0 opacity-50" aria-hidden="true" />
                 </DropdownMenuTrigger>
                 <DropdownMenuContent side="top" sideOffset={8} className="min-w-56">
@@ -303,7 +305,7 @@ function AppHome() {
                   className="flex cursor-pointer items-center gap-1 rounded-lg px-2 py-1 text-sm text-muted-foreground/60 transition-colors hover:bg-accent hover:text-muted-foreground disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-muted-foreground/60"
                 >
                   <GitBranchIcon className="size-3.5 shrink-0" aria-hidden="true" />
-                  <span className="max-w-[160px] truncate">{currentBranch}</span>
+                  <span className="max-w-40 truncate">{currentBranch}</span>
                   <ChevronDownIcon className="size-3 shrink-0 opacity-50" aria-hidden="true" />
                 </DropdownMenuTrigger>
                 <DropdownMenuContent side="top" sideOffset={8}>

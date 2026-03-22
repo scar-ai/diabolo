@@ -1,35 +1,25 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import {
-  BookMarkedIcon,
-  ChevronDownIcon,
-  GitBranchIcon,
-  LoaderIcon,
-  SquareIcon,
-  Trash2Icon,
-} from "lucide-react";
+import { LoaderIcon } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { useSetHeaderSlots } from "@/components/app/header-portal";
-import { PromptComposer } from "@/components/app/prompt-composer";
 import {
-  AgentBubble,
-  FollowUpAgentBubble,
-  parseFollowUpHistory,
   QuickTaskDetail,
-  UserBubble,
+  TaskConversation,
+  TaskFollowUpComposer,
+  TaskHeaderActions,
 } from "@/components/app/task-detail";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import {
   $destroyTaskSandboxById,
   $runFollowUpById,
   $terminateQuickTaskById,
   $terminateTaskById,
 } from "@/lib/project/functions";
-import { taskDetailQueryOptions } from "@/lib/project/queries";
+import { taskDetailQueryOptions, taskKeys } from "@/lib/project/queries";
 
 const TERMINAL_STATUSES = new Set(["failed", "succeeded"]);
 
@@ -68,8 +58,8 @@ function TaskDetailPage() {
     mutationFn: () => terminateTask({ data: { taskId } }),
     onSuccess: () => {
       toast.success("Task terminated.");
-      queryClient.invalidateQueries({ queryKey: ["task-detail", taskId] });
-      queryClient.invalidateQueries({ queryKey: ["all-user-tasks"] });
+      queryClient.invalidateQueries({ queryKey: taskKeys.detail(taskId) });
+      queryClient.invalidateQueries({ queryKey: taskKeys.all });
     },
     onError: (error) => {
       toast.error(error instanceof Error ? error.message : "Failed to terminate task.");
@@ -80,8 +70,8 @@ function TaskDetailPage() {
     mutationFn: () => destroySandbox({ data: { taskId } }),
     onSuccess: () => {
       toast.success("Sandbox destroyed.");
-      queryClient.invalidateQueries({ queryKey: ["task-detail", taskId] });
-      queryClient.invalidateQueries({ queryKey: ["all-user-tasks"] });
+      queryClient.invalidateQueries({ queryKey: taskKeys.detail(taskId) });
+      queryClient.invalidateQueries({ queryKey: taskKeys.all });
     },
     onError: (error) => {
       toast.error(error instanceof Error ? error.message : "Failed to destroy sandbox.");
@@ -92,8 +82,8 @@ function TaskDetailPage() {
     mutationFn: () => terminateQuickTask({ data: { taskId } }),
     onSuccess: () => {
       toast.success("Quick task stopped and sandbox destroyed.");
-      queryClient.invalidateQueries({ queryKey: ["task-detail", taskId] });
-      queryClient.invalidateQueries({ queryKey: ["all-user-tasks"] });
+      queryClient.invalidateQueries({ queryKey: taskKeys.detail(taskId) });
+      queryClient.invalidateQueries({ queryKey: taskKeys.all });
     },
     onError: (error) => {
       toast.error(error instanceof Error ? error.message : "Failed to stop quick task.");
@@ -103,8 +93,8 @@ function TaskDetailPage() {
   const followUpMutation = useMutation({
     mutationFn: (prompt: string) => runFollowUp({ data: { taskId, prompt } }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["task-detail", taskId] });
-      queryClient.invalidateQueries({ queryKey: ["all-user-tasks"] });
+      queryClient.invalidateQueries({ queryKey: taskKeys.detail(taskId) });
+      queryClient.invalidateQueries({ queryKey: taskKeys.all });
     },
     onError: (error) => {
       toast.error(error instanceof Error ? error.message : "Failed to start follow-up.");
@@ -116,6 +106,7 @@ function TaskDetailPage() {
   const isCompleted = task && TERMINAL_STATUSES.has(task.status);
   const sandboxAlive = isCompleted && task.sandboxId;
   const isQuickTask = task?.quickTask === true;
+  const taskTitle = task?.repoName ?? "Task";
   const canSendFollowUp = Boolean(
     isCompleted && !isQuickTask && followUpInput.trim().length >= 10 && !followUpMutation.isPending,
   );
@@ -127,8 +118,19 @@ function TaskDetailPage() {
   }, []);
 
   useEffect(() => {
-    scrollToBottom();
-  }, [task?.logs, task?.stage, task?.status, task?.followUpHistory, scrollToBottom]);
+    const container = scrollRef.current;
+
+    if (!container) {
+      return;
+    }
+
+    const distanceFromBottom =
+      container.scrollHeight - container.scrollTop - container.clientHeight;
+
+    if (distanceFromBottom < 120) {
+      scrollToBottom();
+    }
+  }, [task?.logs, task?.stage, task?.status, task?.parsedFollowUpHistory, scrollToBottom]);
 
   const terminatePending = terminateMutation.isPending;
   const terminateMutate = terminateMutation.mutate;
@@ -137,50 +139,24 @@ function TaskDetailPage() {
 
   useEffect(() => {
     setHeaderSlots({
-      left: task ? (
-        <span className="truncate text-sm font-medium text-foreground">
-          {task.repoName ?? "Task"}
-        </span>
+      left: taskTitle ? (
+        <span className="truncate text-sm font-medium text-foreground">{taskTitle}</span>
       ) : null,
       right: (
-        <>
-          {isRunning ? (
-            <Button
-              variant="destructive"
-              size="sm"
-              disabled={terminatePending}
-              onClick={() => terminateMutate()}
-            >
-              {terminatePending ? (
-                <LoaderIcon className="size-3.5 animate-spin" />
-              ) : (
-                <SquareIcon className="size-3.5" />
-              )}
-              {terminatePending ? "Stopping..." : "Terminate"}
-            </Button>
-          ) : null}
-          {sandboxAlive ? (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="gap-1.5 text-destructive hover:bg-destructive/10 hover:text-destructive"
-              disabled={destroyPending}
-              onClick={() => destroyMutate()}
-            >
-              {destroyPending ? (
-                <LoaderIcon className="size-3.5 animate-spin" />
-              ) : (
-                <Trash2Icon className="size-3.5" />
-              )}
-              {destroyPending ? "Destroying..." : "Destroy Sandbox"}
-            </Button>
-          ) : null}
-        </>
+        <TaskHeaderActions
+          destroyPending={destroyPending}
+          onDestroy={() => destroyMutate()}
+          onTerminate={() => terminateMutate()}
+          sandboxAlive={!!sandboxAlive}
+          taskIsRunning={!!isRunning}
+          terminatePending={terminatePending}
+        />
       ),
     });
     return () => setHeaderSlots({ left: null, right: null });
   }, [
-    task,
+    task?.id,
+    taskTitle,
     isRunning,
     sandboxAlive,
     terminatePending,
@@ -216,7 +192,7 @@ function TaskDetailPage() {
     );
   }
 
-  const followUps = parseFollowUpHistory(task.followUpHistory);
+  const followUps = task.parsedFollowUpHistory;
   const pendingFollowUpPrompt =
     followUpMutation.isPending &&
     followUpMutation.variables &&
@@ -236,88 +212,24 @@ function TaskDetailPage() {
 
   return (
     <main className="flex flex-1 flex-col overflow-hidden">
-      {/* Chat messages area */}
-      <div ref={scrollRef} className="flex flex-1 flex-col overflow-y-auto">
-        <div className="mx-auto flex w-full max-w-3xl flex-col gap-10 px-4 py-6 pb-8">
-          {/* Initial user message */}
-          <UserBubble text={task.prompt} timestamp={task.startedAt} />
+      <TaskConversation
+        followUps={followUps}
+        pendingFollowUpPrompt={pendingFollowUpPrompt}
+        scrollRef={scrollRef}
+        task={task}
+        taskIsRunning={!!isRunning}
+      />
 
-          {/* Agent response */}
-          <AgentBubble task={task} isRunning={!!isRunning} />
-
-          {/* Follow-up messages */}
-          {followUps.map((followUp) => (
-            <div key={followUp.id} className="flex flex-col gap-10">
-              <UserBubble text={followUp.prompt} timestamp={followUp.startedAt} />
-              <FollowUpAgentBubble followUp={followUp} />
-            </div>
-          ))}
-
-          {pendingFollowUpPrompt ? <UserBubble text={pendingFollowUpPrompt} /> : null}
-        </div>
-      </div>
-
-      {/* Sticky prompt at the bottom */}
       {isCompleted || isRunning ? (
-        <div className="shrink-0 bg-background px-4 py-3">
-          <div className="mx-auto max-w-3xl">
-            <PromptComposer
-              value={followUpInput}
-              onChange={setFollowUpInput}
-              onSubmit={handleSendFollowUp}
-              placeholder={
-                isRunning && !sandboxAlive
-                  ? "Waiting for task to finish..."
-                  : sandboxAlive
-                    ? "Send a follow-up..."
-                    : "Send a follow-up to restart the sandbox..."
-              }
-              canSubmit={canSendFollowUp}
-              disabled={isRunning && !sandboxAlive}
-              submitAriaLabel={followUpMutation.isPending ? "Sending..." : "Send"}
-              footerLeft={
-                <>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    disabled
-                    className="cursor-not-allowed gap-1 text-muted-foreground/40 hover:bg-transparent hover:text-muted-foreground/40"
-                  >
-                    <BookMarkedIcon className="size-3.5 shrink-0" aria-hidden="true" />
-                    <span className="max-w-[160px] truncate">{task.repoName ?? "Project"}</span>
-                    <ChevronDownIcon className="size-3 shrink-0 opacity-30" aria-hidden="true" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    disabled
-                    className="cursor-not-allowed gap-1 text-muted-foreground/40 hover:bg-transparent hover:text-muted-foreground/40"
-                  >
-                    <GitBranchIcon className="size-3.5 shrink-0" aria-hidden="true" />
-                    <span className="max-w-[160px] truncate">
-                      {task.branchName ?? "Used branch"}
-                    </span>
-                    <ChevronDownIcon className="size-3 shrink-0 opacity-30" aria-hidden="true" />
-                  </Button>
-                  <button
-                    type="button"
-                    disabled
-                    aria-pressed={!!task.quickTask}
-                    className="flex cursor-not-allowed items-center gap-2 rounded-lg px-2 py-1 text-sm text-muted-foreground/40 transition-colors hover:bg-transparent hover:text-muted-foreground/40"
-                  >
-                    <Checkbox
-                      checked={!!task.quickTask}
-                      disabled
-                      aria-label="Quick task mode"
-                      className="pointer-events-none size-3.5"
-                    />
-                    <span>Quick task</span>
-                  </button>
-                </>
-              }
-            />
-          </div>
-        </div>
+        <TaskFollowUpComposer
+          canSubmit={canSendFollowUp}
+          disabled={Boolean(isRunning && !sandboxAlive)}
+          isPending={followUpMutation.isPending}
+          onChange={setFollowUpInput}
+          onSubmit={handleSendFollowUp}
+          task={task}
+          value={followUpInput}
+        />
       ) : null}
     </main>
   );
