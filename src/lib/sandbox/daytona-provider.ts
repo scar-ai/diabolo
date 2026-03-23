@@ -3,10 +3,13 @@ import {
   CodeLanguage,
   type CreateSandboxBaseParams,
   type CreateSandboxFromImageParams,
-  Daytona,
 } from "@daytonaio/sdk";
 
-import { env } from "@/env/server";
+import {
+  formatDaytonaError,
+  getConfiguredDaytonaImage,
+  getDaytonaClient,
+} from "@/lib/daytona/client";
 
 import type {
   CloneRepositoryOptions,
@@ -14,8 +17,6 @@ import type {
   SandboxProvider,
   SandboxSession,
 } from "./types";
-
-const LEGACY_UNSUPPORTED_IMAGES = new Set(["daytonaio/workspace", "daytonaio/workspace:latest"]);
 
 const sanitizeNamePart = (value: string) =>
   value
@@ -27,29 +28,9 @@ const sanitizeNamePart = (value: string) =>
 const makeSandboxName = (repoName: string) =>
   `task-${sanitizeNamePart(repoName)}-${Date.now().toString(36)}`;
 
-const getConfiguredDaytonaImage = () => {
-  const image = env.DAYTONA_DEFAULT_IMAGE?.trim();
-
-  if (!image || LEGACY_UNSUPPORTED_IMAGES.has(image)) {
-    return undefined;
-  }
-
-  return image;
-};
-
-const getDaytonaClient = () => {
-  if (!env.DAYTONA_API_KEY) {
-    throw new Error("DAYTONA_API_KEY is not configured.");
-  }
-
-  return new Daytona({
-    apiKey: env.DAYTONA_API_KEY,
-    apiUrl: env.DAYTONA_API_URL || undefined,
-    target: env.DAYTONA_TARGET || undefined,
-  });
-};
-
-const wrapSandbox = (sandbox: Awaited<ReturnType<Daytona["create"]>>): SandboxSession => ({
+const wrapSandbox = (
+  sandbox: Awaited<ReturnType<ReturnType<typeof getDaytonaClient>["create"]>>,
+): SandboxSession => ({
   id: sandbox.id,
   name: sandbox.name,
   async cloneRepository(options: CloneRepositoryOptions) {
@@ -85,25 +66,6 @@ const wrapSandbox = (sandbox: Awaited<ReturnType<Daytona["create"]>>): SandboxSe
     await sandbox.stop(timeoutSeconds);
   },
 });
-
-export const formatDaytonaError = (error: unknown) => {
-  const message = error instanceof Error ? error.message : "Unexpected sandbox provider error.";
-
-  if (
-    message.toLowerCase().includes("unprocessable entity") &&
-    message.toLowerCase().includes("pull access denied")
-  ) {
-    const configuredImage = env.DAYTONA_DEFAULT_IMAGE?.trim();
-
-    if (configuredImage) {
-      return `Daytona could not pull the configured image "${configuredImage}". Clear DAYTONA_DEFAULT_IMAGE to use Daytona's default sandbox image, or set it to a valid image your Daytona target can access.`;
-    }
-
-    return "Daytona could not start the sandbox because the resolved image was not accessible. Set a valid DAYTONA_DEFAULT_IMAGE for your Daytona target, or leave it unset to use Daytona's default sandbox image.";
-  }
-
-  return message;
-};
 
 export const getSandboxProvider = (): SandboxProvider => {
   const getWorkspace = async (id: string) => {

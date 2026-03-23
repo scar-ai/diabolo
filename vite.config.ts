@@ -11,6 +11,7 @@ export default defineConfig({
     tsconfigPaths: true,
   },
   server: {
+    allowedHosts: ["unconjured-laverna-enviably.ngrok-free.dev"],
     port: 3000,
   },
   plugins: [

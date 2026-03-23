@@ -3,26 +3,6 @@ import { env } from "@/env/server";
 
 const DEFAULT_OPENCODE_MODEL = "openrouter/openai/gpt-5-codex";
 
-const KNOWN_NON_OPENROUTER_PROVIDERS = new Set([
-  "amazon-bedrock",
-  "anthropic",
-  "azure",
-  "azure-openai",
-  "cerebras",
-  "deepseek",
-  "fireworks",
-  "google",
-  "google-vertex",
-  "groq",
-  "lmstudio",
-  "ollama",
-  "openai",
-  "openrouter",
-  "opencode",
-  "together",
-  "xai",
-]);
-
 export type OpenCodeConfig = {
   apiKey: string;
   model: string;
@@ -47,13 +27,10 @@ export const normalizeOpenRouterModel = (value: string) => {
     return model;
   }
 
-  const providerPrefix = model.split("/", 1)[0];
-
-  if (!providerPrefix || !KNOWN_NON_OPENROUTER_PROVIDERS.has(providerPrefix)) {
-    return `openrouter/${model}`;
-  }
-
-  return model;
+  // This app only provisions the OpenRouter provider for OpenCode, so any
+  // provider-scoped model id like "openai/gpt-5.4-nano" still needs the
+  // "openrouter/" prefix to resolve correctly inside OpenCode.
+  return `openrouter/${model}`;
 };
 
 export const getConfiguredOpenCodeModel = () =>
@@ -70,12 +47,7 @@ export const ensureOpenCodeConfig = (): OpenCodeConfig => {
   };
 };
 
-export const buildOpenCodeConfigContent = (
-  model: string,
-  options?: {
-    enableDaytonaTools?: boolean;
-  },
-) => {
+export const buildOpenCodeConfigContent = (model: string) => {
   const providerScopedModelId = getProviderScopedModelId(model);
 
   const config: Record<string, unknown> = {
@@ -97,19 +69,6 @@ export const buildOpenCodeConfigContent = (
       },
     },
   };
-
-  if (options?.enableDaytonaTools) {
-    config.tools = {
-      "daytona_*": false,
-    };
-    config.agent = {
-      frontend: {
-        tools: {
-          "daytona_*": true,
-        },
-      },
-    };
-  }
 
   return JSON.stringify(config);
 };

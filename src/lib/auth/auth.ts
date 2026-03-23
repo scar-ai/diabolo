@@ -7,8 +7,16 @@ import { env } from "@/env/server";
 import { db } from "@/lib/db";
 import * as schema from "@/lib/db/schema";
 
+const fallbackAuthUrl = env.VITE_BASE_URL;
+const allowedAuthHosts = Array.from(
+  new Set(["localhost:3000", "127.0.0.1:3000", new URL(fallbackAuthUrl).host]),
+);
+
 export const auth = betterAuth({
-  baseURL: env.VITE_BASE_URL,
+  baseURL: {
+    allowedHosts: allowedAuthHosts,
+    fallback: fallbackAuthUrl,
+  },
   telemetry: {
     enabled: false,
   },
