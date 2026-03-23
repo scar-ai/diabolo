@@ -2,7 +2,8 @@ import { createServerFn } from "@tanstack/react-start";
 import * as z from "zod";
 
 import { authMiddleware } from "@/lib/auth/middleware";
-import { listSignedInGithubRepoBranches, listSignedInGithubRepos } from "@/lib/github/server";
+import { Github } from "@/lib/github";
+import { unwrap } from "@/lib/result";
 
 const listGithubBranchesInputSchema = z.object({
   repoFullName: z.string().min(1),
@@ -10,13 +11,9 @@ const listGithubBranchesInputSchema = z.object({
 
 export const $listGithubRepos = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
-  .handler(async () => {
-    return listSignedInGithubRepos();
-  });
+  .handler(async () => unwrap(Github.listRepos()));
 
 export const $listGithubBranches = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
   .inputValidator((data) => listGithubBranchesInputSchema.parse(data))
-  .handler(async ({ data }) => {
-    return listSignedInGithubRepoBranches(data.repoFullName);
-  });
+  .handler(async ({ data }) => unwrap(Github.listBranches(data.repoFullName)));
