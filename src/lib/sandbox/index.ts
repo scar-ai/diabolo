@@ -166,7 +166,7 @@ export namespace Sandbox {
     );
 
   export const getTask = (jobId: string, userId?: string): ResultAsync<TaskJob, Error> =>
-    ResultAsync.fromSafePromise(Promise.resolve(requireJob(jobId, userId)));
+    fromPromise(Promise.resolve().then(() => requireJob(jobId, userId)));
 
   export const terminateTask = (jobId: string): ResultAsync<void, Error> =>
     ResultAsync.fromSafePromise(

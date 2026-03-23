@@ -5,7 +5,7 @@ import * as R from "remeda";
 import { db } from "@/lib/db";
 import { Github } from "@/lib/github";
 import { Log } from "@/lib/log";
-import { fromPromise, toError } from "@/lib/result";
+import { fromPromise } from "@/lib/result";
 import { Sandbox } from "@/lib/sandbox";
 
 import { project, task } from "./project.sql";
@@ -30,22 +30,6 @@ export namespace Project {
   // ---------------------------------------------------------------------------
 
   const RUNNING_TASK_STATUSES = new Set(["queued", "running"]);
-
-  const TASK_SUMMARY_KEYS = [
-    "branchName",
-    "completedAt",
-    "createdAt",
-    "id",
-    "projectId",
-    "prompt",
-    "quickTask",
-    "repoName",
-    "sandboxId",
-    "stage",
-    "startedAt",
-    "status",
-    "updatedAt",
-  ] as const;
 
   const taskSummarySelection = {
     branchName: task.branchName,
@@ -216,6 +200,11 @@ export namespace Project {
 
     if (result.isErr()) {
       if (!RUNNING_TASK_STATUSES.has(t.status)) return t;
+
+      const message = result.error.message;
+      if (message !== "Task not found.") {
+        throw result.error;
+      }
 
       return updateTask(t.id, {
         completedAt: new Date(),

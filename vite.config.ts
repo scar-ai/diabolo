@@ -13,6 +13,9 @@ export default defineConfig({
   server: {
     allowedHosts: ["unconjured-laverna-enviably.ngrok-free.dev"],
     port: 3000,
+    watch: {
+      ignored: ["**/tmp/**"],
+    },
   },
   plugins: [
     devtools(),
