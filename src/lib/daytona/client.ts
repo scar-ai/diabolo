@@ -1,19 +1,8 @@
 import "@tanstack/react-start/server-only";
-import { Daytona } from "@daytonaio/sdk";
+import { Daytona, DaytonaNotFoundError } from "@daytonaio/sdk";
 
 import { env } from "@/env/server";
-
-const LEGACY_UNSUPPORTED_IMAGES = new Set(["daytonaio/workspace", "daytonaio/workspace:latest"]);
-
-export const getConfiguredDaytonaImage = () => {
-  const image = env.DAYTONA_DEFAULT_IMAGE?.trim();
-
-  if (!image || LEGACY_UNSUPPORTED_IMAGES.has(image)) {
-    return undefined;
-  }
-
-  return image;
-};
+import { formatMissingBrowserSnapshotError } from "@/lib/daytona/snapshot";
 
 export const getDaytonaClient = () => {
   if (!env.DAYTONA_API_KEY) {
@@ -28,19 +17,21 @@ export const getDaytonaClient = () => {
 };
 
 export const formatDaytonaError = (error: unknown) => {
+  if (error instanceof DaytonaNotFoundError) {
+    return formatMissingBrowserSnapshotError(error);
+  }
+
   const message = error instanceof Error ? error.message : "Unexpected sandbox provider error.";
 
-  if (
-    message.toLowerCase().includes("unprocessable entity") &&
-    message.toLowerCase().includes("pull access denied")
-  ) {
-    const configuredImage = env.DAYTONA_DEFAULT_IMAGE?.trim();
+  if (message.toLowerCase().includes("pull access denied")) {
+    const configuredImage =
+      env.DAYTONA_DEFAULT_IMAGE?.trim() || env.DAYTONA_BROWSER_BASE_IMAGE?.trim();
 
     if (configuredImage) {
-      return `Daytona could not pull the configured image "${configuredImage}". Clear DAYTONA_DEFAULT_IMAGE to use Daytona's default sandbox image, or set it to a valid image your Daytona target can access.`;
+      return `Daytona could not pull the configured base image "${configuredImage}" while building the browser snapshot. Set DAYTONA_DEFAULT_IMAGE or DAYTONA_BROWSER_BASE_IMAGE to an image your Daytona target can access.`;
     }
 
-    return "Daytona could not start the sandbox because the resolved image was not accessible. Set a valid DAYTONA_DEFAULT_IMAGE for your Daytona target, or leave it unset to use Daytona's default sandbox image.";
+    return "Daytona could not pull the base image used to build the browser snapshot. Set DAYTONA_BROWSER_BASE_IMAGE to an image your Daytona target can access.";
   }
 
   return message;

@@ -36,6 +36,20 @@
       "when": 1776000000000,
       "tag": "0004_follow_up_history",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1774387740896,
+      "tag": "0005_moaning_vertigo",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1774388918987,
+      "tag": "0006_sad_thaddeus_ross",
+      "breakpoints": true
     }
   ]
 }

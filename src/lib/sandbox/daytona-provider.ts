@@ -2,15 +2,12 @@ import "@tanstack/react-start/server-only";
 import {
   CodeLanguage,
   type CreateSandboxBaseParams,
-  type CreateSandboxFromImageParams,
+  type CreateSandboxFromSnapshotParams,
   type Daytona,
 } from "@daytonaio/sdk";
 
-import {
-  formatDaytonaError,
-  getConfiguredDaytonaImage,
-  getDaytonaClient,
-} from "@/lib/daytona/client";
+import { formatDaytonaError, getDaytonaClient } from "@/lib/daytona/client";
+import { getRequiredBrowserSnapshot } from "@/lib/daytona/snapshot";
 import { Log } from "@/lib/log";
 
 import type { Sandbox } from "./index";
@@ -80,20 +77,16 @@ export const getSandboxProvider = (): Sandbox.Provider => {
         language: CodeLanguage.TYPESCRIPT,
         name,
       };
-      const configuredImage = getConfiguredDaytonaImage();
+      const snapshot = await getRequiredBrowserSnapshot(daytona);
 
-      log.info("creating sandbox", { name, image: configuredImage ?? "default" });
+      log.info("creating sandbox", { name, snapshot });
 
-      if (configuredImage) {
-        const imageParams: CreateSandboxFromImageParams = {
-          ...baseParams,
-          image: configuredImage,
-        };
+      const snapshotParams: CreateSandboxFromSnapshotParams = {
+        ...baseParams,
+        snapshot,
+      };
 
-        return wrapSandbox(await daytona.create(imageParams, { timeout: 120 }));
-      }
-
-      return wrapSandbox(await daytona.create(baseParams, { timeout: 120 }));
+      return wrapSandbox(await daytona.create(snapshotParams, { timeout: 120 }));
     },
     async destroyWorkspace(id) {
       const workspace = await getWorkspace(id);

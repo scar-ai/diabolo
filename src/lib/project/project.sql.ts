@@ -35,9 +35,12 @@ export const task = pgTable(
     repoId: text(),
     repoName: text(),
     repoUrl: text(),
+    parentTaskId: text("parent_task_id"),
     sandboxId: text(),
     sandboxName: text(),
     branchName: text(),
+    spawnSource: text().notNull().default("user"),
+    opencodeModel: text(),
     sandboxPath: text("clone_path"),
     logs: text(),
     agentMessages: text(),
@@ -45,6 +48,7 @@ export const task = pgTable(
     error: text(),
     prNumber: integer(),
     prUrl: text(),
+    cancelRequestedAt: timestamp(),
     startedAt: timestamp().defaultNow().notNull(),
     completedAt: timestamp(),
     createdAt: timestamp().defaultNow().notNull(),
@@ -53,16 +57,64 @@ export const task = pgTable(
       .$onUpdate(() => new Date())
       .notNull(),
   },
-  (table) => [index("task_projectId_idx").on(table.projectId)],
+  (table) => [
+    index("task_projectId_idx").on(table.projectId),
+    index("task_parentTaskId_idx").on(table.parentTaskId),
+  ],
+);
+
+export const taskMessage = pgTable(
+  "task_message",
+  {
+    id: text().primaryKey(),
+    taskId: text()
+      .notNull()
+      .references(() => task.id, { onDelete: "cascade" }),
+    sequence: integer().notNull(),
+    kind: text().notNull().default("follow_up"),
+    prompt: text().notNull(),
+    status: text().notNull().default("pending"),
+    stage: text().notNull().default("Queued"),
+    logs: text(),
+    responseMessages: text(),
+    error: text(),
+    processingStartedAt: timestamp(),
+    startedAt: timestamp().defaultNow().notNull(),
+    completedAt: timestamp(),
+    createdAt: timestamp().defaultNow().notNull(),
+    updatedAt: timestamp()
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    index("task_message_taskId_idx").on(table.taskId),
+    index("task_message_taskId_sequence_idx").on(table.taskId, table.sequence),
+    index("task_message_taskId_status_idx").on(table.taskId, table.status),
+  ],
 );
 
 export const projectRelations = relations(project, ({ many }) => ({
   tasks: many(task),
 }));
 
-export const taskRelations = relations(task, ({ one }) => ({
+export const taskRelations = relations(task, ({ many, one }) => ({
+  children: many(task, { relationName: "task_children" }),
+  messages: many(taskMessage),
+  parent: one(task, {
+    fields: [task.parentTaskId],
+    relationName: "task_children",
+    references: [task.id],
+  }),
   project: one(project, {
     fields: [task.projectId],
     references: [project.id],
+  }),
+}));
+
+export const taskMessageRelations = relations(taskMessage, ({ one }) => ({
+  task: one(task, {
+    fields: [taskMessage.taskId],
+    references: [task.id],
   }),
 }));

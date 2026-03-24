@@ -15,6 +15,7 @@
     "prepare": "husky",
     "db": "node ./scripts/db.mjs",
     "db:studio": "pnpm drizzle-kit studio",
+    "daytona:snapshot": "node --env-file=.env scripts/daytona-snapshot.mjs",
     "deps": "pnpm dlx taze@latest -Ilw",
     "deps:major": "pnpm dlx taze@latest major -Ilw",
     "tanstack": "pnpm dlx @tanstack/cli@latest",

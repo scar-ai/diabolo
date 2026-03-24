@@ -1,5 +1,7 @@
 import type { Github } from "@/lib/github";
 import type { Sandbox } from "@/lib/sandbox";
+import type { TaskRecord } from "@/lib/sandbox/store";
+import { findTaskRecord, updateTaskRecord } from "@/lib/sandbox/store";
 
 import { opencodeInstallCommand } from "./opencode";
 
@@ -11,38 +13,46 @@ type Viewer = {
 
 type Run = (
   sandbox: Sandbox.Session,
-  jobId: string,
+  taskId: string,
+  messageId: string,
   command: string,
   cwd?: string,
   envVars?: Record<string, string>,
   timeout?: number,
-  options?: { followUpId?: string },
 ) => Promise<{ exitCode: number; output: string }>;
 
-type Update = (jobId: string, patch: Partial<Sandbox.TaskJob>) => void;
-type UpdateFollowUp = (jobId: string, followUpId: string, update: (entry: any) => any) => void;
+const updateStage = async (
+  taskId: string,
+  stage: string,
+  status: "queued" | "running" = "running",
+) =>
+  updateTaskRecord(taskId, {
+    stage,
+    status,
+  });
 
 export namespace SandboxWorkspace {
   export const destroy = async (
     provider: Sandbox.Provider,
-    job: Sandbox.TaskJob,
-    update: Update,
+    taskId: string,
     opts?: {
       stage?: string;
     },
   ) => {
-    if (!job.sandboxId) {
+    const taskRecord = await findTaskRecord(taskId);
+
+    if (!taskRecord?.sandboxId) {
       return;
     }
 
     try {
-      await provider.destroyWorkspace(job.sandboxId);
+      await provider.destroyWorkspace(taskRecord.sandboxId);
     } catch {}
 
-    update(job.id, {
-      sandboxPath: undefined,
-      sandboxId: undefined,
-      sandboxName: undefined,
+    await updateTaskRecord(taskId, {
+      sandboxPath: null,
+      sandboxId: null,
+      sandboxName: null,
       stage: opts?.stage ?? "Sandbox stopped",
     });
   };
@@ -50,35 +60,33 @@ export namespace SandboxWorkspace {
   export const prepare = async (input: {
     authenticatedRemoteUrl: string;
     branch: string;
-    enableStagehandTools: boolean;
+    enableBrowserTools: boolean;
     githubAccessToken: string;
-    jobId: string;
+    messageId: string;
     provider: Sandbox.Provider;
     repoName: string;
     repoOwnerLogin: string;
     repoUrl: string;
     run: Run;
     setupTools?: string;
-    update: Update;
+    taskId: string;
     viewer: Viewer;
   }) => {
-    input.update(input.jobId, {
-      stage: "Booting Daytona sandbox",
-      status: "running",
-    });
+    await updateStage(input.taskId, "Getting your sandbox ready");
 
     const sandbox = await input.provider.createWorkspace(input.repoName);
 
-    input.update(input.jobId, {
+    await updateTaskRecord(input.taskId, {
       sandboxId: sandbox.id,
       sandboxName: sandbox.name,
       stage: "Resolving sandbox workspace",
+      status: "running",
     });
 
     const root = await sandbox.getWorkspaceRoot();
     const sandboxPath = `${root.replace(/\/$/, "")}/${input.repoName}`;
 
-    input.update(input.jobId, {
+    await updateTaskRecord(input.taskId, {
       sandboxPath,
       stage: "Cloning repository into sandbox",
     });
@@ -98,16 +106,24 @@ export namespace SandboxWorkspace {
       opencodeInstallCommand,
     ];
 
-    if (input.enableStagehandTools && input.setupTools) {
+    if (input.enableBrowserTools && input.setupTools) {
       setup.push(input.setupTools);
     }
 
-    input.update(input.jobId, {
+    await updateTaskRecord(input.taskId, {
       sandboxPath,
-      stage: "Preparing git branch and OpenCode runtime",
+      stage: "Preparing git branch and agent runtime",
     });
 
-    await input.run(sandbox, input.jobId, setup.join("\n"), sandboxPath, undefined, 900);
+    await input.run(
+      sandbox,
+      input.taskId,
+      input.messageId,
+      setup.join("\n"),
+      sandboxPath,
+      undefined,
+      900,
+    );
 
     return {
       sandbox,
@@ -115,64 +131,43 @@ export namespace SandboxWorkspace {
     };
   };
 
-  export const followUpTarget = (repo: Github.Repo, branchName?: string) => ({
-    branch: branchName?.trim() || repo.defaultBranch,
-    repo,
-  });
-
-  export const markRecreated = (
-    jobId: string,
-    followUpId: string,
-    update: Update,
-    updateFollowUp: UpdateFollowUp,
-  ) => {
-    update(jobId, {
-      stage: "Recreating sandbox for follow-up",
-    });
-    updateFollowUp(jobId, followUpId, (entry) => ({
-      ...entry,
-      stage: "Recreating sandbox for follow-up",
-    }));
-  };
-
   export const getOrCreateFollowUp = async (input: {
     authenticatedRemoteUrl: string;
-    enableStagehandTools: boolean;
-    followUpId: string;
+    enableBrowserTools: boolean;
     githubAccessToken: string;
-    job: Sandbox.TaskJob;
+    messageId: string;
     provider: Sandbox.Provider;
     repo: Github.Repo;
     run: Run;
     setupTools?: string;
-    update: Update;
-    updateFollowUp: UpdateFollowUp;
+    taskId: string;
+    taskRecord: TaskRecord;
     viewer: Viewer;
   }) => {
-    if (input.job.sandboxId && input.job.sandboxPath) {
+    if (input.taskRecord.sandboxId && input.taskRecord.sandboxPath) {
       try {
         return {
-          sandbox: await input.provider.getWorkspace(input.job.sandboxId),
-          sandboxPath: input.job.sandboxPath,
+          sandbox: await input.provider.getWorkspace(input.taskRecord.sandboxId),
+          sandboxPath: input.taskRecord.sandboxPath,
         };
       } catch {}
     }
 
-    markRecreated(input.job.id, input.followUpId, input.update, input.updateFollowUp);
+    await updateStage(input.taskId, "Recreating sandbox for follow-up");
 
     return prepare({
       authenticatedRemoteUrl: input.authenticatedRemoteUrl,
-      branch: input.job.branchName?.trim() || input.repo.defaultBranch,
-      enableStagehandTools: input.enableStagehandTools,
+      branch: input.taskRecord.branchName?.trim() || input.repo.defaultBranch,
+      enableBrowserTools: input.enableBrowserTools,
       githubAccessToken: input.githubAccessToken,
-      jobId: input.job.id,
+      messageId: input.messageId,
       provider: input.provider,
       repoName: input.repo.name,
       repoOwnerLogin: input.repo.ownerLogin,
       repoUrl: input.repo.cloneUrl,
       run: input.run,
       setupTools: input.setupTools,
-      update: input.update,
+      taskId: input.taskId,
       viewer: input.viewer,
     });
   };
