@@ -34,6 +34,7 @@ let runtimePromise = null;
 
 const DEFAULT_TIMEOUT_MS = 20000;
 const NAVIGATION_TIMEOUT_MS = 15000;
+const NAVIGATION_RETRY_DELAY_MS = 1000;
 const toErrorMessage = (error) => (error instanceof Error ? error.message : String(error));
 const toText = (value) => (typeof value === "string" ? value : JSON.stringify(value, null, 2));
 const withTimeout = async (label, promise, timeoutMs = DEFAULT_TIMEOUT_MS) => {
@@ -64,6 +65,68 @@ const ensureDirectory = (target) => {
   return target;
 };
 
+const sleep = (timeoutMs) => new Promise((resolve) => setTimeout(resolve, timeoutMs));
+
+const isChromeErrorUrl = (url) => url.startsWith("chrome-error://");
+
+const getNavigationCandidates = (rawUrl) => {
+  const parsed = new URL(rawUrl);
+  const candidates = [parsed.toString()];
+
+  if (parsed.hostname === "localhost") {
+    parsed.hostname = "127.0.0.1";
+    candidates.push(parsed.toString());
+  }
+
+  return candidates;
+};
+
+const navigateWithRetries = async (page, targetUrl) => {
+  let lastError = null;
+
+  for (const candidateUrl of getNavigationCandidates(targetUrl)) {
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      try {
+        await withTimeout(
+          "Navigating with Stagehand",
+          page.goto(candidateUrl, {
+            waitUntil: "domcontentloaded",
+            timeout: NAVIGATION_TIMEOUT_MS,
+          }),
+          NAVIGATION_TIMEOUT_MS + 2000,
+        );
+
+        const landedUrl = page.url();
+
+        if (!isChromeErrorUrl(landedUrl)) {
+          return;
+        }
+
+        lastError = new Error(
+          "Chrome showed an internal error page while opening " +
+            candidateUrl +
+            " (landed on " +
+            landedUrl +
+            ").",
+        );
+      } catch (error) {
+        lastError = error;
+      }
+
+      if (attempt < 3) {
+        await sleep(NAVIGATION_RETRY_DELAY_MS * attempt);
+      }
+    }
+  }
+
+  throw new Error(
+    "Failed to open " +
+      targetUrl +
+      ": " +
+      (lastError ? toErrorMessage(lastError) : "unknown navigation error"),
+  );
+};
+
 const getModel = () => {
   const apiKey = process.env.OPENROUTER_API_KEY;
 
@@ -89,8 +152,15 @@ const createRuntime = async () => {
     cacheDir: runtimeDir + "/cache",
     localBrowserLaunchOptions: {
       headless: true,
-      args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-web-security",
+        "--allow-running-insecure-content",
+      ],
       chromiumSandbox: false,
+      ignoreHTTPSErrors: true,
       preserveUserDataDir: true,
       userDataDir,
     },
@@ -145,11 +215,7 @@ export const open_url = {
   },
   async execute(args) {
     const { page } = await getPage();
-    await withTimeout(
-      "Navigating with Stagehand",
-      page.goto(args.url, { waitUntil: "domcontentloaded", timeout: NAVIGATION_TIMEOUT_MS }),
-      NAVIGATION_TIMEOUT_MS + 2000,
-    );
+    await navigateWithRetries(page, args.url);
     return toText(await getPageState());
   },
 };
@@ -255,14 +321,30 @@ export const buildStagehandOpenCodeSetupCommand = () =>
     'OPENCODE_STAGEHAND_CONFIG_DIR="${OPENCODE_STAGEHAND_CONFIG_DIR:-$OPENCODE_STAGEHAND_ROOT/config}"',
     'OPENCODE_STAGEHAND_RUNTIME_DIR="${OPENCODE_STAGEHAND_RUNTIME_DIR:-$HOME/.cache/opencode-stagehand}"',
     'OPENCODE_STAGEHAND_REPO_DIR="${OPENCODE_STAGEHAND_REPO_DIR:-$HOME/.local/share/opencode-stagehand/stagehand-repo}"',
-    'mkdir -p "$OPENCODE_STAGEHAND_ROOT/tools" "$OPENCODE_STAGEHAND_RUNTIME_DIR" "$OPENCODE_STAGEHAND_REPO_DIR"',
+    'OPENCODE_STAGEHAND_PLAYWRIGHT_BROWSERS_DIR="${OPENCODE_STAGEHAND_PLAYWRIGHT_BROWSERS_DIR:-$HOME/.cache/ms-playwright}"',
+    'OPENCODE_STAGEHAND_READY_MARKER="${OPENCODE_STAGEHAND_RUNTIME_DIR}/.stagehand-ready-v2"',
+    'mkdir -p "$OPENCODE_STAGEHAND_ROOT/tools" "$OPENCODE_STAGEHAND_RUNTIME_DIR" "$OPENCODE_STAGEHAND_REPO_DIR" "$OPENCODE_STAGEHAND_PLAYWRIGHT_BROWSERS_DIR"',
     'if ! command -v pnpm >/dev/null 2>&1; then if command -v corepack >/dev/null 2>&1; then pnpm() { corepack pnpm "$@"; }; else npm install -g pnpm --prefix "$HOME/.local"; export PATH="$HOME/.local/bin:$PATH"; fi; fi',
     "pnpm --version",
+    "retry_stagehand_command() {",
+    "  stagehand_attempt=1",
+    '  while [ "$stagehand_attempt" -le 3 ]; do',
+    '    if "$@"; then',
+    "      return 0",
+    "    fi",
+    '    if [ "$stagehand_attempt" -eq 3 ]; then',
+    "      return 1",
+    "    fi",
+    '    echo "Stagehand setup attempt ${stagehand_attempt} failed; retrying..."',
+    '    sleep "$((stagehand_attempt * 5))"',
+    "    stagehand_attempt=$((stagehand_attempt + 1))",
+    "  done",
+    "}",
     writeFileCommand("$OPENCODE_STAGEHAND_ROOT/package.json", STAGEHAND_PACKAGE_JSON),
     writeFileCommand("$OPENCODE_STAGEHAND_ROOT/tools/stagehand.ts", STAGEHAND_TOOL_CONTENT),
     'if [ ! -d "$OPENCODE_STAGEHAND_REPO_DIR/.git" ]; then git clone --depth=1 https://github.com/browserbase/stagehand.git "$OPENCODE_STAGEHAND_REPO_DIR"; fi',
     'if [ ! -d "$OPENCODE_STAGEHAND_ROOT/node_modules/@browserbasehq/stagehand" ] || [ ! -d "$OPENCODE_STAGEHAND_ROOT/node_modules/playwright" ] || [ ! -d "$OPENCODE_STAGEHAND_ROOT/node_modules/zod" ]; then (cd "$OPENCODE_STAGEHAND_ROOT" && pnpm install --ignore-scripts); fi',
-    'if [ ! -f "$OPENCODE_STAGEHAND_RUNTIME_DIR/.playwright-installed" ]; then (cd "$OPENCODE_STAGEHAND_ROOT" && (pnpm exec playwright install --with-deps chromium || pnpm exec playwright install chromium)) && touch "$OPENCODE_STAGEHAND_RUNTIME_DIR/.playwright-installed"; fi',
+    'if [ ! -f "$OPENCODE_STAGEHAND_READY_MARKER" ]; then (cd "$OPENCODE_STAGEHAND_ROOT" && PLAYWRIGHT_BROWSERS_PATH="$OPENCODE_STAGEHAND_PLAYWRIGHT_BROWSERS_DIR" retry_stagehand_command pnpm exec playwright install --with-deps chromium) && touch "$OPENCODE_STAGEHAND_READY_MARKER"; fi',
   ].join("\n");
 
 export const buildStagehandOpenCodeExports = () =>

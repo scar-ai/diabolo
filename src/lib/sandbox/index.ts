@@ -7,12 +7,14 @@ import { ensureOpenCodeConfig } from "@/lib/opencode/config";
 import { buildStagehandOpenCodeSetupCommand } from "@/lib/opencode/stagehand";
 import { fromPromise, toError } from "@/lib/result";
 import { getSandboxProvider } from "@/lib/sandbox/daytona-provider";
-import { SandboxRun } from "@/lib/sandbox/run";
-import { jobs, requireJob, updateJob } from "@/lib/sandbox/state";
+import { SandboxQueue } from "@/lib/sandbox/queue";
+import { createTaskMessage, findTaskRecord } from "@/lib/sandbox/store";
+import { SandboxWorkspace } from "@/lib/sandbox/workspace";
 
 const log = Log.create({ ns: "sandbox" });
 
 const sandboxProvider = getSandboxProvider();
+const stagehandSetupToolsCommand = buildStagehandOpenCodeSetupCommand();
 
 const makeJobId = () => `tk-${crypto.randomUUID()}`;
 
@@ -34,36 +36,11 @@ export namespace Sandbox {
     timestamp: number;
   };
 
-  export type FollowUpEntry = {
-    completedAt?: string;
-    error?: string;
-    id: string;
-    logs?: string;
-    prompt: string;
-    responseMessages: AgentMessage[];
-    stage: string;
-    startedAt: string;
-    status: TaskStatus;
-  };
-
   export type TaskJob = {
-    agentMessages: AgentMessage[];
-    branchName?: string;
-    completedAt?: string;
-    error?: string;
-    followUpHistory: FollowUpEntry[];
     id: string;
-    logs?: string;
-    prNumber?: number;
-    prUrl?: string;
     prompt: string;
     quickTask: boolean;
     repoId: string;
-    repoName?: string;
-    repoUrl?: string;
-    sandboxId?: string;
-    sandboxName?: string;
-    sandboxPath?: string;
     sourceBranch: string;
     stage: string;
     startedAt: string;
@@ -109,84 +86,93 @@ export namespace Sandbox {
 
   export const isFrontendTaskPrompt = (prompt: string) => FRONTEND_TASK_PATTERN.test(prompt);
 
+  export const getProvider = () => sandboxProvider;
+
+  export const getSetupToolsCommand = () => stagehandSetupToolsCommand;
+
   export const startTask = (input: TaskInput, userId: string): ResultAsync<TaskJob, Error> =>
     fromPromise(
       (async () => {
         const prompt = input.prompt.trim();
-        if (!prompt) throw new Error("Prompt is required.");
-        if (prompt.length < 10) throw new Error("Prompt must be at least 10 characters.");
+
+        if (!prompt) {
+          throw new Error("Prompt is required.");
+        }
+
+        if (prompt.length < 10) {
+          throw new Error("Prompt must be at least 10 characters.");
+        }
 
         const repo = await Github.getRepo(input.repoId).match(
-          (r) => r,
-          (e) => {
-            throw e;
+          (value) => value,
+          (error) => {
+            throw error;
           },
         );
 
         ensureOpenCodeConfig();
 
-        if (!repo) throw new Error("Unknown repository selection.");
+        if (!repo) {
+          throw new Error("Unknown repository selection.");
+        }
 
-        const jobId = makeJobId();
         const startedAt = new Date().toISOString();
-        const sourceBranch = input.sourceBranch.trim() || repo.defaultBranch;
-        const job: TaskJob = {
-          agentMessages: [],
-          followUpHistory: [],
-          id: jobId,
+
+        return {
+          id: makeJobId(),
           prompt,
           quickTask: input.quickTask,
           repoId: input.repoId,
-          sourceBranch,
+          sourceBranch: input.sourceBranch.trim() || repo.defaultBranch,
           stage: "Queued",
           startedAt,
           status: "queued",
           userId,
         };
-
-        jobs.set(jobId, job);
-        log.info("task queued", { jobId, repoId: input.repoId, quickTask: input.quickTask });
-
-        queueMicrotask(() => {
-          void SandboxRun.task(
-            jobId,
-            {
-              prompt,
-              quickTask: input.quickTask,
-              repoId: input.repoId,
-              sourceBranch: input.sourceBranch,
-            },
-            sandboxProvider,
-            buildStagehandOpenCodeSetupCommand(),
-          );
-        });
-
-        return job;
       })(),
     );
 
-  export const getTask = (jobId: string, userId?: string): ResultAsync<TaskJob, Error> =>
-    fromPromise(Promise.resolve().then(() => requireJob(jobId, userId)));
+  export const enqueueTaskMessage = (
+    taskId: string,
+    prompt: string,
+    kind: "follow_up" | "initial",
+  ): ResultAsync<void, Error> =>
+    fromPromise(
+      (async () => {
+        const trimmedPrompt = prompt.trim();
 
-  export const terminateTask = (jobId: string): ResultAsync<void, Error> =>
-    ResultAsync.fromSafePromise(
-      Promise.resolve().then(() => {
-        const job = jobs.get(jobId);
-        if (!job) return;
+        if (!trimmedPrompt) {
+          throw new Error("Prompt is required.");
+        }
 
-        updateJob(jobId, {
-          completedAt: new Date().toISOString(),
-          error: "Task was terminated by user.",
-          stage: "Terminated",
-          status: "failed",
+        if (trimmedPrompt.length < 10) {
+          throw new Error("Prompt must be at least 10 characters.");
+        }
+
+        await createTaskMessage({
+          kind,
+          prompt: trimmedPrompt,
+          taskId,
         });
-
-        log.info("task terminated", { jobId });
-      }),
+        await SandboxQueue.enqueue(taskId);
+      })(),
     );
 
-  export const destroyTaskSandbox = (jobId: string, userId?: string): ResultAsync<void, Error> =>
-    fromPromise(SandboxRun.destroy(jobId, sandboxProvider, "Sandbox stopped", userId));
+  export const getTask = (
+    jobId: string,
+  ): ResultAsync<Awaited<ReturnType<typeof findTaskRecord>>, Error> =>
+    fromPromise(findTaskRecord(jobId));
+
+  export const resumeTask = (taskId: string): ResultAsync<void, Error> =>
+    fromPromise(SandboxQueue.resume(taskId));
+
+  export const terminateTask = (jobId: string): ResultAsync<void, Error> =>
+    fromPromise(SandboxQueue.terminate(jobId)).map(() => {
+      log.info("task terminated", { jobId });
+    });
+
+  export const destroyTaskSandbox = (jobId: string): ResultAsync<void, Error> =>
+    fromPromise(SandboxWorkspace.destroy(sandboxProvider, jobId, { stage: "Sandbox stopped" }));
 
   export const destroySandbox = (sandboxId: string): ResultAsync<void, Error> =>
     ResultAsync.fromPromise(
@@ -196,18 +182,6 @@ export namespace Sandbox {
       log.info("sandbox destroyed", { sandboxId });
     });
 
-  export const runTaskFollowUp = (
-    jobId: string,
-    prompt: string,
-    userId?: string,
-  ): ResultAsync<void, Error> =>
-    fromPromise(
-      SandboxRun.followUp(
-        jobId,
-        prompt,
-        sandboxProvider,
-        buildStagehandOpenCodeSetupCommand(),
-        userId,
-      ),
-    );
+  export const runTaskFollowUp = (jobId: string, prompt: string): ResultAsync<void, Error> =>
+    enqueueTaskMessage(jobId, prompt, "follow_up");
 }

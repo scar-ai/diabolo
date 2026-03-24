@@ -45,7 +45,21 @@ const createTaskSummaryLine = ({
 
 type ParsedAgentMessage = { text: string; timestamp: number };
 
-type ParsedFollowUp = {
+type ParsedConversationMessage = {
+  completedAt?: Date | string | null;
+  error?: string | null;
+  id: string;
+  kind: string;
+  logs?: string | null;
+  prompt: string;
+  responseMessages: ParsedAgentMessage[];
+  sequence: number;
+  stage: string;
+  startedAt: Date | string;
+  status: string;
+};
+
+type ParsedLegacyFollowUp = {
   completedAt?: string;
   error?: string;
   id: string;
@@ -58,7 +72,9 @@ type ParsedFollowUp = {
 };
 
 const parseAgentMessages = (raw: string | null | undefined): ParsedAgentMessage[] => {
-  if (!raw) return [];
+  if (!raw) {
+    return [];
+  }
 
   try {
     const parsed = JSON.parse(raw);
@@ -68,15 +84,17 @@ const parseAgentMessages = (raw: string | null | undefined): ParsedAgentMessage[
   }
 };
 
-const parseFollowUpHistory = (raw: string | null | undefined): ParsedFollowUp[] => {
-  if (!raw) return [];
+const parseFollowUpHistory = (raw: string | null | undefined): ParsedLegacyFollowUp[] => {
+  if (!raw) {
+    return [];
+  }
 
   try {
     const parsed = JSON.parse(raw);
 
     return Array.isArray(parsed)
       ? parsed.filter(
-          (entry): entry is ParsedFollowUp =>
+          (entry): entry is ParsedLegacyFollowUp =>
             typeof entry?.id === "string" &&
             typeof entry?.prompt === "string" &&
             typeof entry?.stage === "string" &&
@@ -91,8 +109,42 @@ const parseFollowUpHistory = (raw: string | null | undefined): ParsedFollowUp[] 
 };
 
 const selectParsedTaskDetail = (task: NonNullable<Awaited<ReturnType<typeof $getTaskById>>>) => {
-  const parsedAgentMessages = parseAgentMessages(task.agentMessages);
-  const parsedFollowUpHistory = parseFollowUpHistory(task.followUpHistory);
+  const conversation: ParsedConversationMessage[] =
+    task.messages.length > 0
+      ? task.messages.map((message) => ({
+          completedAt: message.completedAt,
+          error: message.error,
+          id: message.id,
+          kind: message.kind,
+          logs: message.logs,
+          prompt: message.prompt,
+          responseMessages: parseAgentMessages(message.responseMessages),
+          sequence: message.sequence,
+          stage: message.stage,
+          startedAt: message.startedAt,
+          status: message.status,
+        }))
+      : [];
+
+  const initialMessage = conversation[0] ?? null;
+  const parsedAgentMessages =
+    initialMessage?.responseMessages ?? parseAgentMessages(task.agentMessages);
+  const followUps =
+    conversation.length > 0
+      ? conversation.slice(1)
+      : parseFollowUpHistory(task.followUpHistory).map((entry, index) => ({
+          completedAt: entry.completedAt,
+          error: entry.error,
+          id: entry.id,
+          kind: "follow_up",
+          logs: entry.logs,
+          prompt: entry.prompt,
+          responseMessages: entry.responseMessages,
+          sequence: index + 1,
+          stage: entry.stage,
+          startedAt: entry.startedAt,
+          status: entry.status,
+        }));
 
   return {
     ...task,
@@ -100,8 +152,10 @@ const selectParsedTaskDetail = (task: NonNullable<Awaited<ReturnType<typeof $get
       .map((message) => message.text)
       .join("\n\n")
       .trim(),
+    logs: initialMessage?.logs ?? task.logs ?? null,
     parsedAgentMessages,
-    parsedFollowUpHistory,
+    parsedConversation: conversation,
+    parsedFollowUpHistory: followUps,
   };
 };
 

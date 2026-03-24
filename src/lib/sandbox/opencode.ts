@@ -1,7 +1,4 @@
-import {
-  buildStagehandOpenCodeExports,
-  buildStagehandOpenCodeSetupCommand,
-} from "@/lib/opencode/stagehand";
+import { buildStagehandOpenCodeExports } from "@/lib/opencode/stagehand";
 
 const SANDBOX_TOOL_PATH_EXPORT =
   'export PATH="$HOME/.local/bin:$HOME/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/bin:$(npm config get prefix)/bin:$PATH"';
@@ -55,9 +52,7 @@ export const buildOpenCodeRunCommand = (
 ) =>
   [
     SANDBOX_TOOL_PATH_EXPORT,
-    ...(options?.enableStagehandTools
-      ? [buildStagehandOpenCodeSetupCommand(), buildStagehandOpenCodeExports()]
-      : []),
+    ...(options?.enableStagehandTools ? [buildStagehandOpenCodeExports()] : []),
     'printf \'%s\' "$OPENCODE_CONFIG_CONTENT" > "$PWD/../.opencode.generated.json"',
     'export OPENCODE_CONFIG="$PWD/../.opencode.generated.json"',
     `opencode run --format json --model '${escapeForSingleQuotedShell(model)}' "$(cat <<'EOF'\n${prompt}\nEOF\n)"`,

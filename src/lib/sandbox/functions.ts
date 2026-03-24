@@ -24,4 +24,4 @@ export const $startRepoTask = createServerFn({ method: "POST" })
 export const $getRepoTask = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
   .inputValidator((data) => getRepoTaskInputSchema.parse(data))
-  .handler(async ({ data, context }) => unwrap(Sandbox.getTask(data.jobId, context.user.id)));
+  .handler(async ({ data }) => unwrap(Sandbox.getTask(data.jobId)));

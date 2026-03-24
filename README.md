@@ -1,95 +1,81 @@
-# diabolo
+# diabolo ⚙️😈
 
-This project was scaffolded with [`create-mugnavo`](https://github.com/mugnavo/create-mugnavo).
+**diabolo** is a powerful platform for orchestrating AI agents in isolated, reproducible sandboxed environments. Built on a cutting-edge React 19 stack, it combines cloud-native development environments with sophisticated browser automation.
+
+## 🚀 Key Features
+
+- **🏗️ Sandboxed Execution:** Utilizes [Daytona](https://www.daytona.io/) to spin up secure, isolated development environments for AI agents to execute code and manage workspaces.
+- **🌐 Intelligent Browsing:** Integrated with [Stagehand](https://stagehand.dev/) and [OpenRouter](https://openrouter.ai/) for high-level, LLM-driven browser automation and web interaction.
+- **⚡ Modern Full-Stack:** Built with [TanStack Start](https://tanstack.com/start), leveraging React 19, [Vite](https://vite.dev/), and [Nitro](https://nitro.build/) for a seamless SSR and client-side experience.
+- **🔐 Secure Auth:** Robust authentication powered by [Better Auth](https://www.better-auth.com/) with Drizzle ORM integration.
+- **📊 Database & Types:** [Drizzle ORM](https://orm.drizzle.team/) with PostgreSQL for type-safe database operations and [Zod](https://zod.dev/) for rigorous schema validation.
+- **🎨 Polished UI:** Styled with [Tailwind CSS v4](https://tailwindcss.com/), [shadcn/ui](https://ui.shadcn.com/), and [Remix Icon](https://remixicon.com/).
+- **🛠️ Developer First:** Ultra-fast linting and formatting with [Oxlint](https://oxc.rs/docs/guide/usage/linter.html) and [Oxfmt](https://oxc.rs/docs/guide/usage/formatter.html).
+
+## 🛠️ Tech Stack
+
+- **Frontend:** React 19, TanStack Router, TanStack Query, TanStack Start.
+- **Backend:** Nitro, Drizzle ORM, PostgreSQL.
+- **Auth:** Better Auth.
+- **Agent Capabilities:** Daytona SDK, Stagehand, Octokit (GitHub API).
+- **Tooling:** TypeScript, Vite, Tailwind CSS v4, Oxlint, Oxfmt, Husky.
+
+## 🏁 Getting Started
+
+### 1. Prerequisites
+
+- [pnpm](https://pnpm.io/) (Recommended)
+- [Docker](https://www.docker.com/) (for local database)
+- Daytona API Key (if using sandboxes)
+- OpenRouter API Key (for browser automation)
+
+### 2. Installation
 
 ```bash
-pnpm create mugnavo
+# Clone the repository
+git clone https://github.com/your-repo/diabolo.git
+cd diabolo
+
+# Install dependencies
+pnpm install
 ```
 
-- [React 19](https://react.dev) + [React Compiler](https://react.dev/learn/react-compiler)
-- TanStack [Start](https://tanstack.com/start/latest) + [Router](https://tanstack.com/router/latest) + [Query](https://tanstack.com/query/latest)
-- [Tailwind CSS](https://tailwindcss.com/) + [shadcn/ui](https://ui.shadcn.com/) + [Base UI](https://base-ui.com/) (base-maia) + [Remix Icon](https://remixicon.com/)
-- [Vite 8](https://vite.dev) + [Nitro v3](https://nitro.build/)
-- [Drizzle ORM](https://orm.drizzle.team/) + PostgreSQL
-- [Better Auth](https://www.better-auth.com/)
-- [Oxlint](https://oxc.rs/docs/guide/usage/linter.html) + [Oxfmt](https://oxc.rs/docs/guide/usage/formatter.html)
+### 3. Environment Setup
 
-> [!TIP]
-> This template is also available as a monorepo, powered by [Vite+](https://viteplus.dev/) and pnpm. See [mugnavo/tanstarter-plus](https://github.com/mugnavo/tanstarter-plus).
+Create a `.env` file based on [`.env.example`](./.env.example) and fill in the required credentials.
 
-## Getting Started
+### 4. Database Setup
 
-1. [Use this template](https://github.com/new?template_name=tanstarter&template_owner=mugnavo) or create a project using our CLI:
+Spin up the local database and run migrations:
 
-   ```bash
-   pnpm create mugnavo
-   ```
+```bash
+pnpm db push
+```
 
-2. Create a `.env` file based on [`.env.example`](./.env.example).
+### 5. Development
 
-3. Push the schema to your database with drizzle-kit:
+Start the development server:
 
-   ```bash
-   pnpm db push
-   ```
+```bash
+pnpm dev
+```
 
-   This starts the local Postgres service from `docker-compose.yml` before running Drizzle.
+The application will be available at `http://localhost:3000`.
 
-   https://orm.drizzle.team/docs/migrations
+## 📜 Available Scripts
 
-4. Run the development server:
+- `pnpm dev`: Start the development server.
+- `pnpm build`: Build for production.
+- `pnpm start`: Run the production server.
+- `pnpm check`: Run linting and formatting checks.
+- `pnpm db`: Drizzle ORM management (generate, migrate, studio).
+- `pnpm auth:migrate`: Sync Better Auth schema with the database.
+- `pnpm ui`: shadcn/ui component management.
 
-   ```bash
-   pnpm dev
-   ```
+## 🤝 Contributing
 
-   The development server should now be running at [http://localhost:3000](http://localhost:3000).
+Contributions are welcome! Please ensure you run `pnpm check` before submitting a PR to maintain code quality.
 
-## Deploying to production
+## 📄 License
 
-[![Netlify Status](https://api.netlify.com/api/v1/badges/66acdee6-8e42-436f-9943-a67cad998f63/deploy-status)](https://app.netlify.com/projects/mugnavo-tanstarter/deploys)
-
-The [vite config](./vite.config.ts#L12-L13) is currently configured to use Nitro to deploy on Netlify, but supports many other [deployment presets](https://nitro.build/deploy) like Vercel and Node.
-
-While Nitro provides a great multi-provider default, the official [@netlify/vite-plugin-tanstack-start](https://npmx.dev/package/@netlify/vite-plugin-tanstack-start) is also available for Netlify deployments.
-
-Refer to the [TanStack Start hosting docs](https://tanstack.com/start/latest/docs/framework/react/guide/hosting) for deploying to other platforms.
-
-## Issue watchlist
-
-- [Router/Start issues](https://github.com/TanStack/router/issues) - TanStack Start is in RC.
-- [Devtools releases](https://github.com/TanStack/devtools/releases) - TanStack Devtools is in alpha and may still have breaking changes.
-- [Nitro v3 beta](https://nitro.build/blog/v3-beta) - The template is configured with Nitro v3 beta by default.
-
-## Goodies
-
-#### Git hooks
-
-We use [Husky](https://typicode.github.io/husky/) to run git hooks with the following tools:
-
-- [lint-staged](https://github.com/lint-staged/lint-staged) - Run Oxfmt to format staged files on commit (`pre-commit`).
-
-#### Scripts
-
-We use **pnpm** by default, but you can modify these scripts in [package.json](./package.json) to use your preferred package manager.
-
-- **`auth:generate`** - Regenerate the [auth db schema](./src/lib/db/schema/schema.ts) if you've made changes to your Better Auth [config](./src/lib/auth/auth.ts).
-- **`db`** - Run [drizzle-kit](https://orm.drizzle.team/docs/kit-overview) commands. (e.g. `pnpm db generate`, `pnpm db studio`)
-- **`ui`** - The shadcn/ui CLI. (e.g. `pnpm ui add button`)
-- **`format`**, **`lint`** - Run Oxfmt and Oxlint, or both via `pnpm check`.
-- **`deps`** - Selectively upgrade dependencies via taze.
-
-#### Utilities
-
-- [`auth/middleware.ts`](./src/lib/auth/middleware.ts) - Sample middleware for forcing authentication on server functions. (see [#5](https://github.com/mugnavo/tanstarter/issues/5#issuecomment-2615905686) and [#17](https://github.com/mugnavo/tanstarter/issues/17#issuecomment-2853482062))
-- [`theme-toggle.tsx`](./src/components/theme-toggle.tsx), [`theme-provider.tsx`](./src/components/theme-provider.tsx) - A theme toggle and provider for toggling between light and dark mode. ([#7](https://github.com/mugnavo/tanstarter/issues/7#issuecomment-3141530412))
-
-## License
-
-Code in this template is public domain via [Unlicense](./LICENSE). Feel free to remove or replace for your own project.
-
-## Also check out
-
-- [@tanstack/intent](https://tanstack.com/intent/latest/docs/getting-started/quick-start-consumers) - Up-to-date skills for your AI agents, auto-synchronized from your installed dependencies.
-- [awesome-tanstack-start](https://github.com/Balastrong/awesome-tanstack-start) - A curated list of awesome resources for TanStack Start.
-- [shadcn/ui Directory](https://ui.shadcn.com/docs/directory), [MCP](https://ui.shadcn.com/docs/mcp), [shoogle.dev](https://shoogle.dev/) - Component directories & registries for shadcn/ui.
+This project is licensed under the [Unlicense](./LICENSE).
