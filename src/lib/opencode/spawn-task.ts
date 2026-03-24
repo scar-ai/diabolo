@@ -132,8 +132,9 @@ export const buildSpawnTaskOpenCodeSetupCommand = () =>
   [
     'OPENCODE_TOOLS_ROOT="${OPENCODE_TOOLS_ROOT:-$HOME/.config/opencode}"',
     'mkdir -p "$OPENCODE_TOOLS_ROOT/tools"',
-    'if ! command -v pnpm >/dev/null 2>&1; then if command -v corepack >/dev/null 2>&1; then pnpm() { corepack pnpm "$@"; }; else npm install -g pnpm --prefix "$HOME/.local"; export PATH="$HOME/.local/bin:$PATH"; fi; fi',
     writeFileCommand("$OPENCODE_TOOLS_ROOT/package.json", SPAWN_TASK_PACKAGE_JSON),
     writeFileCommand("$OPENCODE_TOOLS_ROOT/tools/spawn-task.ts", SPAWN_TASK_TOOL_CONTENT),
-    'if [ ! -d "$OPENCODE_TOOLS_ROOT/node_modules/zod" ]; then (cd "$OPENCODE_TOOLS_ROOT" && pnpm install --ignore-scripts); fi',
+    'GLOBAL_NODE_MODULES="$(npm root -g)"',
+    'if [ ! -e "$OPENCODE_TOOLS_ROOT/node_modules" ] && [ -d "$GLOBAL_NODE_MODULES" ]; then ln -s "$GLOBAL_NODE_MODULES" "$OPENCODE_TOOLS_ROOT/node_modules"; fi',
+    'if [ ! -d "$OPENCODE_TOOLS_ROOT/node_modules/zod" ]; then echo "Global zod dependency is missing from the Daytona browser snapshot." >&2; exit 1; fi',
   ].join("\n");

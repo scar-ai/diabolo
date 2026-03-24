@@ -16,6 +16,8 @@ export const env = createEnv({
     DAYTONA_API_URL: z.url().optional(),
     DAYTONA_TARGET: z.string().optional(),
     DAYTONA_DEFAULT_IMAGE: z.string().optional(),
+    DAYTONA_BROWSER_BASE_IMAGE: z.string().optional(),
+    DAYTONA_BROWSER_SNAPSHOT: z.string().optional(),
     OPENROUTER_API_KEY: z.string().optional(),
     OPENCODE_MODEL: z.string().optional(),
   },

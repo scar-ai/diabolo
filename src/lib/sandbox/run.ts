@@ -242,7 +242,7 @@ const runInitialMessage = async (taskId: string, messageId: string) => {
     viewer,
   });
 
-  await updateStage(taskId, messageId, "Running OpenCode task");
+  await updateStage(taskId, messageId, "Running task");
 
   const prompt = buildOpenCodePrompt(messageRecord.prompt, {
     enableBrowserTools,

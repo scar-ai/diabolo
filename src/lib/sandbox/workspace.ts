@@ -72,7 +72,7 @@ export namespace SandboxWorkspace {
     taskId: string;
     viewer: Viewer;
   }) => {
-    await updateStage(input.taskId, "Booting Daytona sandbox");
+    await updateStage(input.taskId, "Getting your sandbox ready");
 
     const sandbox = await input.provider.createWorkspace(input.repoName);
 
@@ -112,7 +112,7 @@ export namespace SandboxWorkspace {
 
     await updateTaskRecord(input.taskId, {
       sandboxPath,
-      stage: "Preparing git branch and OpenCode runtime",
+      stage: "Preparing git branch and agent runtime",
     });
 
     await input.run(

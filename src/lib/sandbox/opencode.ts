@@ -7,7 +7,7 @@ const escapeForSingleQuotedShell = (value: string) => value.replace(/'/g, `'\\''
 
 export const opencodeInstallCommand = [
   SANDBOX_TOOL_PATH_EXPORT,
-  "if ! command -v opencode >/dev/null 2>&1; then npm install -g opencode-ai; fi",
+  'if ! command -v opencode >/dev/null 2>&1; then echo "OpenCode is missing from the Daytona browser snapshot." >&2; exit 1; fi',
   "opencode --version",
   buildSpawnTaskOpenCodeSetupCommand(),
 ].join("\n");
