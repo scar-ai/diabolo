@@ -1,5 +1,5 @@
 import "@tanstack/react-start/server-only";
-import { and, asc, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, isNotNull, lt, sql } from "drizzle-orm";
 
 import { db } from "@/lib/db";
 import { task, taskMessage } from "@/lib/project/project.sql";
@@ -235,7 +235,8 @@ export const findStaleProcessingMessage = (taskId: string, staleBefore: Date) =>
       and(
         eq(taskMessage.taskId, taskId),
         eq(taskMessage.status, "processing"),
-        sql`${taskMessage.processingStartedAt} is not null and ${taskMessage.processingStartedAt} < ${staleBefore}`,
+        isNotNull(taskMessage.processingStartedAt),
+        lt(taskMessage.processingStartedAt, staleBefore),
       ),
     )
     .orderBy(asc(taskMessage.sequence))
@@ -245,6 +246,6 @@ export const findLatestCompletedMessage = (taskId: string) =>
   db
     .select()
     .from(taskMessage)
-    .where(and(eq(taskMessage.taskId, taskId), sql`${taskMessage.completedAt} is not null`))
+    .where(and(eq(taskMessage.taskId, taskId), isNotNull(taskMessage.completedAt)))
     .orderBy(desc(taskMessage.sequence))
     .then((rows) => rows[0]);
