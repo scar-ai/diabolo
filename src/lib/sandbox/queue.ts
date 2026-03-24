@@ -1,6 +1,5 @@
 import "@tanstack/react-start/server-only";
 import { Log } from "@/lib/log";
-import { buildStagehandOpenCodeSetupCommand } from "@/lib/opencode/stagehand";
 import { getSandboxProvider } from "@/lib/sandbox/daytona-provider";
 import { SandboxRun } from "@/lib/sandbox/run";
 import {
@@ -76,12 +75,7 @@ const drainTaskQueue = async (taskId: string) => {
         break;
       }
 
-      await SandboxRun.processMessage(
-        taskId,
-        claimed.id,
-        sandboxProvider,
-        buildStagehandOpenCodeSetupCommand(),
-      );
+      await SandboxRun.processMessage(taskId, claimed.id, sandboxProvider);
     }
   } finally {
     activeProcessors.delete(taskId);

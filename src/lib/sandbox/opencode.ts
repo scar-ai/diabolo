@@ -1,5 +1,4 @@
 import { buildSpawnTaskOpenCodeSetupCommand } from "@/lib/opencode/spawn-task";
-import { buildStagehandOpenCodeExports } from "@/lib/opencode/stagehand";
 
 const SANDBOX_TOOL_PATH_EXPORT =
   'export PATH="$HOME/.local/bin:$HOME/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/bin:$(npm config get prefix)/bin:$PATH"';
@@ -16,7 +15,7 @@ export const opencodeInstallCommand = [
 export const buildOpenCodePrompt = (
   userPrompt: string,
   options?: {
-    enableStagehandTools?: boolean;
+    enableBrowserTools?: boolean;
     sandboxId?: string;
   },
 ) =>
@@ -27,17 +26,17 @@ export const buildOpenCodePrompt = (
     "Fix any issues you find during verification before finishing.",
     "Do not create commits, branches, or pull requests yourself.",
     "Leave the repository with uncommitted file changes only.",
-    ...(options?.enableStagehandTools
+    ...(options?.enableBrowserTools
       ? [
           "",
-          "Frontend validation instructions:",
-          "Use the Stagehand local browser tools for browser automation, screenshots, and interactive verification when the task touches frontend behavior.",
-          "If the user explicitly asks for computer use, the browser, screenshots, clicking, typing, localhost pages, or similar interactive actions, you must use the Stagehand tools instead of relying only on shell inspection.",
+          "Browser validation instructions:",
+          "Use the local browser tools for browser automation, screenshots, and interactive verification when the task touches frontend behavior.",
+          "If the user explicitly asks for computer use, the browser, screenshots, clicking, typing, localhost pages, or similar interactive actions, you must use the browser tools instead of relying only on shell inspection.",
           options.sandboxId
-            ? `The current Daytona sandbox id is ${options.sandboxId}. Run the Stagehand browser inside this sandbox and keep browser activity local to it.`
-            : "Use the current sandbox for local Stagehand browser actions whenever possible.",
-          "Key tools available include stagehand_open_url, stagehand_get_state, stagehand_page_text, stagehand_observe, stagehand_act, stagehand_screenshot, and stagehand_close.",
-          "If you need to verify UI behavior, start the app server inside the sandbox, open the local URL with stagehand_open_url, interact through Stagehand, and capture screenshots before finishing.",
+            ? `The current Daytona sandbox id is ${options.sandboxId}. Run browser automation inside this sandbox and keep browser activity local to it.`
+            : "Use the current sandbox for local browser actions whenever possible.",
+          "Key tools available include browser_open_url, browser_snapshot, browser_click, browser_fill, browser_type, browser_keyboard_type, browser_press, browser_wait, browser_screenshot, browser_evaluate, and browser_close.",
+          "Preferred workflow: open the page, take a browser_snapshot to get refs like @e1, interact using those refs, then capture a browser_screenshot before finishing when visual verification matters.",
         ]
       : []),
     "",
@@ -48,13 +47,12 @@ export const buildOpenCodePrompt = (
 export const buildOpenCodeRunCommand = (
   model: string,
   prompt: string,
-  options?: {
-    enableStagehandTools?: boolean;
+  _options?: {
+    enableBrowserTools?: boolean;
   },
 ) =>
   [
     SANDBOX_TOOL_PATH_EXPORT,
-    ...(options?.enableStagehandTools ? [buildStagehandOpenCodeExports()] : []),
     'printf \'%s\' "$OPENCODE_CONFIG_CONTENT" > "$PWD/../.opencode.generated.json"',
     'export OPENCODE_CONFIG="$PWD/../.opencode.generated.json"',
     `opencode run --format json --model '${escapeForSingleQuotedShell(model)}' "$(cat <<'EOF'\n${prompt}\nEOF\n)"`,

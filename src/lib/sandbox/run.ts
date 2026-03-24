@@ -224,12 +224,12 @@ const runInitialMessage = async (taskId: string, messageId: string) => {
     status: "running",
   });
 
-  const enableStagehandTools = Sandbox.isFrontendTaskPrompt(messageRecord.prompt);
+  const enableBrowserTools = Sandbox.isFrontendTaskPrompt(messageRecord.prompt);
 
   const prepared = await SandboxWorkspace.prepare({
     authenticatedRemoteUrl,
     branch: taskRecord.branchName?.trim() || repo.defaultBranch,
-    enableStagehandTools,
+    enableBrowserTools,
     githubAccessToken,
     messageId,
     provider: Sandbox.getProvider(),
@@ -237,7 +237,7 @@ const runInitialMessage = async (taskId: string, messageId: string) => {
     repoOwnerLogin: repo.ownerLogin,
     repoUrl: repo.cloneUrl,
     run,
-    setupTools: enableStagehandTools ? Sandbox.getSetupToolsCommand() : undefined,
+    setupTools: enableBrowserTools ? Sandbox.getSetupToolsCommand() : undefined,
     taskId,
     viewer,
   });
@@ -245,7 +245,7 @@ const runInitialMessage = async (taskId: string, messageId: string) => {
   await updateStage(taskId, messageId, "Running OpenCode task");
 
   const prompt = buildOpenCodePrompt(messageRecord.prompt, {
-    enableStagehandTools,
+    enableBrowserTools,
     sandboxId: prepared.sandbox.id,
   });
   const response = await run(
@@ -253,7 +253,7 @@ const runInitialMessage = async (taskId: string, messageId: string) => {
     taskId,
     messageId,
     buildOpenCodeRunCommand(model, prompt, {
-      enableStagehandTools,
+      enableBrowserTools,
     }),
     prepared.sandboxPath,
     {
@@ -425,18 +425,18 @@ const runFollowUpMessage = async (taskId: string, messageId: string) => {
     throw new Error("Unknown repository selection.");
   }
 
-  const enableStagehandTools = Sandbox.isFrontendTaskPrompt(messageRecord.prompt);
+  const enableBrowserTools = Sandbox.isFrontendTaskPrompt(messageRecord.prompt);
   const model = taskRecord.opencodeModel?.trim() || ensureOpenCodeConfig().model;
 
   const prepared = await SandboxWorkspace.getOrCreateFollowUp({
     authenticatedRemoteUrl,
-    enableStagehandTools,
+    enableBrowserTools,
     githubAccessToken,
     messageId,
     provider: Sandbox.getProvider(),
     repo,
     run,
-    setupTools: enableStagehandTools ? Sandbox.getSetupToolsCommand() : undefined,
+    setupTools: enableBrowserTools ? Sandbox.getSetupToolsCommand() : undefined,
     taskId,
     taskRecord,
     viewer,
@@ -450,7 +450,7 @@ const runFollowUpMessage = async (taskId: string, messageId: string) => {
 
   const openCode = ensureOpenCodeConfig();
   const prompt = buildOpenCodePrompt(messageRecord.prompt, {
-    enableStagehandTools,
+    enableBrowserTools,
     sandboxId: prepared.sandbox.id,
   });
   const response = await run(
@@ -458,7 +458,7 @@ const runFollowUpMessage = async (taskId: string, messageId: string) => {
     taskId,
     messageId,
     buildOpenCodeRunCommand(model, prompt, {
-      enableStagehandTools,
+      enableBrowserTools,
     }),
     prepared.sandboxPath,
     {
@@ -509,7 +509,6 @@ export namespace SandboxRun {
     taskId: string,
     messageId: string,
     provider: Sandbox.Provider,
-    _setupTools?: string,
   ) => {
     const op = log.child({ messageId, taskId });
     const message = await findTaskMessage(messageId);

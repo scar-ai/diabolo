@@ -5,7 +5,7 @@
 ## 🚀 Key Features
 
 - **🏗️ Sandboxed Execution:** Utilizes [Daytona](https://www.daytona.io/) to spin up secure, isolated development environments for AI agents to execute code and manage workspaces.
-- **🌐 Intelligent Browsing:** Integrated with [Stagehand](https://stagehand.dev/) and [OpenRouter](https://openrouter.ai/) for high-level, LLM-driven browser automation and web interaction.
+- **🌐 Intelligent Browsing:** Integrated with `agent-browser` and [OpenRouter](https://openrouter.ai/) so OpenCode agents can perform browser automation, screenshots, and interactive web verification inside the sandbox.
 - **⚡ Modern Full-Stack:** Built with [TanStack Start](https://tanstack.com/start), leveraging React 19, [Vite](https://vite.dev/), and [Nitro](https://nitro.build/) for a seamless SSR and client-side experience.
 - **🔐 Secure Auth:** Robust authentication powered by [Better Auth](https://www.better-auth.com/) with Drizzle ORM integration.
 - **📊 Database & Types:** [Drizzle ORM](https://orm.drizzle.team/) with PostgreSQL for type-safe database operations and [Zod](https://zod.dev/) for rigorous schema validation.
@@ -17,7 +17,7 @@
 - **Frontend:** React 19, TanStack Router, TanStack Query, TanStack Start.
 - **Backend:** Nitro, Drizzle ORM, PostgreSQL.
 - **Auth:** Better Auth.
-- **Agent Capabilities:** Daytona SDK, Stagehand, Octokit (GitHub API).
+- **Agent Capabilities:** Daytona SDK, `agent-browser`, Octokit (GitHub API).
 - **Tooling:** TypeScript, Vite, Tailwind CSS v4, Oxlint, Oxfmt, Husky.
 
 ## 🏁 Getting Started

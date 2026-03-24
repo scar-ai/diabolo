@@ -60,7 +60,7 @@ export namespace SandboxWorkspace {
   export const prepare = async (input: {
     authenticatedRemoteUrl: string;
     branch: string;
-    enableStagehandTools: boolean;
+    enableBrowserTools: boolean;
     githubAccessToken: string;
     messageId: string;
     provider: Sandbox.Provider;
@@ -106,7 +106,7 @@ export namespace SandboxWorkspace {
       opencodeInstallCommand,
     ];
 
-    if (input.enableStagehandTools && input.setupTools) {
+    if (input.enableBrowserTools && input.setupTools) {
       setup.push(input.setupTools);
     }
 
@@ -133,7 +133,7 @@ export namespace SandboxWorkspace {
 
   export const getOrCreateFollowUp = async (input: {
     authenticatedRemoteUrl: string;
-    enableStagehandTools: boolean;
+    enableBrowserTools: boolean;
     githubAccessToken: string;
     messageId: string;
     provider: Sandbox.Provider;
@@ -158,7 +158,7 @@ export namespace SandboxWorkspace {
     return prepare({
       authenticatedRemoteUrl: input.authenticatedRemoteUrl,
       branch: input.taskRecord.branchName?.trim() || input.repo.defaultBranch,
-      enableStagehandTools: input.enableStagehandTools,
+      enableBrowserTools: input.enableBrowserTools,
       githubAccessToken: input.githubAccessToken,
       messageId: input.messageId,
       provider: input.provider,
