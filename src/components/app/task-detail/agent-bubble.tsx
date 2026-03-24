@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils";
 
 import type { TaskData } from "./types";
 
-function ThinkingWave({ text = "Thinking..." }: { text?: string }) {
+export function ThinkingWave({ text = "Thinking..." }: { text?: string }) {
   const chars = text.split("");
   return (
     <span className="text-sm font-medium" aria-label={text}>

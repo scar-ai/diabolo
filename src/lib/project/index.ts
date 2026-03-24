@@ -73,10 +73,13 @@ export namespace Project {
   const insertTask = (input: {
     branchName: string;
     id: string;
+    opencodeModel?: string | null;
+    parentTaskId?: string | null;
     projectId: string;
     prompt: string;
     quickTask: boolean;
     repoId: string;
+    spawnSource?: string;
     stage: string;
     startedAt: Date;
     status: string;
@@ -96,6 +99,14 @@ export namespace Project {
       .from(task)
       .where(eq(task.id, taskId))
       .then((rows) => rows[0]);
+
+  const findTaskWithProject = (taskId: string) =>
+    db
+      .select()
+      .from(task)
+      .innerJoin(project, eq(task.projectId, project.id))
+      .where(eq(task.id, taskId))
+      .then((rows) => rows[0] as TaskForUserRecord | undefined);
 
   const findProjectTask = (taskId: string, projectId: string) =>
     db
@@ -297,6 +308,52 @@ export namespace Project {
         return value;
       });
   };
+
+  export const createChildTaskForTask = (input: {
+    model?: string | null;
+    parentTaskId: string;
+    prompt: string;
+    title: string;
+  }): ResultAsync<TaskRecord, Error> =>
+    fromPromise(findTaskWithProject(input.parentTaskId)).andThen((value) => {
+      if (!value) {
+        return errAsync(new Error("Parent task not found."));
+      }
+
+      const parentTask = value.task;
+      const branchName = parentTask.branchName ?? "main";
+
+      return Sandbox.startTask(
+        {
+          prompt: input.prompt,
+          quickTask: false,
+          repoId: parentTask.repoId ?? value.project.repoId,
+          sourceBranch: branchName,
+        },
+        value.project.userId,
+      ).andThen((draft) =>
+        fromPromise(
+          insertTask({
+            branchName,
+            id: draft.id,
+            opencodeModel: input.model ?? null,
+            parentTaskId: input.parentTaskId,
+            projectId: parentTask.projectId,
+            prompt: input.prompt,
+            quickTask: false,
+            repoId: draft.repoId,
+            spawnSource: "agent",
+            stage: input.title.trim() ? `Queued child task: ${input.title.trim()}` : draft.stage,
+            startedAt: new Date(draft.startedAt),
+            status: draft.status,
+          }),
+        ).andThen((createdTask) =>
+          Sandbox.enqueueTaskMessage(createdTask.id, input.prompt, "initial").map(
+            () => createdTask,
+          ),
+        ),
+      );
+    });
 
   export const listTasksForProject = (
     projectId: string,

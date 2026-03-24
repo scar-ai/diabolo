@@ -4,6 +4,7 @@ import { ResultAsync } from "neverthrow";
 import { Github } from "@/lib/github";
 import { Log } from "@/lib/log";
 import { ensureOpenCodeConfig } from "@/lib/opencode/config";
+import { createSpawnTaskToken, getSpawnTaskEndpoint } from "@/lib/opencode/spawn-task";
 import { buildStagehandOpenCodeSetupCommand } from "@/lib/opencode/stagehand";
 import { fromPromise, toError } from "@/lib/result";
 import { getSandboxProvider } from "@/lib/sandbox/daytona-provider";
@@ -89,6 +90,12 @@ export namespace Sandbox {
   export const getProvider = () => sandboxProvider;
 
   export const getSetupToolsCommand = () => stagehandSetupToolsCommand;
+
+  export const getSpawnTaskEnvironment = (taskId: string) => ({
+    OPENCODE_SPAWN_TASK_ENDPOINT: getSpawnTaskEndpoint(),
+    OPENCODE_SPAWN_TASK_PARENT_ID: taskId,
+    OPENCODE_SPAWN_TASK_TOKEN: createSpawnTaskToken(taskId),
+  });
 
   export const startTask = (input: TaskInput, userId: string): ResultAsync<TaskJob, Error> =>
     fromPromise(

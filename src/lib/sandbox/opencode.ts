@@ -1,3 +1,4 @@
+import { buildSpawnTaskOpenCodeSetupCommand } from "@/lib/opencode/spawn-task";
 import { buildStagehandOpenCodeExports } from "@/lib/opencode/stagehand";
 
 const SANDBOX_TOOL_PATH_EXPORT =
@@ -9,6 +10,7 @@ export const opencodeInstallCommand = [
   SANDBOX_TOOL_PATH_EXPORT,
   "if ! command -v opencode >/dev/null 2>&1; then npm install -g opencode-ai; fi",
   "opencode --version",
+  buildSpawnTaskOpenCodeSetupCommand(),
 ].join("\n");
 
 export const buildOpenCodePrompt = (

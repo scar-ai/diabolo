@@ -35,9 +35,12 @@ export const task = pgTable(
     repoId: text(),
     repoName: text(),
     repoUrl: text(),
+    parentTaskId: text("parent_task_id"),
     sandboxId: text(),
     sandboxName: text(),
     branchName: text(),
+    spawnSource: text().notNull().default("user"),
+    opencodeModel: text(),
     sandboxPath: text("clone_path"),
     logs: text(),
     agentMessages: text(),
@@ -54,7 +57,10 @@ export const task = pgTable(
       .$onUpdate(() => new Date())
       .notNull(),
   },
-  (table) => [index("task_projectId_idx").on(table.projectId)],
+  (table) => [
+    index("task_projectId_idx").on(table.projectId),
+    index("task_parentTaskId_idx").on(table.parentTaskId),
+  ],
 );
 
 export const taskMessage = pgTable(
@@ -93,7 +99,13 @@ export const projectRelations = relations(project, ({ many }) => ({
 }));
 
 export const taskRelations = relations(task, ({ many, one }) => ({
+  children: many(task, { relationName: "task_children" }),
   messages: many(taskMessage),
+  parent: one(task, {
+    fields: [task.parentTaskId],
+    relationName: "task_children",
+    references: [task.id],
+  }),
   project: one(project, {
     fields: [task.projectId],
     references: [project.id],

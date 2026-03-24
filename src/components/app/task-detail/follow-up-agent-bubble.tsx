@@ -1,28 +1,40 @@
-import { ChevronDownIcon, ChevronRightIcon, LoaderIcon, TerminalIcon } from "lucide-react";
+import { ChevronDownIcon, ChevronRightIcon, TerminalIcon } from "lucide-react";
 import { useState } from "react";
 
 import { Markdown } from "@/components/app/markdown";
 
+import { ThinkingWave } from "./agent-bubble";
 import type { ParsedFollowUp } from "./types";
 
 export function FollowUpAgentBubble({ followUp }: { followUp: ParsedFollowUp }) {
   const [logsOpen, setLogsOpen] = useState(false);
-  const combinedText = followUp.responseMessages.map((m) => m.text).join("\n\n");
+  const combinedText = followUp.responseMessages
+    .map((m) => m.text)
+    .join("\n\n")
+    .trim();
   const isRunning = followUp.status === "queued" || followUp.status === "running";
 
   return (
     <div className="flex w-full flex-col gap-3">
-      <span className="text-xs text-muted-foreground">{followUp.stage}</span>
-
       {combinedText ? (
-        <div className="text-sm leading-relaxed text-foreground">
-          <Markdown content={combinedText} />
+        <div className="flex flex-col gap-2">
+          {followUp.stage ? (
+            isRunning ? (
+              <ThinkingWave text={`${followUp.stage}...`} />
+            ) : (
+              <span className="text-xs font-medium tracking-[0.02em] text-muted-foreground">
+                {followUp.stage}
+              </span>
+            )
+          ) : null}
+          <div className="text-sm leading-relaxed text-foreground">
+            <Markdown content={combinedText} />
+          </div>
         </div>
       ) : isRunning ? (
-        <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
-          <LoaderIcon className="size-3.5 animate-spin" />
-          <span>Thinking...</span>
-        </div>
+        <ThinkingWave text={followUp.stage ? `${followUp.stage}...` : undefined} />
+      ) : followUp.stage ? (
+        <div className="text-sm text-muted-foreground">{followUp.stage}</div>
       ) : (
         <div className="text-sm text-muted-foreground">No response captured.</div>
       )}
@@ -53,12 +65,12 @@ export function FollowUpAgentBubble({ followUp }: { followUp: ParsedFollowUp }) 
             )}
           </button>
           {logsOpen ? (
-            <div className="max-h-[300px] overflow-auto rounded-lg bg-[#0a0a0a] p-3 font-mono text-[11px] leading-relaxed text-emerald-400">
+            <div className="max-h-75 overflow-auto rounded-lg bg-[#0a0a0a] p-3 font-mono text-[11px] leading-relaxed text-emerald-400">
               <pre className="break-all whitespace-pre-wrap">{followUp.logs}</pre>
             </div>
           ) : null}
         </div>
-      ) : isRunning ? (
+      ) : isRunning && !combinedText ? (
         <div className="flex items-center gap-1.5 text-xs text-muted-foreground/50">
           <TerminalIcon className="size-3" />
           <span>Waiting for logs...</span>

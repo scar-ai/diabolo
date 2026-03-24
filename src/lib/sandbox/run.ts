@@ -176,20 +176,6 @@ const pushFollowUpChanges = async (input: {
   sandboxPath: string;
   taskId: string;
 }) => {
-  const changes = await run(
-    input.sandbox,
-    input.taskId,
-    input.messageId,
-    "git status --porcelain",
-    input.sandboxPath,
-    undefined,
-    60,
-  );
-
-  if (!read(changes.output)) {
-    return;
-  }
-
   const commitMessage = buildFollowUpCommitMessage(input.prompt);
 
   await run(
@@ -226,6 +212,7 @@ const runInitialMessage = async (taskId: string, messageId: string) => {
     unwrapResult<string>(Github.getAuthenticatedRemoteUrl(taskRecord.repoId ?? "")),
   ]);
   const openCode = ensureOpenCodeConfig();
+  const model = taskRecord.opencodeModel?.trim() || openCode.model;
 
   if (!repo) {
     throw new Error("Unknown repository selection.");
@@ -265,13 +252,14 @@ const runInitialMessage = async (taskId: string, messageId: string) => {
     prepared.sandbox,
     taskId,
     messageId,
-    buildOpenCodeRunCommand(openCode.model, prompt, {
+    buildOpenCodeRunCommand(model, prompt, {
       enableStagehandTools,
     }),
     prepared.sandboxPath,
     {
       OPENROUTER_API_KEY: openCode.apiKey,
-      OPENCODE_CONFIG_CONTENT: buildOpenCodeConfigContent(openCode.model),
+      OPENCODE_CONFIG_CONTENT: buildOpenCodeConfigContent(model),
+      ...Sandbox.getSpawnTaskEnvironment(taskId),
     },
     3600,
   );
@@ -347,7 +335,7 @@ const runInitialMessage = async (taskId: string, messageId: string) => {
       userPrompt: messageRecord.prompt,
     },
     openCode.apiKey,
-    openCode.model,
+    model,
   );
 
   if (didGitMetadataGenerationTimeout(started)) {
@@ -438,6 +426,7 @@ const runFollowUpMessage = async (taskId: string, messageId: string) => {
   }
 
   const enableStagehandTools = Sandbox.isFrontendTaskPrompt(messageRecord.prompt);
+  const model = taskRecord.opencodeModel?.trim() || ensureOpenCodeConfig().model;
 
   const prepared = await SandboxWorkspace.getOrCreateFollowUp({
     authenticatedRemoteUrl,
@@ -457,7 +446,7 @@ const runFollowUpMessage = async (taskId: string, messageId: string) => {
     throw new Error("No sandbox workspace available for follow-up.");
   }
 
-  await updateStage(taskId, messageId, "Running follow-up task");
+  await updateStage(taskId, messageId, "Running OpenCode task");
 
   const openCode = ensureOpenCodeConfig();
   const prompt = buildOpenCodePrompt(messageRecord.prompt, {
@@ -468,13 +457,14 @@ const runFollowUpMessage = async (taskId: string, messageId: string) => {
     prepared.sandbox,
     taskId,
     messageId,
-    buildOpenCodeRunCommand(openCode.model, prompt, {
+    buildOpenCodeRunCommand(model, prompt, {
       enableStagehandTools,
     }),
     prepared.sandboxPath,
     {
       OPENROUTER_API_KEY: openCode.apiKey,
-      OPENCODE_CONFIG_CONTENT: buildOpenCodeConfigContent(openCode.model),
+      OPENCODE_CONFIG_CONTENT: buildOpenCodeConfigContent(model),
+      ...Sandbox.getSpawnTaskEnvironment(taskId),
     },
     3600,
   );
@@ -487,7 +477,19 @@ const runFollowUpMessage = async (taskId: string, messageId: string) => {
     return;
   }
 
-  if (taskRecord.branchName) {
+  await updateStage(taskId, messageId, "Checking generated changes");
+
+  const changes = await run(
+    prepared.sandbox,
+    taskId,
+    messageId,
+    "git status --porcelain",
+    prepared.sandboxPath,
+    undefined,
+    60,
+  );
+
+  if (taskRecord.branchName && read(changes.output)) {
     await updateStage(taskId, messageId, "Pushing follow-up changes");
     await pushFollowUpChanges({
       branchName: taskRecord.branchName,
