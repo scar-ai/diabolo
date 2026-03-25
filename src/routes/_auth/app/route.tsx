@@ -2,6 +2,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link, Outlet, useMatchRoute, useRouter } from "@tanstack/react-router";
 import { HouseIcon, HistoryIcon, LogOutIcon } from "lucide-react";
 
+import { authQueryOptions } from "@/auth";
+import authClient from "@/auth/client";
 import { HeaderPortalProvider, useHeaderSlots } from "@/components/app/header-portal";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -11,8 +13,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import authClient from "@/lib/auth/auth-client";
-import { authQueryOptions } from "@/lib/auth/queries";
 export const Route = createFileRoute("/_auth/app")({
   component: AppLayout,
 });

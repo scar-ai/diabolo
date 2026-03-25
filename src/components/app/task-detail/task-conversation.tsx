@@ -1,7 +1,7 @@
 import { ArrowDownIcon } from "lucide-react";
 import { type RefObject, useEffect, useRef, useState } from "react";
 
-import { cn } from "@/lib/utils";
+import { cn } from "@/util/cn";
 
 import { AgentBubble } from "./agent-bubble";
 import { FollowUpAgentBubble } from "./follow-up-agent-bubble";

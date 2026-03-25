@@ -11,7 +11,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import type { GithubReposResult } from "@/lib/github/queries";
+import type { GithubReposResult } from "@/github/query";
 
 export function CreateProjectDialog({
   isCreating,

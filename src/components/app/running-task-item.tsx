@@ -2,7 +2,7 @@ import { Link } from "@tanstack/react-router";
 import { ArrowRightIcon } from "lucide-react";
 
 import { TaskStatusBadge } from "@/components/app/task-status-badge";
-import type { TaskSummaryResult } from "@/lib/project/queries";
+import type { TaskSummaryResult } from "@/project/query";
 
 export type RunningTaskItemData = TaskSummaryResult;
 

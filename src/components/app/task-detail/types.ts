@@ -1,4 +1,4 @@
-import type { TaskDetailResult } from "@/lib/project/queries";
+import type { TaskDetailResult } from "@/project/query";
 
 export type TaskData = TaskDetailResult;
 

@@ -9,7 +9,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import type { ProjectsResult } from "@/lib/project/queries";
+import type { ProjectsResult } from "@/project/query";
 
 export function ProjectSelector({
   onCreateProject,

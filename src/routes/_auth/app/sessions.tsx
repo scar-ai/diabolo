@@ -17,8 +17,8 @@ import {
 } from "@/components/ui/empty";
 import { Frame } from "@/components/ui/frame";
 import { Table, TableBody, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { $deleteTask } from "@/lib/project/functions";
-import { allUserTaskSummariesQueryOptions, taskKeys } from "@/lib/project/queries";
+import { allUserTaskSummariesQueryOptions, taskKeys } from "@/project/query";
+import { $deleteTask } from "@/project/server";
 
 export const Route = createFileRoute("/_auth/app/sessions")({
   loader: async ({ context }) => {

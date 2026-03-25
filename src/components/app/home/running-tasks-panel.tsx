@@ -2,7 +2,7 @@ import { Link } from "@tanstack/react-router";
 import { ArrowRightIcon } from "lucide-react";
 
 import { RunningTaskItem } from "@/components/app/running-task-item";
-import type { TaskSummaryResult } from "@/lib/project/queries";
+import type { TaskSummaryResult } from "@/project/query";
 
 export function RunningTasksPanel({ tasks }: { tasks: TaskSummaryResult[] }) {
   if (tasks.length === 0) {

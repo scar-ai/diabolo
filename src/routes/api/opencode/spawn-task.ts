@@ -1,8 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 import * as z from "zod";
 
-import { verifySpawnTaskToken } from "@/lib/opencode/spawn-task";
-import { Project } from "@/lib/project";
+import { verifySpawnTaskToken } from "@/opencode/spawn-task";
+import { Project } from "@/project";
 
 const requestSchema = z.object({
   model: z.string().trim().min(1).nullable().optional(),

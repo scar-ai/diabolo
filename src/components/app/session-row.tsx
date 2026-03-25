@@ -17,7 +17,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { TableCell, TableRow } from "@/components/ui/table";
-import type { TaskSummaryResult } from "@/lib/project/queries";
+import type { TaskSummaryResult } from "@/project/query";
 
 export type SessionRowData = TaskSummaryResult;
 

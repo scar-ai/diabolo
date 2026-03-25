@@ -3,12 +3,12 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
 
+import { authQueryOptions } from "@/auth";
+import authClient from "@/auth/client";
 import { SignInSocialButton } from "@/components/sign-in-social-button";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import authClient from "@/lib/auth/auth-client";
-import { authQueryOptions } from "@/lib/auth/queries";
 
 export const Route = createFileRoute("/_guest/signup")({
   component: SignupForm,

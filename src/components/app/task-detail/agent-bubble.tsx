@@ -2,7 +2,7 @@ import { ChevronDownIcon, ChevronRightIcon, TerminalIcon } from "lucide-react";
 import { useState } from "react";
 
 import { Markdown } from "@/components/app/markdown";
-import { cn } from "@/lib/utils";
+import { cn } from "@/util/cn";
 
 import type { TaskData } from "./types";
 

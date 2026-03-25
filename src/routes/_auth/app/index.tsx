@@ -10,15 +10,15 @@ import { ProjectSelector } from "@/components/app/home/project-selector";
 import { RunningTasksPanel } from "@/components/app/home/running-tasks-panel";
 import { PromptComposer } from "@/components/app/prompt-composer";
 import { Checkbox } from "@/components/ui/checkbox";
-import { githubBranchesQueryOptions, githubReposQueryOptions } from "@/lib/github/queries";
-import { $createProject, $createTask } from "@/lib/project/functions";
+import { githubBranchesQueryOptions, githubReposQueryOptions } from "@/github/query";
 import {
   allUserTaskSummariesQueryOptions,
   projectDetailQueryOptions,
   projectKeys,
   projectsQueryOptions,
   taskKeys,
-} from "@/lib/project/queries";
+} from "@/project/query";
+import { $createProject, $createTask } from "@/project/server";
 
 type AppHomeSearch = {
   branch?: string;

@@ -6,7 +6,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import type { GithubBranchesResult } from "@/lib/github/queries";
+import type { GithubBranchesResult } from "@/github/query";
 
 export function BranchSelector({
   branches,

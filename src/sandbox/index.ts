@@ -1,0 +1,194 @@
+import "@tanstack/react-start/server-only";
+import { ResultAsync } from "neverthrow";
+
+import { Github } from "@/github";
+import { OpenCode } from "@/opencode";
+import { OpenCodeAgentBrowser } from "@/opencode/agent-browser";
+import { OpenCodeSpawnTask } from "@/opencode/spawn-task";
+import { SandboxProvider } from "@/sandbox/provider";
+import { SandboxQueue } from "@/sandbox/queue";
+import { createTaskMessage, findTaskRecord } from "@/sandbox/store";
+import { SandboxWorkspace } from "@/sandbox/workspace";
+import { Log } from "@/util/log";
+import { fromPromise, toError } from "@/util/result";
+
+const log = Log.create({ service: "sandbox" });
+
+const sandboxProvider = SandboxProvider.get();
+const browserSetupToolsCommand = OpenCodeAgentBrowser.buildSetupCommand();
+
+const makeJobId = () => `tk-${crypto.randomUUID()}`;
+
+const FRONTEND_TASK_PATTERN =
+  /\b(frontend|ui|ux|browser|screenshot|screen shot|visual|css|tailwind|layout|responsive|component|shadcn|page|modal|dialog|dropdown|form|button|input|navbar|sidebar|header|footer|computer use|computer-use|desktop|gui|click|type|typing|keyboard|mouse|preview|browser automation|agent-browser|sandbox browser|open the browser|open browser|localhost|127\.0\.0\.1|check out the file)\b/i;
+
+export namespace Sandbox {
+  export type TaskInput = {
+    prompt: string;
+    quickTask: boolean;
+    repoId: string;
+    sourceBranch: string;
+  };
+
+  export type TaskStatus = "failed" | "queued" | "running" | "succeeded";
+
+  export type AgentMessage = {
+    text: string;
+    timestamp: number;
+  };
+
+  export type TaskJob = {
+    id: string;
+    prompt: string;
+    quickTask: boolean;
+    repoId: string;
+    sourceBranch: string;
+    stage: string;
+    startedAt: string;
+    status: TaskStatus;
+    userId: string;
+  };
+
+  export type CommandOptions = {
+    cwd?: string;
+    envVars?: Record<string, string>;
+    timeoutSeconds?: number;
+  };
+
+  export type CommandResult = {
+    exitCode: number;
+    output: string;
+  };
+
+  export type CloneRepositoryOptions = {
+    accessToken: string;
+    branch: string;
+    ownerLogin: string;
+    targetPath: string;
+    url: string;
+  };
+
+  export interface Session {
+    cloneRepository(options: CloneRepositoryOptions): Promise<void>;
+    delete(timeoutSeconds?: number): Promise<void>;
+    executeCommand(command: string, options?: CommandOptions): Promise<CommandResult>;
+    getWorkspaceRoot(): Promise<string>;
+    id: string;
+    name: string;
+    stop(timeoutSeconds?: number): Promise<void>;
+  }
+
+  export interface Provider {
+    createWorkspace(repoName: string): Promise<Session>;
+    destroyWorkspace(id: string): Promise<void>;
+    formatError(error: unknown): string;
+    getWorkspace(id: string): Promise<Session>;
+  }
+
+  export const isFrontendTaskPrompt = (prompt: string) => FRONTEND_TASK_PATTERN.test(prompt);
+
+  export const getProvider = () => sandboxProvider;
+
+  export const getSetupToolsCommand = () => browserSetupToolsCommand;
+
+  export const getSpawnTaskEnvironment = (taskId: string) => ({
+    OPENCODE_SPAWN_TASK_ENDPOINT: OpenCodeSpawnTask.getEndpoint(),
+    OPENCODE_SPAWN_TASK_PARENT_ID: taskId,
+    OPENCODE_SPAWN_TASK_TOKEN: OpenCodeSpawnTask.createToken(taskId),
+  });
+
+  export const startTask = (input: TaskInput, userId: string): ResultAsync<TaskJob, Error> =>
+    fromPromise(
+      (async () => {
+        const prompt = input.prompt.trim();
+
+        if (!prompt) {
+          throw new Error("Prompt is required.");
+        }
+
+        if (prompt.length < 10) {
+          throw new Error("Prompt must be at least 10 characters.");
+        }
+
+        const repo = await Github.getRepo(input.repoId).match(
+          (value) => value,
+          (error) => {
+            throw error;
+          },
+        );
+
+        OpenCode.ensureConfig();
+
+        if (!repo) {
+          throw new Error("Unknown repository selection.");
+        }
+
+        const startedAt = new Date().toISOString();
+
+        return {
+          id: makeJobId(),
+          prompt,
+          quickTask: input.quickTask,
+          repoId: input.repoId,
+          sourceBranch: input.sourceBranch.trim() || repo.defaultBranch,
+          stage: "Queued",
+          startedAt,
+          status: "queued",
+          userId,
+        };
+      })(),
+    );
+
+  export const enqueueTaskMessage = (
+    taskId: string,
+    prompt: string,
+    kind: "follow_up" | "initial",
+  ): ResultAsync<void, Error> =>
+    fromPromise(
+      (async () => {
+        const trimmedPrompt = prompt.trim();
+
+        if (!trimmedPrompt) {
+          throw new Error("Prompt is required.");
+        }
+
+        if (trimmedPrompt.length < 10) {
+          throw new Error("Prompt must be at least 10 characters.");
+        }
+
+        await createTaskMessage({
+          kind,
+          prompt: trimmedPrompt,
+          taskId,
+        });
+        await SandboxQueue.enqueue(taskId);
+      })(),
+    );
+
+  export const getTask = (
+    jobId: string,
+  ): ResultAsync<Awaited<ReturnType<typeof findTaskRecord>>, Error> =>
+    fromPromise(findTaskRecord(jobId));
+
+  export const resumeTask = (taskId: string): ResultAsync<void, Error> =>
+    fromPromise(SandboxQueue.resume(taskId));
+
+  export const terminateTask = (jobId: string): ResultAsync<void, Error> =>
+    fromPromise(SandboxQueue.terminate(jobId)).map(() => {
+      log.info("task terminated", { jobId });
+    });
+
+  export const destroyTaskSandbox = (jobId: string): ResultAsync<void, Error> =>
+    fromPromise(SandboxWorkspace.destroy(sandboxProvider, jobId, { stage: "Sandbox stopped" }));
+
+  export const destroySandbox = (sandboxId: string): ResultAsync<void, Error> =>
+    ResultAsync.fromPromise(
+      sandboxProvider.destroyWorkspace(sandboxId).catch(() => {}),
+      toError,
+    ).map(() => {
+      log.info("sandbox destroyed", { sandboxId });
+    });
+
+  export const runTaskFollowUp = (jobId: string, prompt: string): ResultAsync<void, Error> =>
+    enqueueTaskMessage(jobId, prompt, "follow_up");
+}

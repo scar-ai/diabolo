@@ -13,13 +13,13 @@ import {
   TaskHeaderActions,
 } from "@/components/app/task-detail";
 import { Button } from "@/components/ui/button";
+import { taskDetailQueryOptions, taskKeys } from "@/project/query";
 import {
   $destroyTaskSandboxById,
   $runFollowUpById,
   $terminateQuickTaskById,
   $terminateTaskById,
-} from "@/lib/project/functions";
-import { taskDetailQueryOptions, taskKeys } from "@/lib/project/queries";
+} from "@/project/server";
 
 const TERMINAL_STATUSES = new Set(["failed", "succeeded"]);
 

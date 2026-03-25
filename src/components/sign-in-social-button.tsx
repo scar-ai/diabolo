@@ -1,8 +1,8 @@
 import { cloneElement, type ReactElement, type SVGProps, useState } from "react";
 import { toast } from "sonner";
 
+import authClient from "@/auth/client";
 import { Button } from "@/components/ui/button";
-import authClient from "@/lib/auth/auth-client";
 
 interface SocialLoginButtonProps {
   provider: string;

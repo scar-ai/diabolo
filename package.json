@@ -22,7 +22,7 @@
     "ui": "pnpm dlx shadcn@latest",
     "auth": "pnpm dlx auth@latest",
     "auth:secret": "pnpm dlx auth@latest secret",
-    "auth:generate": "pnpm dlx auth@latest generate --config ./src/lib/auth/auth.ts --y --output ./src/lib/db/schema/schema.ts",
+    "auth:generate": "pnpm dlx auth@latest generate --config ./src/auth/server.ts --y --output ./src/auth/auth.sql.ts",
     "auth:migrate": "pnpm run auth:generate && pnpm run db generate && pnpm run db migrate",
     "skills": "pnpm dlx skills@latest",
     "intent": "pnpm dlx @tanstack/intent@latest"
@@ -42,6 +42,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "drizzle-orm": "^0.45.1",
+    "effect": "^3.21.0",
     "lucide-react": "^0.577.0",
     "neverthrow": "^8.2.0",
     "octokit": "^5.0.5",

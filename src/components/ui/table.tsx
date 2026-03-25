@@ -1,6 +1,6 @@
 import type * as React from "react";
 
-import { cn } from "@/lib/utils";
+import { cn } from "@/util/cn";
 
 export function Table({ className, ...props }: React.ComponentProps<"table">): React.ReactElement {
   return (

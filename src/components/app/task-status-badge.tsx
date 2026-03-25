@@ -1,7 +1,7 @@
 import { CheckCircle2Icon, CircleDotIcon, XCircleIcon } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
-import { cn } from "@/lib/utils";
+import { cn } from "@/util/cn";
 
 const statusConfig = {
   queued: {
