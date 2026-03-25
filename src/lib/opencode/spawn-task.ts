@@ -20,6 +20,8 @@ const SPAWN_TASK_PACKAGE_JSON = JSON.stringify(
     private: true,
     type: "module",
     dependencies: {
+      "@daytonaio/sdk": "latest",
+      "@opencode-ai/plugin": "latest",
       zod: "^4.3.6",
     },
   },
@@ -137,4 +139,5 @@ export const buildSpawnTaskOpenCodeSetupCommand = () =>
     'GLOBAL_NODE_MODULES="$(npm root -g)"',
     'if [ ! -e "$OPENCODE_TOOLS_ROOT/node_modules" ] && [ -d "$GLOBAL_NODE_MODULES" ]; then ln -s "$GLOBAL_NODE_MODULES" "$OPENCODE_TOOLS_ROOT/node_modules"; fi',
     'if [ ! -d "$OPENCODE_TOOLS_ROOT/node_modules/zod" ]; then echo "Global zod dependency is missing from the Daytona browser snapshot." >&2; exit 1; fi',
+    'if [ ! -d "$OPENCODE_TOOLS_ROOT/node_modules/@opencode-ai/plugin" ]; then echo "Global @opencode-ai/plugin dependency is missing from the Daytona browser snapshot." >&2; exit 1; fi',
   ].join("\n");

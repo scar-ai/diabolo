@@ -42,7 +42,7 @@ const createBrowserSnapshotImage = async () => {
       "rm -rf /var/lib/apt/lists/*",
       "corepack enable",
       "corepack prepare pnpm@10.33.0 --activate",
-      "npm install -g opencode-ai @opencode-ai/plugin agent-browser zod",
+      "npm install -g opencode-ai @opencode-ai/plugin @daytonaio/sdk agent-browser zod",
       [
         "bash",
         "-lc",
@@ -53,7 +53,7 @@ const createBrowserSnapshotImage = async () => {
       "pnpm --version",
       "opencode --version",
       "agent-browser --version",
-      "mkdir -p /home/daytona/.config/opencode/tools",
+      "mkdir -p /home/daytona/.config/opencode/tools /root/.config/opencode/tools",
     )
     .env({
       PATH: "/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin",

@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 import { formatTaskDate } from "./parsers";
+import { TaskArtifactList } from "./task-artifact-list";
 import type { TaskData } from "./types";
 
 export function QuickTaskDetail({
@@ -59,6 +60,7 @@ export function QuickTaskDetail({
               value={formatTaskDate(task.completedAt ?? task.startedAt)}
             />
             <ReadOnlyMetaItem label="Status" value={task.status} />
+            <ReadOnlyMetaItem label="Sandbox" value={task.sandboxStatus} />
             <ReadOnlyMetaItem
               label="Pull request"
               value={
@@ -100,6 +102,7 @@ export function QuickTaskDetail({
           }
           mono
         />
+        <TaskArtifactList artifacts={task.artifacts} />
 
         {task.error ? (
           <Card className="border border-destructive/30 bg-destructive/5">

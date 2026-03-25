@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Markdown } from "@/components/app/markdown";
 import { cn } from "@/lib/utils";
 
+import { TaskArtifactList } from "./task-artifact-list";
 import type { TaskData } from "./types";
 
 export function ThinkingWave({ text = "Thinking..." }: { text?: string }) {
@@ -29,9 +30,16 @@ export function ThinkingWave({ text = "Thinking..." }: { text?: string }) {
 export function AgentBubble({ task, isRunning }: { task: TaskData; isRunning: boolean }) {
   const [logsOpen, setLogsOpen] = useState(false);
   const combinedText = task.combinedAgentText;
+  const initialMessage = task.parsedConversation[0];
 
   return (
     <div className="flex w-full flex-col gap-3">
+      <div className="flex items-center gap-2 text-[11px] tracking-[0.08em] text-muted-foreground/70 uppercase">
+        <span>{task.stage}</span>
+        <span>·</span>
+        <span>{task.sandboxStatus}</span>
+      </div>
+
       {combinedText ? (
         <div className="text-sm leading-relaxed text-foreground">
           <Markdown content={combinedText} />
@@ -77,6 +85,8 @@ export function AgentBubble({ task, isRunning }: { task: TaskData; isRunning: bo
           <span>Waiting for logs...</span>
         </div>
       ) : null}
+
+      <TaskArtifactList artifacts={initialMessage?.artifacts ?? []} />
 
       {task.completedAt ? (
         <span className="text-[11px] text-muted-foreground/50">

@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 
 import { AgentBubble } from "./agent-bubble";
 import { FollowUpAgentBubble } from "./follow-up-agent-bubble";
+import { TaskChildList } from "./task-child-list";
 import type { ParsedFollowUp, TaskData } from "./types";
 import { UserBubble } from "./user-bubble";
 
@@ -49,6 +50,7 @@ export function TaskConversation({
         >
           <UserBubble text={task.prompt} timestamp={task.startedAt} />
           <AgentBubble task={task} isRunning={taskIsRunning} />
+          <TaskChildList tasks={task.children} />
           {followUps.map((followUp) => (
             <div key={followUp.id} className="flex flex-col gap-10">
               <UserBubble text={followUp.prompt} timestamp={followUp.startedAt} />

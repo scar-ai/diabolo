@@ -19,7 +19,8 @@ import {
   $terminateQuickTaskById,
   $terminateTaskById,
 } from "@/lib/project/functions";
-import { taskDetailQueryOptions, taskKeys } from "@/lib/project/queries";
+import { type TaskDetailResult, taskDetailQueryOptions, taskKeys } from "@/lib/project/queries";
+import { useTaskStream } from "@/lib/project/use-task-stream";
 
 const TERMINAL_STATUSES = new Set(["failed", "succeeded"]);
 
@@ -48,7 +49,7 @@ function TaskDetailPage() {
   const taskQuery = useQuery({
     ...taskDetailQueryOptions(taskId),
     refetchInterval: (query) => {
-      const data = query.state.data;
+      const data = query.state.data as TaskDetailResult | undefined;
       if (!data || TERMINAL_STATUSES.has(data.status)) return false;
       return 2_000;
     },
@@ -101,12 +102,13 @@ function TaskDetailPage() {
     },
   });
 
-  const task = taskQuery.data;
+  const task = taskQuery.data as TaskDetailResult | undefined;
+  useTaskStream(taskId, true);
   const isRunning = task && !TERMINAL_STATUSES.has(task.status);
   const isCompleted = task && TERMINAL_STATUSES.has(task.status);
   const sandboxAlive = isCompleted && task.sandboxId;
   const isQuickTask = task?.quickTask === true;
-  const taskTitle = task?.repoName ?? "Task";
+  const taskTitle = task?.title ?? task?.repoName ?? "Task";
   const canSendFollowUp = Boolean(
     isCompleted && !isQuickTask && followUpInput.trim().length >= 10 && !followUpMutation.isPending,
   );
@@ -130,7 +132,14 @@ function TaskDetailPage() {
     if (distanceFromBottom < 120) {
       scrollToBottom();
     }
-  }, [task?.logs, task?.stage, task?.status, task?.parsedFollowUpHistory, scrollToBottom]);
+  }, [
+    task?.logs,
+    task?.stage,
+    task?.status,
+    task?.parsedFollowUpHistory,
+    task?.children,
+    scrollToBottom,
+  ]);
 
   const terminatePending = terminateMutation.isPending;
   const terminateMutate = terminateMutation.mutate;

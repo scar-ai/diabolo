@@ -39,7 +39,7 @@ export const createBrowserSnapshotImage = () =>
       "pnpm --version",
       "opencode --version",
       "agent-browser --version",
-      "mkdir -p /home/daytona/.config/opencode/tools",
+      "mkdir -p /home/daytona/.config/opencode/tools /root/.config/opencode/tools",
     )
     .env({
       PATH: "/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin",

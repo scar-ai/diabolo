@@ -3,11 +3,11 @@ import { ResultAsync } from "neverthrow";
 
 import { Github } from "@/lib/github";
 import { Log } from "@/lib/log";
-import { buildAgentBrowserOpenCodeSetupCommand } from "@/lib/opencode/agent-browser";
 import { ensureOpenCodeConfig } from "@/lib/opencode/config";
 import { createSpawnTaskToken, getSpawnTaskEndpoint } from "@/lib/opencode/spawn-task";
 import { fromPromise, toError } from "@/lib/result";
 import { getSandboxProvider } from "@/lib/sandbox/daytona-provider";
+import { SandboxEvents } from "@/lib/sandbox/events";
 import { SandboxQueue } from "@/lib/sandbox/queue";
 import { createTaskMessage, findTaskRecord } from "@/lib/sandbox/store";
 import { SandboxWorkspace } from "@/lib/sandbox/workspace";
@@ -15,12 +15,8 @@ import { SandboxWorkspace } from "@/lib/sandbox/workspace";
 const log = Log.create({ ns: "sandbox" });
 
 const sandboxProvider = getSandboxProvider();
-const browserSetupToolsCommand = buildAgentBrowserOpenCodeSetupCommand();
 
 const makeJobId = () => `tk-${crypto.randomUUID()}`;
-
-const FRONTEND_TASK_PATTERN =
-  /\b(frontend|ui|ux|browser|screenshot|screen shot|visual|css|tailwind|layout|responsive|component|shadcn|page|modal|dialog|dropdown|form|button|input|navbar|sidebar|header|footer|computer use|computer-use|desktop|gui|click|type|typing|keyboard|mouse|preview|browser automation|agent-browser|sandbox browser|open the browser|open browser|localhost|127\.0\.0\.1|check out the file)\b/i;
 
 export namespace Sandbox {
   export type TaskInput = {
@@ -85,11 +81,7 @@ export namespace Sandbox {
     getWorkspace(id: string): Promise<Session>;
   }
 
-  export const isFrontendTaskPrompt = (prompt: string) => FRONTEND_TASK_PATTERN.test(prompt);
-
   export const getProvider = () => sandboxProvider;
-
-  export const getSetupToolsCommand = () => browserSetupToolsCommand;
 
   export const getSpawnTaskEnvironment = (taskId: string) => ({
     OPENCODE_SPAWN_TASK_ENDPOINT: getSpawnTaskEndpoint(),
@@ -156,10 +148,18 @@ export namespace Sandbox {
           throw new Error("Prompt must be at least 10 characters.");
         }
 
-        await createTaskMessage({
+        const message = await createTaskMessage({
           kind,
           prompt: trimmedPrompt,
           taskId,
+        });
+        await SandboxEvents.publish({
+          messageId: message.id,
+          payload: {
+            prompt: trimmedPrompt,
+          },
+          taskId,
+          type: "user_message",
         });
         await SandboxQueue.enqueue(taskId);
       })(),

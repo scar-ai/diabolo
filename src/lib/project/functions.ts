@@ -98,8 +98,17 @@ export const $terminateTask = createServerFn({ method: "POST" })
 export const $getTaskById = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
   .inputValidator((data) => taskIdInputSchema.parse(data))
-  .handler(async ({ context, data }) =>
-    unwrap(Project.getTaskForUser(data.taskId, context.user.id)),
+  .handler(
+    async ({ context, data }) =>
+      unwrap(Project.getTaskForUser(data.taskId, context.user.id)) as Promise<any>,
+  );
+
+export const $listChildTasksByParentId = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .inputValidator((data) => taskIdInputSchema.parse(data))
+  .handler(
+    async ({ context, data }) =>
+      unwrap(Project.listChildTasksForUser(data.taskId, context.user.id)) as Promise<any>,
   );
 
 export const $terminateTaskById = createServerFn({ method: "POST" })

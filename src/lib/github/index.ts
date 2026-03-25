@@ -201,6 +201,27 @@ export namespace Github {
         ),
     );
 
+  export const findOpenPullRequestForBranch = (input: {
+    branch: string;
+    repoId: string;
+  }): ResultAsync<{ number: number; url: string } | null, Error> =>
+    ResultAsync.combine([requireRepo(input.repoId), fromPromise(getOctokit())]).andThen(
+      ([repo, octokit]) =>
+        fromPromise(
+          octokit.rest.pulls
+            .list({
+              head: `${repo.ownerLogin}:${input.branch}`,
+              owner: repo.ownerLogin,
+              repo: repo.name,
+              state: "open",
+            })
+            .then(({ data }) => {
+              const pr = data[0];
+              return pr ? { number: pr.number, url: pr.html_url } : null;
+            }),
+        ),
+    );
+
   export const listBranches = (repoFullName: string): ResultAsync<Array<{ name: string }>, Error> =>
     fromPromise(
       (async () => {

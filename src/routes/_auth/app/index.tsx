@@ -17,6 +17,7 @@ import {
   projectDetailQueryOptions,
   projectKeys,
   projectsQueryOptions,
+  type TaskSummaryResult,
   taskKeys,
 } from "@/lib/project/queries";
 
@@ -73,8 +74,10 @@ function AppHome() {
   const recentTasksQuery = useQuery({
     ...allUserTaskSummariesQueryOptions(user.id),
     refetchInterval: (query) => {
-      const tasks = query.state.data ?? [];
-      return tasks.some((task) => task.status === "queued" || task.status === "running")
+      const tasks = (query.state.data ?? []) as TaskSummaryResult[];
+      return tasks.some(
+        (task) => task.status === "queued" || task.status === "running" || task.hasActiveChildren,
+      )
         ? 2_000
         : 10_000;
     },
@@ -107,7 +110,7 @@ function AppHome() {
   const createProjectRepo = repos.find((repo) => repo.id === createProjectRepoId) ?? null;
 
   const runningTasks = (recentTasksQuery.data ?? []).filter(
-    (task) => task.status === "queued" || task.status === "running",
+    (task) => task.status === "queued" || task.status === "running" || task.hasActiveChildren,
   );
 
   const createProjectMutation = useMutation({

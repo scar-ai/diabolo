@@ -1,13 +1,18 @@
 import "@tanstack/react-start/server-only";
+import { Buffer } from "node:buffer";
+
 import { type ResultAsync } from "neverthrow";
 
 import { Github } from "@/lib/github";
+import type { JsonObject } from "@/lib/json";
 import { Log } from "@/lib/log";
 import { buildOpenCodeConfigContent, ensureOpenCodeConfig } from "@/lib/opencode/config";
-import { didGitMetadataGenerationTimeout, generateGitMetadata } from "@/lib/opencode/git-metadata";
 import { Sandbox } from "@/lib/sandbox";
+import { SandboxEvents } from "@/lib/sandbox/events";
 import { buildOpenCodePrompt, buildOpenCodeRunCommand } from "@/lib/sandbox/opencode";
+import { SandboxRuntimeState } from "@/lib/sandbox/runtime-state";
 import {
+  appendTaskAgentMessage,
   appendTaskMessageAgentMessage,
   appendTaskMessageLog,
   findTaskMessage,
@@ -22,7 +27,6 @@ import { SandboxWorkspace } from "@/lib/sandbox/workspace";
 const log = Log.create({ ns: "sandbox.run" });
 
 const read = (value: string) => value.trim();
-const escape = (value: string) => value.replace(/'/g, `'\\''`);
 
 const unwrapResult = async <T>(result: ResultAsync<T, Error>): Promise<T> => {
   const res = await result;
@@ -41,11 +45,11 @@ const updateStage = async (
   taskStatus: "queued" | "running" | "succeeded" | "failed" = "running",
 ) => {
   await Promise.all([
-    updateTaskRecord(taskId, {
-      completedAt: null,
-      error: null,
+    SandboxRuntimeState.setTaskStage({
+      messageId,
       stage,
       status: taskStatus,
+      taskId,
     }),
     updateTaskMessageRecord(messageId, {
       stage,
@@ -65,6 +69,8 @@ const failMessage = async (
     updateTaskRecord(taskId, {
       completedAt,
       error: errorMessage,
+      lastHeartbeatAt: completedAt,
+      sandboxStatus: "failed",
       stage,
       status: "failed",
     }),
@@ -75,6 +81,24 @@ const failMessage = async (
       status: "failed",
     }),
   ]);
+  await SandboxEvents.publish({
+    messageId,
+    payload: {
+      error: errorMessage,
+      stage,
+    },
+    taskId,
+    type: "error",
+  });
+  await SandboxEvents.publish({
+    messageId,
+    payload: {
+      status: "failed",
+    },
+    taskId,
+    type: "execution_complete",
+  });
+  await SandboxRuntimeState.publishChildSnapshot(taskId);
 };
 
 const completeMessage = async (
@@ -89,6 +113,7 @@ const completeMessage = async (
     updateTaskRecord(taskId, {
       completedAt,
       error: null,
+      lastHeartbeatAt: completedAt,
       stage,
       status: "succeeded",
       ...(taskPatch ?? {}),
@@ -100,6 +125,20 @@ const completeMessage = async (
       status: "completed",
     }),
   ]);
+  await SandboxEvents.publish({
+    messageId,
+    payload: {
+      branchName: taskPatch?.branchName ?? null,
+      prNumber: taskPatch?.prNumber ?? null,
+      prUrl: taskPatch?.prUrl ?? null,
+      sandboxStatus: taskPatch?.sandboxStatus ?? null,
+      stage,
+      status: "succeeded",
+    },
+    taskId,
+    type: "execution_complete",
+  });
+  await SandboxRuntimeState.publishChildSnapshot(taskId);
 };
 
 const assertTaskNotCancelled = async (taskId: string) => {
@@ -119,6 +158,7 @@ const run = async (
   envVars?: Record<string, string>,
   timeout = 0,
 ) => {
+  await SandboxRuntimeState.touchHeartbeat(taskId);
   const response = await sandbox.executeCommand(command, {
     cwd,
     envVars,
@@ -134,11 +174,89 @@ const run = async (
   }
 
   await assertTaskNotCancelled(taskId);
+  await SandboxRuntimeState.touchHeartbeat(taskId);
 
   return response;
 };
 
-const parse = async (messageId: string, output: string) => {
+const detectArtifacts = async (taskId: string, messageId: string, payload: JsonObject) => {
+  const url =
+    (typeof payload.url === "string" && payload.url) ||
+    (typeof payload.prUrl === "string" && payload.prUrl) ||
+    (typeof payload.previewUrl === "string" && payload.previewUrl) ||
+    (typeof payload.screenshotUrl === "string" && payload.screenshotUrl);
+
+  if (!url) {
+    return;
+  }
+
+  const type =
+    (typeof payload.type === "string" && payload.type) ||
+    (url.includes("/pull/")
+      ? "pull_request"
+      : url.match(/\.(png|jpg|jpeg|webp)$/i)
+        ? "screenshot"
+        : "link");
+
+  await SandboxEvents.publishArtifact({
+    messageId,
+    metadata: payload,
+    taskId,
+    type,
+    url,
+  });
+};
+
+const normalizeEvent = (event: JsonObject) => {
+  const rawType = typeof event.type === "string" ? event.type : "unknown";
+  const part = typeof event.part === "object" && event.part ? (event.part as JsonObject) : null;
+
+  if (rawType === "text" && typeof part?.text === "string") {
+    return {
+      payload: {
+        text: part.text,
+        timestamp: event.timestamp ?? Date.now(),
+      },
+      type: "text",
+    } as const;
+  }
+
+  if (rawType.includes("tool")) {
+    return {
+      payload: {
+        ...event,
+      },
+      type: rawType.includes("result") || rawType.includes("output") ? "tool_result" : "tool_call",
+    } as const;
+  }
+
+  if (rawType.includes("error")) {
+    return {
+      payload: {
+        ...event,
+      },
+      type: "error",
+    } as const;
+  }
+
+  if (rawType.includes("complete") || rawType.includes("finish")) {
+    return {
+      payload: {
+        ...event,
+      },
+      type: "execution_complete",
+    } as const;
+  }
+
+  return {
+    payload: {
+      ...event,
+    },
+    type: "tool_result",
+  } as const;
+};
+
+const parse = async (taskId: string, messageId: string, output: string) => {
   for (const line of output.split("\n")) {
     const trimmed = line.trim();
 
@@ -147,53 +265,121 @@ const parse = async (messageId: string, output: string) => {
     }
 
     try {
-      const event = JSON.parse(trimmed);
+      const event = JSON.parse(trimmed) as JsonObject;
+      const normalized = normalizeEvent(event);
 
-      if (event.type !== "text" || !event.part?.text) {
-        continue;
+      if (normalized.type === "text" && typeof normalized.payload.text === "string") {
+        const timestamp = Number(normalized.payload.timestamp ?? Date.now());
+
+        await appendTaskMessageAgentMessage(messageId, normalized.payload.text, timestamp);
+
+        const message = await findTaskMessage(messageId);
+
+        if (message?.kind === "initial" || message?.sequence === 0) {
+          await appendTaskAgentMessage(taskId, normalized.payload.text, timestamp);
+        }
       }
 
-      await appendTaskMessageAgentMessage(
+      await SandboxEvents.publish({
         messageId,
-        event.part.text,
-        event.timestamp ?? Date.now(),
-      );
+        payload: normalized.payload,
+        taskId,
+        type: normalized.type,
+      });
+      await detectArtifacts(taskId, messageId, normalized.payload);
     } catch {}
   }
 };
 
-const buildFollowUpCommitMessage = (prompt: string) => {
-  const preview = prompt.split("\n")[0]?.replace(/\s+/g, " ").trim().slice(0, 60);
-
-  return preview ? `Follow-up: ${preview}` : "Follow-up changes";
-};
-
-const pushFollowUpChanges = async (input: {
-  branchName: string;
+const syncGitHandoffState = async (input: {
   messageId: string;
-  prompt: string;
+  repoDefaultBranch: string;
+  repoId: string | null;
   sandbox: Sandbox.Session;
   sandboxPath: string;
   taskId: string;
 }) => {
-  const commitMessage = buildFollowUpCommitMessage(input.prompt);
-
-  await run(
+  const branch = await run(
     input.sandbox,
     input.taskId,
     input.messageId,
-    [
-      "git add -A",
-      "if ! git diff --cached --quiet; then",
-      `  git -c core.hooksPath=/dev/null commit --no-verify -m '${escape(commitMessage)}'`,
-      `  GIT_TERMINAL_PROMPT=0 git push --porcelain origin '${escape(input.branchName)}'`,
-      "fi",
-    ].join("\n"),
+    "git branch --show-current",
     input.sandboxPath,
     undefined,
-    900,
+    30,
   );
+  const branchName = read(branch.output) || null;
+
+  let pr: { number: number; url: string } | null = null;
+
+  if (branchName && input.repoId && branchName !== input.repoDefaultBranch) {
+    pr = await Github.findOpenPullRequestForBranch({
+      branch: branchName,
+      repoId: input.repoId,
+    }).match(
+      (value) => value,
+      () => null,
+    );
+  }
+
+  await updateTaskRecord(input.taskId, {
+    branchName,
+    prNumber: pr?.number ?? null,
+    prUrl: pr?.url ?? null,
+  });
+
+  if (branchName) {
+    await SandboxEvents.publishArtifact({
+      metadata: { branchName },
+      taskId: input.taskId,
+      type: "branch",
+      url: branchName,
+    });
+  }
+
+  if (pr) {
+    await SandboxEvents.publishArtifact({
+      metadata: {
+        branchName,
+        prNumber: pr.number,
+        prUrl: pr.url,
+      },
+      taskId: input.taskId,
+      type: "pull_request",
+      url: pr.url,
+    });
+  }
+
+  return {
+    branchName,
+    prNumber: pr?.number ?? null,
+    prUrl: pr?.url ?? null,
+  };
 };
+
+const buildOpenCodeEnvironment = (input: {
+  apiKey: string;
+  defaultBranch: string;
+  githubToken: string;
+  model: string;
+  repoFullName: string;
+  sandboxPath: string;
+  taskId: string;
+  viewer: { email: string; name: string };
+}) => ({
+  OPENROUTER_API_KEY: input.apiKey,
+  OPENCODE_CONFIG_CONTENT_B64: Buffer.from(
+    buildOpenCodeConfigContent(input.model),
+    "utf8",
+  ).toString("base64"),
+  OPENCODE_GITHUB_DEFAULT_BRANCH: input.defaultBranch,
+  OPENCODE_GITHUB_REPO_FULL_NAME: input.repoFullName,
+  OPENCODE_GITHUB_TOKEN: input.githubToken,
+  OPENCODE_GIT_AUTHOR_EMAIL: input.viewer.email,
+  OPENCODE_GIT_AUTHOR_NAME: input.viewer.name,
+  OPENCODE_REPO_PATH: input.sandboxPath,
+  ...Sandbox.getSpawnTaskEnvironment(input.taskId),
+});
 
 const runInitialMessage = async (taskId: string, messageId: string) => {
   const [taskRecord, messageRecord] = await Promise.all([
@@ -221,15 +407,13 @@ const runInitialMessage = async (taskId: string, messageId: string) => {
   await updateTaskRecord(taskId, {
     repoName: repo.fullName,
     repoUrl: repo.htmlUrl,
+    sandboxStatus: "pending",
     status: "running",
   });
-
-  const enableBrowserTools = Sandbox.isFrontendTaskPrompt(messageRecord.prompt);
 
   const prepared = await SandboxWorkspace.prepare({
     authenticatedRemoteUrl,
     branch: taskRecord.branchName?.trim() || repo.defaultBranch,
-    enableBrowserTools,
     githubAccessToken,
     messageId,
     provider: Sandbox.getProvider(),
@@ -237,7 +421,6 @@ const runInitialMessage = async (taskId: string, messageId: string) => {
     repoOwnerLogin: repo.ownerLogin,
     repoUrl: repo.cloneUrl,
     run,
-    setupTools: enableBrowserTools ? Sandbox.getSetupToolsCommand() : undefined,
     taskId,
     viewer,
   });
@@ -245,26 +428,28 @@ const runInitialMessage = async (taskId: string, messageId: string) => {
   await updateStage(taskId, messageId, "Running task");
 
   const prompt = buildOpenCodePrompt(messageRecord.prompt, {
-    enableBrowserTools,
     sandboxId: prepared.sandbox.id,
   });
   const response = await run(
     prepared.sandbox,
     taskId,
     messageId,
-    buildOpenCodeRunCommand(model, prompt, {
-      enableBrowserTools,
-    }),
+    buildOpenCodeRunCommand(model, prompt),
     prepared.sandboxPath,
-    {
-      OPENROUTER_API_KEY: openCode.apiKey,
-      OPENCODE_CONFIG_CONTENT: buildOpenCodeConfigContent(model),
-      ...Sandbox.getSpawnTaskEnvironment(taskId),
-    },
+    buildOpenCodeEnvironment({
+      apiKey: openCode.apiKey,
+      defaultBranch: repo.defaultBranch,
+      githubToken: githubAccessToken,
+      model,
+      repoFullName: repo.fullName,
+      sandboxPath: prepared.sandboxPath,
+      taskId,
+      viewer,
+    }),
     3600,
   );
 
-  await parse(messageId, response.output);
+  await parse(taskId, messageId, response.output);
   await assertTaskNotCancelled(taskId);
 
   if (taskRecord.quickTask) {
@@ -284,8 +469,6 @@ const runInitialMessage = async (taskId: string, messageId: string) => {
     return;
   }
 
-  await updateStage(taskId, messageId, "Checking generated changes");
-
   const changes = await run(
     prepared.sandbox,
     taskId,
@@ -295,113 +478,30 @@ const runInitialMessage = async (taskId: string, messageId: string) => {
     undefined,
     60,
   );
-
-  if (!read(changes.output)) {
-    throw new Error("OpenCode finished without producing repository changes.");
-  }
-
-  await updateStage(taskId, messageId, "Collecting change summary");
-
-  const [diffSummary, changedFiles] = await Promise.all([
-    run(
-      prepared.sandbox,
-      taskId,
-      messageId,
-      "git diff --stat --summary",
-      prepared.sandboxPath,
-      undefined,
-      60,
-    ),
-    run(
-      prepared.sandbox,
-      taskId,
-      messageId,
-      "git status --short",
-      prepared.sandboxPath,
-      undefined,
-      60,
-    ),
-  ]);
-
-  await updateStage(taskId, messageId, "Generating branch, pull request, and comment metadata");
-
-  const started = Date.now();
-  const metadata = await generateGitMetadata(
-    {
-      baseBranch: taskRecord.branchName?.trim() || repo.defaultBranch,
-      changedFiles: changedFiles.output,
-      diffSummary: diffSummary.output,
-      repoFullName: repo.fullName,
-      userPrompt: messageRecord.prompt,
-    },
-    openCode.apiKey,
-    model,
-  );
-
-  if (didGitMetadataGenerationTimeout(started)) {
-    await appendTaskMessageLog(
-      messageId,
-      "Git metadata generation timed out; using fallback branch, commit, and PR metadata.\n",
-    );
-    log.warn("git metadata generation timed out", { taskId });
-  }
-
-  await updateTaskRecord(taskId, {
-    branchName: metadata.branchName,
+  const handoffState = await syncGitHandoffState({
+    messageId,
+    repoDefaultBranch: repo.defaultBranch,
+    repoId: taskRecord.repoId ?? null,
+    sandbox: prepared.sandbox,
+    sandboxPath: prepared.sandboxPath,
+    taskId,
   });
-  await updateStage(taskId, messageId, "Committing and pushing branch");
 
-  await run(
-    prepared.sandbox,
+  await completeMessage(
     taskId,
     messageId,
-    [
-      `git checkout -b '${escape(metadata.branchName)}'`,
-      "git add -A",
-      `git -c core.hooksPath=/dev/null commit --no-verify -m '${escape(metadata.commitTitle)}'`,
-      `GIT_TERMINAL_PROMPT=0 git push --porcelain -u origin '${escape(metadata.branchName)}'`,
-    ].join("\n"),
-    prepared.sandboxPath,
-    undefined,
-    900,
+    read(changes.output)
+      ? handoffState.prUrl
+        ? "Task completed with pushed changes and PR"
+        : "Task completed with workspace changes and no PR"
+      : "Task completed",
+    {
+      branchName: handoffState.branchName,
+      prNumber: handoffState.prNumber,
+      prUrl: handoffState.prUrl,
+      sandboxStatus: "ready",
+    },
   );
-
-  await updateStage(taskId, messageId, "Opening pull request");
-
-  const pr = await unwrapResult<{ number: number; url: string }>(
-    Github.createPullRequest({
-      base: taskRecord.branchName?.trim() || repo.defaultBranch,
-      body: metadata.prBody,
-      head: metadata.branchName,
-      repoId: taskRecord.repoId ?? "",
-      title: metadata.prTitle,
-    }),
-  );
-
-  if (metadata.prComment.trim()) {
-    await updateStage(taskId, messageId, "Posting pull request comment");
-
-    try {
-      await unwrapResult<void>(
-        Github.createPullRequestComment({
-          body: metadata.prComment,
-          prNumber: pr.number,
-          repoId: taskRecord.repoId ?? "",
-        }),
-      );
-    } catch (error) {
-      await appendTaskMessageLog(
-        messageId,
-        `Failed to post pull request comment: ${Sandbox.getProvider().formatError(error)}\n`,
-      );
-    }
-  }
-
-  await completeMessage(taskId, messageId, "Task completed", {
-    branchName: metadata.branchName,
-    prNumber: pr.number,
-    prUrl: pr.url,
-  });
 };
 
 const runFollowUpMessage = async (taskId: string, messageId: string) => {
@@ -425,18 +525,15 @@ const runFollowUpMessage = async (taskId: string, messageId: string) => {
     throw new Error("Unknown repository selection.");
   }
 
-  const enableBrowserTools = Sandbox.isFrontendTaskPrompt(messageRecord.prompt);
   const model = taskRecord.opencodeModel?.trim() || ensureOpenCodeConfig().model;
 
   const prepared = await SandboxWorkspace.getOrCreateFollowUp({
     authenticatedRemoteUrl,
-    enableBrowserTools,
     githubAccessToken,
     messageId,
     provider: Sandbox.getProvider(),
     repo,
     run,
-    setupTools: enableBrowserTools ? Sandbox.getSetupToolsCommand() : undefined,
     taskId,
     taskRecord,
     viewer,
@@ -450,34 +547,34 @@ const runFollowUpMessage = async (taskId: string, messageId: string) => {
 
   const openCode = ensureOpenCodeConfig();
   const prompt = buildOpenCodePrompt(messageRecord.prompt, {
-    enableBrowserTools,
     sandboxId: prepared.sandbox.id,
   });
   const response = await run(
     prepared.sandbox,
     taskId,
     messageId,
-    buildOpenCodeRunCommand(model, prompt, {
-      enableBrowserTools,
-    }),
+    buildOpenCodeRunCommand(model, prompt),
     prepared.sandboxPath,
-    {
-      OPENROUTER_API_KEY: openCode.apiKey,
-      OPENCODE_CONFIG_CONTENT: buildOpenCodeConfigContent(model),
-      ...Sandbox.getSpawnTaskEnvironment(taskId),
-    },
+    buildOpenCodeEnvironment({
+      apiKey: openCode.apiKey,
+      defaultBranch: repo.defaultBranch,
+      githubToken: githubAccessToken,
+      model,
+      repoFullName: repo.fullName,
+      sandboxPath: prepared.sandboxPath,
+      taskId,
+      viewer,
+    }),
     3600,
   );
 
-  await parse(messageId, response.output);
+  await parse(taskId, messageId, response.output);
   await assertTaskNotCancelled(taskId);
 
   if (taskRecord.quickTask) {
     await completeMessage(taskId, messageId, "Follow-up completed");
     return;
   }
-
-  await updateStage(taskId, messageId, "Checking generated changes");
 
   const changes = await run(
     prepared.sandbox,
@@ -488,20 +585,30 @@ const runFollowUpMessage = async (taskId: string, messageId: string) => {
     undefined,
     60,
   );
+  const handoffState = await syncGitHandoffState({
+    messageId,
+    repoDefaultBranch: repo.defaultBranch,
+    repoId: taskRecord.repoId ?? null,
+    sandbox: prepared.sandbox,
+    sandboxPath: prepared.sandboxPath,
+    taskId,
+  });
 
-  if (taskRecord.branchName && read(changes.output)) {
-    await updateStage(taskId, messageId, "Pushing follow-up changes");
-    await pushFollowUpChanges({
-      branchName: taskRecord.branchName,
-      messageId,
-      prompt: messageRecord.prompt,
-      sandbox: prepared.sandbox,
-      sandboxPath: prepared.sandboxPath,
-      taskId,
-    });
-  }
-
-  await completeMessage(taskId, messageId, "Follow-up completed");
+  await completeMessage(
+    taskId,
+    messageId,
+    read(changes.output)
+      ? handoffState.prUrl
+        ? "Follow-up completed with pushed changes and PR"
+        : "Follow-up completed with workspace changes and no PR"
+      : "Follow-up completed",
+    {
+      branchName: handoffState.branchName,
+      prNumber: handoffState.prNumber,
+      prUrl: handoffState.prUrl,
+      sandboxStatus: "ready",
+    },
+  );
 };
 
 export namespace SandboxRun {
@@ -518,6 +625,7 @@ export namespace SandboxRun {
     }
 
     try {
+      await SandboxRuntimeState.setSandboxStatus(taskId, "running");
       if (message.kind === "initial" || message.sequence === 0) {
         await runInitialMessage(taskId, messageId);
       } else {

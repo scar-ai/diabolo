@@ -1,7 +1,9 @@
 import "@tanstack/react-start/server-only";
 import { Log } from "@/lib/log";
 import { getSandboxProvider } from "@/lib/sandbox/daytona-provider";
+import { SandboxEvents } from "@/lib/sandbox/events";
 import { SandboxRun } from "@/lib/sandbox/run";
+import { SandboxRuntimeState } from "@/lib/sandbox/runtime-state";
 import {
   cancelPendingTaskMessages,
   claimNextTaskMessage,
@@ -55,9 +57,21 @@ const recoverStaleProcessing = async (taskId: string) => {
   await updateTaskRecord(taskId, {
     completedAt: pending ? null : new Date(),
     error: pending ? null : "Task execution was interrupted.",
+    sandboxStatus: pending ? "stale" : "failed",
+    lastHeartbeatAt: new Date(),
     stage: pending ? "Queued next prompt" : "Task interrupted",
     status: pending ? "queued" : "failed",
   });
+  await SandboxEvents.publish({
+    messageId: staleMessage.id,
+    payload: {
+      messageId: staleMessage.id,
+      reason: "processing_stale",
+    },
+    taskId,
+    type: "error",
+  });
+  await SandboxRuntimeState.publishChildSnapshot(taskId);
 };
 
 const drainTaskQueue = async (taskId: string) => {
@@ -92,6 +106,11 @@ export namespace SandboxQueue {
   export const enqueue = async (taskId: string) => {
     await clearTaskCancellation(taskId);
     await recoverStaleProcessing(taskId);
+    await SandboxRuntimeState.setTaskStage({
+      stage: "Queued",
+      status: "queued",
+      taskId,
+    });
     queueMicrotask(() => {
       void drainTaskQueue(taskId);
     });
@@ -125,9 +144,18 @@ export namespace SandboxQueue {
       cancelRequestedAt: now,
       completedAt: now,
       error: "Task was terminated by user.",
+      sandboxStatus: "failed",
       stage: "Terminated",
       status: "failed",
     });
+    await SandboxEvents.publish({
+      payload: {
+        reason: "user_terminated",
+      },
+      taskId,
+      type: "execution_complete",
+    });
+    await SandboxRuntimeState.publishChildSnapshot(taskId);
 
     log.info("task terminated", { taskId });
   };
