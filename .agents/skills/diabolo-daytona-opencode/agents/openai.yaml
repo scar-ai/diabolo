@@ -1,0 +1,4 @@
+interface:
+  display_name: "Diabolo Sandbox Workflow"
+  short_description: "Prefer Daytona and OpenCode in diabolo"
+  default_prompt: "Use $diabolo-daytona-opencode to work on diabolo with its Daytona sandbox and OpenCode flow."

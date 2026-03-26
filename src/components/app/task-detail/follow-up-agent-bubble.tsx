@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Markdown } from "@/components/app/markdown";
 
 import { ThinkingWave } from "./agent-bubble";
+import { TaskArtifactList } from "./task-artifact-list";
 import type { ParsedFollowUp } from "./types";
 
 export function FollowUpAgentBubble({ followUp }: { followUp: ParsedFollowUp }) {
@@ -76,6 +77,8 @@ export function FollowUpAgentBubble({ followUp }: { followUp: ParsedFollowUp }) 
           <span>Waiting for logs...</span>
         </div>
       ) : null}
+
+      <TaskArtifactList artifacts={followUp.artifacts} />
 
       <span className="text-[11px] text-muted-foreground/50">
         {new Date(followUp.completedAt ?? followUp.startedAt).toLocaleTimeString([], {

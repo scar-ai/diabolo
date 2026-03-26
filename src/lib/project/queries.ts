@@ -1,5 +1,8 @@
 import { queryOptions } from "@tanstack/react-query";
 
+import type { JsonObject } from "@/lib/json";
+import type { Project } from "@/lib/project";
+
 import {
   $getProject,
   $getTaskById,
@@ -26,26 +29,38 @@ const getTaskPromptPreview = (prompt: string, maxLength: number) =>
 const createTaskSummaryLine = ({
   branchName,
   repoName,
+  sandboxStatus,
   stage,
-  status,
 }: {
   branchName: string | null;
   repoName: string | null;
+  sandboxStatus: string;
   stage: string;
-  status: string;
-}) => {
-  const parts = [repoName, branchName].filter(Boolean);
-
-  if ((status === "queued" || status === "running") && stage) {
-    parts.push(stage);
-  }
-
-  return parts.join(" · ");
-};
+}) =>
+  [repoName, branchName, sandboxStatus !== "ready" ? sandboxStatus : null, stage]
+    .filter(Boolean)
+    .join(" · ");
 
 type ParsedAgentMessage = { text: string; timestamp: number };
+type ParsedTaskEvent = {
+  createdAt: Date | string;
+  id: string;
+  messageId: string | null;
+  payload: JsonObject;
+  sequence: number;
+  type: string;
+};
+type ParsedTaskArtifact = {
+  createdAt: Date | string;
+  id: string;
+  messageId: string | null;
+  metadata: JsonObject | null;
+  type: string;
+  url: string;
+};
 
 type ParsedConversationMessage = {
+  artifacts: ParsedTaskArtifact[];
   completedAt?: Date | string | null;
   error?: string | null;
   id: string;
@@ -53,6 +68,7 @@ type ParsedConversationMessage = {
   logs?: string | null;
   prompt: string;
   responseMessages: ParsedAgentMessage[];
+  runtimeEvents: ParsedTaskEvent[];
   sequence: number;
   stage: string;
   startedAt: Date | string;
@@ -108,17 +124,52 @@ const parseFollowUpHistory = (raw: string | null | undefined): ParsedLegacyFollo
   }
 };
 
-const selectParsedTaskDetail = (task: NonNullable<Awaited<ReturnType<typeof $getTaskById>>>) => {
+const selectParsedTaskDetail = (task: Project.TaskDetailRecord) => {
+  const events: ParsedTaskEvent[] = task.events.map((event) => ({
+    createdAt: event.createdAt,
+    id: event.id,
+    messageId: event.messageId,
+    payload: event.parsedPayload,
+    sequence: event.sequence,
+    type: event.type,
+  }));
+  const artifacts: ParsedTaskArtifact[] = task.artifacts.map((artifact) => ({
+    createdAt: artifact.createdAt,
+    id: artifact.id,
+    messageId: artifact.messageId,
+    metadata: artifact.parsedMetadata,
+    type: artifact.type,
+    url: artifact.url,
+  }));
+
+  const textEventsByMessageId = new Map<string, ParsedAgentMessage[]>();
+
+  for (const event of events) {
+    if (event.type !== "text" || !event.messageId || typeof event.payload.text !== "string") {
+      continue;
+    }
+
+    const bucket = textEventsByMessageId.get(event.messageId) ?? [];
+    bucket.push({
+      text: event.payload.text,
+      timestamp: Number(event.payload.timestamp ?? new Date(event.createdAt).getTime()),
+    });
+    textEventsByMessageId.set(event.messageId, bucket);
+  }
+
   const conversation: ParsedConversationMessage[] =
     task.messages.length > 0
       ? task.messages.map((message) => ({
+          artifacts: artifacts.filter((artifact) => artifact.messageId === message.id),
           completedAt: message.completedAt,
           error: message.error,
           id: message.id,
           kind: message.kind,
           logs: message.logs,
           prompt: message.prompt,
-          responseMessages: parseAgentMessages(message.responseMessages),
+          responseMessages:
+            textEventsByMessageId.get(message.id) ?? parseAgentMessages(message.responseMessages),
+          runtimeEvents: events.filter((event) => event.messageId === message.id),
           sequence: message.sequence,
           stage: message.stage,
           startedAt: message.startedAt,
@@ -127,12 +178,32 @@ const selectParsedTaskDetail = (task: NonNullable<Awaited<ReturnType<typeof $get
       : [];
 
   const initialMessage = conversation[0] ?? null;
-  const parsedAgentMessages =
-    initialMessage?.responseMessages ?? parseAgentMessages(task.agentMessages);
+  const pullRequestArtifact =
+    artifacts.find((artifact) => artifact.type === "pull_request") ?? null;
+  const branchArtifact = artifacts.find((artifact) => artifact.type === "branch") ?? null;
+  const derivedPrUrl =
+    task.prUrl ||
+    (typeof pullRequestArtifact?.metadata?.prUrl === "string"
+      ? pullRequestArtifact.metadata.prUrl
+      : (pullRequestArtifact?.url ?? null));
+  const derivedPrNumber =
+    task.prNumber ??
+    (typeof pullRequestArtifact?.metadata?.prNumber === "number"
+      ? pullRequestArtifact.metadata.prNumber
+      : null);
+  const derivedBranchName =
+    task.branchName ||
+    (typeof branchArtifact?.metadata?.branchName === "string"
+      ? branchArtifact.metadata.branchName
+      : (branchArtifact?.url ?? null));
+  const parsedAgentMessages = initialMessage?.responseMessages.length
+    ? initialMessage.responseMessages
+    : parseAgentMessages(task.agentMessages);
   const followUps =
     conversation.length > 0
       ? conversation.slice(1)
       : parseFollowUpHistory(task.followUpHistory).map((entry, index) => ({
+          artifacts: [],
           completedAt: entry.completedAt,
           error: entry.error,
           id: entry.id,
@@ -140,6 +211,7 @@ const selectParsedTaskDetail = (task: NonNullable<Awaited<ReturnType<typeof $get
           logs: entry.logs,
           prompt: entry.prompt,
           responseMessages: entry.responseMessages,
+          runtimeEvents: [],
           sequence: index + 1,
           stage: entry.stage,
           startedAt: entry.startedAt,
@@ -148,27 +220,56 @@ const selectParsedTaskDetail = (task: NonNullable<Awaited<ReturnType<typeof $get
 
   return {
     ...task,
+    branchName: derivedBranchName,
     combinedAgentText: parsedAgentMessages
       .map((message) => message.text)
       .join("\n\n")
       .trim(),
+    events,
+    artifacts,
     logs: initialMessage?.logs ?? task.logs ?? null,
     parsedAgentMessages,
     parsedConversation: conversation,
     parsedFollowUpHistory: followUps,
+    prNumber: derivedPrNumber,
+    prUrl: derivedPrUrl,
   };
 };
 
 export type TaskDetailResult = ReturnType<typeof selectParsedTaskDetail>;
 
-const selectTaskSummaries = (tasks: AllUserTaskSummariesResult) =>
-  tasks.map((task) => ({
-    ...task,
-    promptPreview: getTaskPromptPreview(task.prompt, 80),
-    runningSummaryLine: `${task.repoName ?? "-"} · ${task.stage}`,
-    sessionSummaryLine: createTaskSummaryLine(task),
-    startedAtLabel: formatTaskSummaryDate(task.startedAt),
-  }));
+const selectTaskSummaries = (tasks: AllUserTaskSummariesResult) => {
+  const childMap = new Map<string, AllUserTaskSummariesResult>();
+
+  for (const summary of tasks) {
+    if (!summary.parentTaskId) {
+      continue;
+    }
+
+    const bucket = childMap.get(summary.parentTaskId) ?? [];
+    bucket.push(summary);
+    childMap.set(summary.parentTaskId, bucket);
+  }
+
+  return tasks.map((task) => {
+    const children = childMap.get(task.id) ?? [];
+    const activeChildren = children.filter(
+      (child) => child.status === "queued" || child.status === "running",
+    );
+
+    return {
+      ...task,
+      activeChildCount: activeChildren.length,
+      childCount: children.length,
+      hasActiveChildren: activeChildren.length > 0,
+      isChildTask: Boolean(task.parentTaskId),
+      promptPreview: getTaskPromptPreview(task.title || task.prompt, 80),
+      runningSummaryLine: `${task.repoName ?? "-"} · ${task.sandboxStatus} · ${task.stage}`,
+      sessionSummaryLine: createTaskSummaryLine(task),
+      startedAtLabel: formatTaskSummaryDate(task.startedAt),
+    };
+  });
+};
 
 export type TaskSummaryResult = ReturnType<typeof selectTaskSummaries>[number];
 
@@ -187,37 +288,38 @@ export const taskKeys = {
 
 export const projectsQueryOptions = (userId: string) =>
   queryOptions({
-    queryKey: projectKeys.list(userId),
     queryFn: ({ signal }) => $listProjects({ signal }),
+    queryKey: projectKeys.list(userId),
     staleTime: 30_000,
   });
 
 export const projectDetailQueryOptions = (projectId: string) =>
   queryOptions({
-    queryKey: projectKeys.detail(projectId),
     queryFn: ({ signal }) => $getProject({ data: { projectId }, signal }),
+    queryKey: projectKeys.detail(projectId),
     staleTime: 30_000,
   });
 
 export const allUserTasksQueryOptions = (userId: string) =>
   queryOptions({
-    queryKey: taskKeys.list(userId),
     queryFn: ({ signal }) => $listAllUserTasks({ signal }),
+    queryKey: taskKeys.list(userId),
     staleTime: 5_000,
   });
 
 export const allUserTaskSummariesQueryOptions = (userId: string) =>
   queryOptions({
-    queryKey: taskKeys.summaryList(userId),
     queryFn: ({ signal }) => $listAllUserTaskSummaries({ signal }),
+    queryKey: taskKeys.summaryList(userId),
     select: selectTaskSummaries,
     staleTime: 5_000,
   });
 
 export const taskDetailQueryOptions = (taskId: string) =>
   queryOptions({
+    queryFn: ({ signal }) =>
+      $getTaskById({ data: { taskId }, signal }) as Promise<Project.TaskDetailRecord>,
     queryKey: taskKeys.detail(taskId),
-    queryFn: ({ signal }) => $getTaskById({ data: { taskId }, signal }),
     select: (task) => (task ? selectParsedTaskDetail(task) : task),
     staleTime: 2_000,
   });

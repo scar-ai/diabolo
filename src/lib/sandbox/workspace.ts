@@ -1,5 +1,6 @@
 import type { Github } from "@/lib/github";
 import type { Sandbox } from "@/lib/sandbox";
+import { SandboxRuntimeState } from "@/lib/sandbox/runtime-state";
 import type { TaskRecord } from "@/lib/sandbox/store";
 import { findTaskRecord, updateTaskRecord } from "@/lib/sandbox/store";
 
@@ -26,9 +27,10 @@ const updateStage = async (
   stage: string,
   status: "queued" | "running" = "running",
 ) =>
-  updateTaskRecord(taskId, {
+  SandboxRuntimeState.setTaskStage({
     stage,
     status,
+    taskId,
   });
 
 export namespace SandboxWorkspace {
@@ -49,7 +51,7 @@ export namespace SandboxWorkspace {
       await provider.destroyWorkspace(taskRecord.sandboxId);
     } catch {}
 
-    await updateTaskRecord(taskId, {
+    await SandboxRuntimeState.setSandboxStatus(taskId, "stopped", {
       sandboxPath: null,
       sandboxId: null,
       sandboxName: null,
@@ -60,7 +62,6 @@ export namespace SandboxWorkspace {
   export const prepare = async (input: {
     authenticatedRemoteUrl: string;
     branch: string;
-    enableBrowserTools: boolean;
     githubAccessToken: string;
     messageId: string;
     provider: Sandbox.Provider;
@@ -68,78 +69,80 @@ export namespace SandboxWorkspace {
     repoOwnerLogin: string;
     repoUrl: string;
     run: Run;
-    setupTools?: string;
     taskId: string;
     viewer: Viewer;
   }) => {
-    await updateStage(input.taskId, "Getting your sandbox ready");
+    try {
+      await updateStage(input.taskId, "Getting your sandbox ready");
+      await SandboxRuntimeState.setSandboxStatus(input.taskId, "spawning");
 
-    const sandbox = await input.provider.createWorkspace(input.repoName);
+      const sandbox = await input.provider.createWorkspace(input.repoName);
 
-    await updateTaskRecord(input.taskId, {
-      sandboxId: sandbox.id,
-      sandboxName: sandbox.name,
-      stage: "Resolving sandbox workspace",
-      status: "running",
-    });
+      await SandboxRuntimeState.setSandboxStatus(input.taskId, "ready", {
+        sandboxId: sandbox.id,
+        sandboxName: sandbox.name,
+        stage: "Resolving sandbox workspace",
+        status: "running",
+      });
 
-    const root = await sandbox.getWorkspaceRoot();
-    const sandboxPath = `${root.replace(/\/$/, "")}/${input.repoName}`;
+      const root = await sandbox.getWorkspaceRoot();
+      const sandboxPath = `${root.replace(/\/$/, "")}/${input.repoName}`;
 
-    await updateTaskRecord(input.taskId, {
-      sandboxPath,
-      stage: "Cloning repository into sandbox",
-    });
+      await updateTaskRecord(input.taskId, {
+        sandboxPath,
+        stage: "Cloning repository into sandbox",
+      });
 
-    await sandbox.cloneRepository({
-      accessToken: input.githubAccessToken,
-      branch: input.branch,
-      ownerLogin: input.repoOwnerLogin,
-      targetPath: sandboxPath,
-      url: input.repoUrl,
-    });
+      await sandbox.cloneRepository({
+        accessToken: input.githubAccessToken,
+        branch: input.branch,
+        ownerLogin: input.repoOwnerLogin,
+        targetPath: sandboxPath,
+        url: input.repoUrl,
+      });
 
-    const setup = [
-      `git remote set-url origin '${input.authenticatedRemoteUrl.replace(/'/g, `'\\''`)}'`,
-      `git config user.name '${input.viewer.name.replace(/'/g, `'\\''`)}'`,
-      `git config user.email '${input.viewer.email.replace(/'/g, `'\\''`)}'`,
-      opencodeInstallCommand,
-    ];
+      const setup = [
+        `git remote set-url origin '${input.authenticatedRemoteUrl.replace(/'/g, `'\\''`)}'`,
+        `git config user.name '${input.viewer.name.replace(/'/g, `'\\''`)}'`,
+        `git config user.email '${input.viewer.email.replace(/'/g, `'\\''`)}'`,
+        opencodeInstallCommand,
+      ];
 
-    if (input.enableBrowserTools && input.setupTools) {
-      setup.push(input.setupTools);
+      await SandboxRuntimeState.setSandboxStatus(input.taskId, "running", {
+        sandboxPath,
+        stage: "Preparing git branch and agent runtime",
+      });
+
+      await input.run(
+        sandbox,
+        input.taskId,
+        input.messageId,
+        setup.join("\n"),
+        sandboxPath,
+        undefined,
+        900,
+      );
+
+      return {
+        sandbox,
+        sandboxPath,
+      };
+    } catch (error) {
+      await SandboxRuntimeState.markSpawnFailure(
+        input.taskId,
+        error instanceof Error ? error.message : String(error),
+      );
+      throw error;
     }
-
-    await updateTaskRecord(input.taskId, {
-      sandboxPath,
-      stage: "Preparing git branch and agent runtime",
-    });
-
-    await input.run(
-      sandbox,
-      input.taskId,
-      input.messageId,
-      setup.join("\n"),
-      sandboxPath,
-      undefined,
-      900,
-    );
-
-    return {
-      sandbox,
-      sandboxPath,
-    };
   };
 
   export const getOrCreateFollowUp = async (input: {
     authenticatedRemoteUrl: string;
-    enableBrowserTools: boolean;
     githubAccessToken: string;
     messageId: string;
     provider: Sandbox.Provider;
     repo: Github.Repo;
     run: Run;
-    setupTools?: string;
     taskId: string;
     taskRecord: TaskRecord;
     viewer: Viewer;
@@ -158,7 +161,6 @@ export namespace SandboxWorkspace {
     return prepare({
       authenticatedRemoteUrl: input.authenticatedRemoteUrl,
       branch: input.taskRecord.branchName?.trim() || input.repo.defaultBranch,
-      enableBrowserTools: input.enableBrowserTools,
       githubAccessToken: input.githubAccessToken,
       messageId: input.messageId,
       provider: input.provider,
@@ -166,7 +168,6 @@ export namespace SandboxWorkspace {
       repoOwnerLogin: input.repo.ownerLogin,
       repoUrl: input.repo.cloneUrl,
       run: input.run,
-      setupTools: input.setupTools,
       taskId: input.taskId,
       viewer: input.viewer,
     });

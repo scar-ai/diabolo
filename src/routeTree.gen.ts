@@ -19,6 +19,7 @@ import { Route as AuthAppIndexRouteImport } from './routes/_auth/app/index'
 import { Route as ApiOpencodeSpawnTaskRouteImport } from './routes/api/opencode/spawn-task'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 import { Route as AuthAppSessionsRouteImport } from './routes/_auth/app/sessions'
+import { Route as ApiTasksTaskIdStreamRouteImport } from './routes/api/tasks/$taskId/stream'
 import { Route as AuthAppTasksTaskIdRouteImport } from './routes/_auth/app/tasks/$taskId'
 
 const GuestRouteRoute = GuestRouteRouteImport.update({
@@ -69,6 +70,11 @@ const AuthAppSessionsRoute = AuthAppSessionsRouteImport.update({
   path: '/sessions',
   getParentRoute: () => AuthAppRouteRoute,
 } as any)
+const ApiTasksTaskIdStreamRoute = ApiTasksTaskIdStreamRouteImport.update({
+  id: '/api/tasks/$taskId/stream',
+  path: '/api/tasks/$taskId/stream',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AuthAppTasksTaskIdRoute = AuthAppTasksTaskIdRouteImport.update({
   id: '/tasks/$taskId',
   path: '/tasks/$taskId',
@@ -85,6 +91,7 @@ export interface FileRoutesByFullPath {
   '/api/opencode/spawn-task': typeof ApiOpencodeSpawnTaskRoute
   '/app/': typeof AuthAppIndexRoute
   '/app/tasks/$taskId': typeof AuthAppTasksTaskIdRoute
+  '/api/tasks/$taskId/stream': typeof ApiTasksTaskIdStreamRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -95,6 +102,7 @@ export interface FileRoutesByTo {
   '/api/opencode/spawn-task': typeof ApiOpencodeSpawnTaskRoute
   '/app': typeof AuthAppIndexRoute
   '/app/tasks/$taskId': typeof AuthAppTasksTaskIdRoute
+  '/api/tasks/$taskId/stream': typeof ApiTasksTaskIdStreamRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -109,6 +117,7 @@ export interface FileRoutesById {
   '/api/opencode/spawn-task': typeof ApiOpencodeSpawnTaskRoute
   '/_auth/app/': typeof AuthAppIndexRoute
   '/_auth/app/tasks/$taskId': typeof AuthAppTasksTaskIdRoute
+  '/api/tasks/$taskId/stream': typeof ApiTasksTaskIdStreamRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -122,6 +131,7 @@ export interface FileRouteTypes {
     | '/api/opencode/spawn-task'
     | '/app/'
     | '/app/tasks/$taskId'
+    | '/api/tasks/$taskId/stream'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -132,6 +142,7 @@ export interface FileRouteTypes {
     | '/api/opencode/spawn-task'
     | '/app'
     | '/app/tasks/$taskId'
+    | '/api/tasks/$taskId/stream'
   id:
     | '__root__'
     | '/'
@@ -145,6 +156,7 @@ export interface FileRouteTypes {
     | '/api/opencode/spawn-task'
     | '/_auth/app/'
     | '/_auth/app/tasks/$taskId'
+    | '/api/tasks/$taskId/stream'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -153,6 +165,7 @@ export interface RootRouteChildren {
   GuestRouteRoute: typeof GuestRouteRouteWithChildren
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   ApiOpencodeSpawnTaskRoute: typeof ApiOpencodeSpawnTaskRoute
+  ApiTasksTaskIdStreamRoute: typeof ApiTasksTaskIdStreamRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -227,6 +240,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthAppSessionsRouteImport
       parentRoute: typeof AuthAppRouteRoute
     }
+    '/api/tasks/$taskId/stream': {
+      id: '/api/tasks/$taskId/stream'
+      path: '/api/tasks/$taskId/stream'
+      fullPath: '/api/tasks/$taskId/stream'
+      preLoaderRoute: typeof ApiTasksTaskIdStreamRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/_auth/app/tasks/$taskId': {
       id: '/_auth/app/tasks/$taskId'
       path: '/tasks/$taskId'
@@ -285,6 +305,7 @@ const rootRouteChildren: RootRouteChildren = {
   GuestRouteRoute: GuestRouteRouteWithChildren,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
   ApiOpencodeSpawnTaskRoute: ApiOpencodeSpawnTaskRoute,
+  ApiTasksTaskIdStreamRoute: ApiTasksTaskIdStreamRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

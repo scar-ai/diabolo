@@ -50,6 +50,13 @@
       "when": 1774388918987,
       "tag": "0006_sad_thaddeus_ross",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1776001000000,
+      "tag": "0007_background_agent_runtime",
+      "breakpoints": true
     }
   ]
 }

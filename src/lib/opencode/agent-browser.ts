@@ -490,7 +490,10 @@ export const buildAgentBrowserOpenCodeSetupCommand = () =>
     'GLOBAL_NODE_MODULES="$(npm root -g)"',
     'if [ ! -e "$OPENCODE_BROWSER_ROOT/node_modules" ] && [ -d "$GLOBAL_NODE_MODULES" ]; then ln -s "$GLOBAL_NODE_MODULES" "$OPENCODE_BROWSER_ROOT/node_modules"; fi',
     'if ! command -v opencode >/dev/null 2>&1; then echo "OpenCode is missing from the Daytona browser snapshot." >&2; exit 1; fi',
+    'if [ ! -d "$OPENCODE_BROWSER_ROOT/node_modules/agent-browser" ]; then echo "Global agent-browser dependency is missing from the Daytona browser snapshot." >&2; exit 1; fi',
+    'if [ ! -d "$OPENCODE_BROWSER_ROOT/node_modules/@opencode-ai/plugin" ]; then echo "Global @opencode-ai/plugin dependency is missing from the Daytona browser snapshot." >&2; exit 1; fi',
+    'if [ ! -d "$OPENCODE_BROWSER_ROOT/node_modules/zod" ]; then echo "Global zod dependency is missing from the Daytona browser snapshot." >&2; exit 1; fi',
+    'if ! command -v agent-browser >/dev/null 2>&1 && [ -x "$OPENCODE_BROWSER_ROOT/node_modules/.bin/agent-browser" ]; then mkdir -p "$HOME/.local/bin" && ln -sf "$OPENCODE_BROWSER_ROOT/node_modules/.bin/agent-browser" "$HOME/.local/bin/agent-browser"; fi',
     'if ! command -v agent-browser >/dev/null 2>&1; then echo "agent-browser is missing from the Daytona browser snapshot." >&2; exit 1; fi',
-    'if [ ! -d "$OPENCODE_BROWSER_ROOT/node_modules/agent-browser" ] || [ ! -d "$OPENCODE_BROWSER_ROOT/node_modules/@opencode-ai/plugin" ] || [ ! -d "$OPENCODE_BROWSER_ROOT/node_modules/zod" ]; then echo "Global OpenCode browser dependencies are missing from the Daytona browser snapshot." >&2; exit 1; fi',
     'if command -v chromium >/dev/null 2>&1 && ! command -v google-chrome >/dev/null 2>&1; then mkdir -p "$HOME/.local/bin" && ln -sf "$(command -v chromium)" "$HOME/.local/bin/google-chrome"; fi',
   ].join("\n");
