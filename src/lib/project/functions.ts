@@ -29,7 +29,6 @@ const updateProjectSettingsInputSchema = z.object({
 const createTaskInputSchema = z.object({
   projectId: z.string().min(1),
   prompt: z.string().min(10),
-  quickTask: z.boolean().optional().default(false),
   sourceBranch: z.string().min(1),
 });
 
@@ -140,13 +139,6 @@ export const $terminateTaskById = createServerFn({ method: "POST" })
   .inputValidator((data) => taskIdInputSchema.parse(data))
   .handler(async ({ context, data }) =>
     unwrap(Project.terminateTaskForUser(data.taskId, context.user.id)),
-  );
-
-export const $terminateQuickTaskById = createServerFn({ method: "POST" })
-  .middleware([authMiddleware])
-  .inputValidator((data) => taskIdInputSchema.parse(data))
-  .handler(async ({ context, data }) =>
-    unwrap(Project.terminateQuickTaskForUser(data.taskId, context.user.id)),
   );
 
 export const $listAllUserTasks = createServerFn({ method: "GET" })

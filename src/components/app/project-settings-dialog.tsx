@@ -455,26 +455,31 @@ export function ProjectSettingsDialog({
 
                 {/* Invite form (owner only) */}
                 {isOwner ? (
-                  <div className="flex gap-2">
-                    <Input
-                      placeholder="GitHub username"
-                      value={inviteUsername}
-                      onChange={(e) => setInviteUsername(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" && inviteUsername.trim()) {
-                          inviteMutation.mutate(inviteUsername.trim());
-                        }
-                      }}
-                    />
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={!inviteUsername.trim() || inviteMutation.isPending}
-                      onClick={() => inviteMutation.mutate(inviteUsername.trim())}
-                    >
-                      <UserPlusIcon className="size-4" aria-hidden="true" />
-                      {inviteMutation.isPending ? "Inviting..." : "Invite"}
-                    </Button>
+                  <div className="space-y-2">
+                    <div className="flex gap-2">
+                      <Input
+                        placeholder="GitHub username"
+                        value={inviteUsername}
+                        onChange={(e) => setInviteUsername(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && inviteUsername.trim()) {
+                            inviteMutation.mutate(inviteUsername.trim());
+                          }
+                        }}
+                      />
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={!inviteUsername.trim() || inviteMutation.isPending}
+                        onClick={() => inviteMutation.mutate(inviteUsername.trim())}
+                      >
+                        <UserPlusIcon className="size-4" aria-hidden="true" />
+                        {inviteMutation.isPending ? "Inviting..." : "Invite"}
+                      </Button>
+                    </div>
+                    <p className="text-xs text-red-800 dark:text-red-400">
+                      Invited members must have access to the GitHub repository to start tasks.
+                    </p>
                   </div>
                 ) : null}
               </div>

@@ -7,7 +7,6 @@ import { toast } from "sonner";
 
 import { useSetHeaderSlots } from "@/components/app/header-portal";
 import {
-  QuickTaskDetail,
   TaskConversation,
   TaskFollowUpComposer,
   TaskHeaderActions,
@@ -17,7 +16,6 @@ import { Button } from "@/components/ui/button";
 import {
   $destroyTaskSandboxById,
   $runFollowUpById,
-  $terminateQuickTaskById,
   $terminateTaskById,
 } from "@/lib/project/functions";
 import {
@@ -45,7 +43,6 @@ function TaskDetailPage() {
   const { taskId } = Route.useParams();
   const queryClient = useQueryClient();
   const terminateTask = useServerFn($terminateTaskById);
-  const terminateQuickTask = useServerFn($terminateQuickTaskById);
   const destroySandbox = useServerFn($destroyTaskSandboxById);
   const runFollowUp = useServerFn($runFollowUpById);
   const setHeaderSlots = useSetHeaderSlots();
@@ -86,18 +83,6 @@ function TaskDetailPage() {
     },
   });
 
-  const terminateQuickTaskMutation = useMutation({
-    mutationFn: () => terminateQuickTask({ data: { taskId } }),
-    onSuccess: () => {
-      toast.success("Quick task stopped and sandbox destroyed.");
-      queryClient.invalidateQueries({ queryKey: taskKeys.detail(taskId) });
-      queryClient.invalidateQueries({ queryKey: taskKeys.all });
-    },
-    onError: (error) => {
-      toast.error(error instanceof Error ? error.message : "Failed to stop quick task.");
-    },
-  });
-
   const followUpMutation = useMutation({
     mutationFn: (prompt: string) => runFollowUp({ data: { taskId, prompt } }),
     onSuccess: () => {
@@ -125,11 +110,10 @@ function TaskDetailPage() {
   const isRunning = task && !TERMINAL_STATUSES.has(task.status);
   const isCompleted = task && TERMINAL_STATUSES.has(task.status);
   const sandboxAlive = isCompleted && task.sandboxId;
-  const isQuickTask = task?.quickTask === true;
   const taskTitle = task?.title ?? task?.repoName ?? "Task";
   const projectName = projectQuery.data?.name ?? null;
   const canSendFollowUp = Boolean(
-    isCompleted && !isQuickTask && followUpInput.trim().length >= 10 && !followUpMutation.isPending,
+    isCompleted && followUpInput.trim().length >= 10 && !followUpMutation.isPending,
   );
 
   const scrollToBottom = useCallback(() => {
@@ -175,7 +159,7 @@ function TaskDetailPage() {
       right: (
         <>
           <Button
-            render={<Link to="/app/projects" search={{}} />}
+            render={<Link to="/app" search={{ projectId: task?.projectId }} />}
             variant="ghost"
             size="sm"
             nativeButton={false}
@@ -241,16 +225,6 @@ function TaskDetailPage() {
     followUps.at(-1)?.prompt !== followUpMutation.variables
       ? followUpMutation.variables
       : null;
-
-  if (isQuickTask) {
-    return (
-      <QuickTaskDetail
-        isStopping={terminateQuickTaskMutation.isPending}
-        onStop={() => terminateQuickTaskMutation.mutate()}
-        task={task}
-      />
-    );
-  }
 
   return (
     <main className="flex flex-1 flex-col overflow-hidden">

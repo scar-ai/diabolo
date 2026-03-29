@@ -22,7 +22,6 @@ export namespace Sandbox {
   export type TaskInput = {
     envVars?: Record<string, string>;
     prompt: string;
-    quickTask: boolean;
     repoId: string;
     sourceBranch: string;
   };
@@ -38,7 +37,6 @@ export namespace Sandbox {
     envVars?: Record<string, string>;
     id: string;
     prompt: string;
-    quickTask: boolean;
     repoId: string;
     sourceBranch: string;
     stage: string;
@@ -123,7 +121,6 @@ export namespace Sandbox {
           envVars: input.envVars,
           id: makeJobId(),
           prompt,
-          quickTask: input.quickTask,
           repoId: input.repoId,
           sourceBranch: input.sourceBranch.trim() || repo.defaultBranch,
           stage: "Queued",

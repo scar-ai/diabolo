@@ -100,7 +100,6 @@ export const insertTask = (input: {
   parentTaskId?: string | null;
   projectId: string;
   prompt: string;
-  quickTask: boolean;
   repoId: string;
   sandboxStatus?: string;
   spawnDepth?: number;

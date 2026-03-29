@@ -11,7 +11,6 @@ import { ProjectSelector } from "@/components/app/home/project-selector";
 import { RunningTasksPanel } from "@/components/app/home/running-tasks-panel";
 import { PromptComposer } from "@/components/app/prompt-composer";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import { githubBranchesQueryOptions, githubReposQueryOptions } from "@/lib/github/queries";
 import { $createProject, $createTask } from "@/lib/project/functions";
 import {
@@ -64,7 +63,6 @@ function AppHome() {
   });
 
   const [inputValue, setInputValue] = useState("");
-  const [quickTask, setQuickTask] = useState(false);
   const [createProjectOpen, setCreateProjectOpen] = useState(false);
   const [createProjectSearch, setCreateProjectSearch] = useState("");
   const [createProjectRepoId, setCreateProjectRepoId] = useState("");
@@ -140,7 +138,7 @@ function AppHome() {
   });
 
   const taskMutation = useMutation({
-    mutationFn: async (data: { prompt: string; quickTask: boolean; sourceBranch: string }) => {
+    mutationFn: async (data: { prompt: string; sourceBranch: string }) => {
       if (!currentProject) {
         throw new Error("Select a project first.");
       }
@@ -149,7 +147,6 @@ function AppHome() {
         data: {
           projectId: currentProject.id,
           prompt: data.prompt,
-          quickTask: data.quickTask,
           sourceBranch: data.sourceBranch,
         },
       });
@@ -158,7 +155,6 @@ function AppHome() {
       await queryClient.invalidateQueries({ queryKey: taskKeys.all });
       toast.success("Background task started.");
       setInputValue("");
-      setQuickTask(false);
       navigate({ to: "/app/tasks/$taskId", params: { taskId: newTask.id } });
     },
     onError: (error) => {
@@ -201,7 +197,6 @@ function AppHome() {
 
     taskMutation.mutate({
       prompt: inputValue.trim(),
-      quickTask,
       sourceBranch: currentBranch,
     });
   };
@@ -243,25 +238,7 @@ function AppHome() {
                 isPending={branchesQuery.isPending}
                 onSelectBranch={handleSelectBranch}
               />
-              <button
-                type="button"
-                onClick={() => setQuickTask((current) => !current)}
-                aria-pressed={quickTask}
-                className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1 text-sm text-muted-foreground/60 transition-colors hover:bg-accent hover:text-muted-foreground"
-              >
-                <Checkbox
-                  checked={quickTask}
-                  aria-label="Enable quick task mode"
-                  className="pointer-events-none size-3.5"
-                />
-                <span>Quick task</span>
-              </button>
             </>
-          }
-          note={
-            quickTask
-              ? "Runs a single task, opens the PR, then destroys the sandbox automatically."
-              : null
           }
         />
       </div>

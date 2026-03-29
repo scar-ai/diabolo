@@ -2,12 +2,7 @@ import { Github } from "@/lib/github";
 import { ensureOpenCodeConfig } from "@/lib/opencode/config";
 import { Sandbox } from "@/lib/sandbox";
 import { buildOpenCodePrompt, buildOpenCodeRunCommand } from "@/lib/sandbox/opencode";
-import {
-  appendTaskMessageLog,
-  findTaskMessage,
-  findTaskRecord,
-  updateTaskRecord,
-} from "@/lib/sandbox/store";
+import { findTaskMessage, findTaskRecord, updateTaskRecord } from "@/lib/sandbox/store";
 import { SandboxWorkspace } from "@/lib/sandbox/workspace";
 
 import {
@@ -97,11 +92,6 @@ const runOpenCodeMessage = async (input: {
   await parseAgentOutput(input.taskId, input.messageId, response.output);
   await assertTaskNotCancelled(input.taskId);
 
-  if (input.taskRecord?.quickTask) {
-    await completeMessageExecution(input.taskId, input.messageId, input.defaultCompletionStage);
-    return;
-  }
-
   const changes = await runSandboxCommand(
     input.prepared.sandbox,
     input.taskId,
@@ -180,19 +170,6 @@ export const runInitialMessage = async (taskId: string, messageId: string) => {
     taskRecord: context.taskRecord,
     viewer: context.viewer,
   });
-
-  if (context.taskRecord.quickTask) {
-    try {
-      await SandboxWorkspace.destroy(Sandbox.getProvider(), taskId, {
-        stage: "Quick task completed; sandbox destroyed",
-      });
-    } catch (error) {
-      await appendTaskMessageLog(
-        messageId,
-        `Failed to destroy quick task sandbox: ${Sandbox.getProvider().formatError(error)}\n`,
-      );
-    }
-  }
 };
 
 export const runFollowUpMessage = async (taskId: string, messageId: string) => {

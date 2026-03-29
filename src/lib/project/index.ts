@@ -39,7 +39,6 @@ import {
   destroyTaskSandboxRecord,
   publishChildTaskUpdate,
   queueFollowUpPrompt,
-  stopQuickTaskAndDestroySandbox,
   syncTaskRuntime,
   syncTaskSummaryRuntime,
   terminateTaskRecord,
@@ -158,7 +157,6 @@ export namespace Project {
   export const createTaskForUser = (input: {
     projectId: string;
     prompt: string;
-    quickTask: boolean;
     sourceBranch: string;
     userId: string;
   }): ResultAsync<TaskRecord, Error> => {
@@ -170,7 +168,6 @@ export namespace Project {
           {
             envVars: serializeProjectEnvEntries(parseStoredProjectEnvEntries(value.envVars)),
             prompt: input.prompt,
-            quickTask: input.quickTask,
             repoId: value.repoId,
             sourceBranch: input.sourceBranch,
           },
@@ -186,7 +183,6 @@ export namespace Project {
             id: draft.id,
             projectId: input.projectId,
             prompt: draft.prompt,
-            quickTask: draft.quickTask,
             repoId: draft.repoId,
             sandboxStatus: "pending",
             stage: draft.stage,
@@ -228,7 +224,6 @@ export namespace Project {
               parseStoredProjectEnvEntries(value.project.envVars),
             ),
             prompt: input.prompt,
-            quickTask: false,
             repoId: childRepoId,
             sourceBranch: branchName,
           },
@@ -243,7 +238,6 @@ export namespace Project {
               parentTaskId: input.parentTaskId,
               projectId: parentTask.projectId,
               prompt: input.prompt,
-              quickTask: false,
               repoId: childRepoId,
               sandboxStatus: "pending",
               spawnDepth: parentTask.spawnDepth + 1,
@@ -351,21 +345,6 @@ export namespace Project {
       }),
     );
 
-  export const terminateQuickTaskForUser = (
-    taskId: string,
-    userId: string,
-  ): ResultAsync<TaskRecord, Error> =>
-    requireTaskForUser(taskId, userId).andThen(({ task: value }) => {
-      if (!value.quickTask) {
-        return errAsync(new Error("This action is only available for quick tasks."));
-      }
-
-      return fromPromise(stopQuickTaskAndDestroySandbox(value)).map((updated) => {
-        log.info("quick task terminated", { taskId });
-        return updated;
-      });
-    });
-
   export const destroyTaskSandboxForUser = (
     taskId: string,
     userId: string,
@@ -379,16 +358,12 @@ export namespace Project {
     prompt: string,
     userId: string,
   ): ResultAsync<TaskRecord, Error> =>
-    requireTaskForUser(taskId, userId).andThen(({ task: value }) => {
-      if (value.quickTask) {
-        return errAsync(new Error("Quick tasks are read-only."));
-      }
-
-      return fromPromise(queueFollowUpPrompt(value, prompt, userId)).map((updated) => {
+    requireTaskForUser(taskId, userId).andThen(({ task: value }) =>
+      fromPromise(queueFollowUpPrompt(value, prompt, userId)).map((updated) => {
         log.info("follow-up queued", { taskId });
         return updated;
-      });
-    });
+      }),
+    );
 
   export const listAllTasksForUser = (userId: string): ResultAsync<TaskRecord[], Error> =>
     fromPromise(listProjectIds(userId)).andThen((ids) => {

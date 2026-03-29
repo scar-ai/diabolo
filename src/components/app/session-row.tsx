@@ -15,7 +15,6 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { TableCell, TableRow } from "@/components/ui/table";
@@ -70,11 +69,6 @@ export function SessionRow({
             <span className="truncate text-sm font-medium text-foreground group-hover:underline">
               {session.promptPreview}
             </span>
-            {session.quickTask ? (
-              <Badge variant="outline" size="sm">
-                Quick
-              </Badge>
-            ) : null}
           </div>
           <div className="flex items-center gap-1.5 text-xs text-muted-foreground/50">
             {session.sessionSummaryLine ? <span>{session.sessionSummaryLine}</span> : null}

@@ -8,6 +8,16 @@ import { toast } from "sonner";
 import { useSetHeaderSlots } from "@/components/app/header-portal";
 import { SessionRow } from "@/components/app/session-row";
 import type { CollaboratorMap } from "@/components/app/task-detail/types";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import {
   Empty,
@@ -57,6 +67,7 @@ function SessionsPage() {
   const deleteTask = useServerFn($deleteTask);
   const setHeaderSlots = useSetHeaderSlots();
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
 
   const tasksQuery = useQuery({
     ...allUserTaskSummariesQueryOptions(user.id),
@@ -132,6 +143,7 @@ function SessionsPage() {
       .filter((s) => selectedIds.has(s.id))
       .map((s) => ({ projectId: s.projectId, taskId: s.id }));
     if (toDelete.length > 0) bulkDeleteMutation.mutate(toDelete);
+    setConfirmBulkDelete(false);
   }
 
   return (
@@ -226,20 +238,43 @@ function SessionsPage() {
                 History ({completedSessions.length})
               </span>
               {selectedIds.size > 0 ? (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="gap-1.5 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                  disabled={bulkDeleteMutation.isPending}
-                  onClick={handleBulkDelete}
-                >
-                  {bulkDeleteMutation.isPending ? (
-                    <LoaderIcon className="size-3.5 animate-spin" aria-hidden="true" />
-                  ) : (
-                    <Trash2Icon className="size-3.5" aria-hidden="true" />
-                  )}
-                  Delete {selectedIds.size} selected
-                </Button>
+                <AlertDialog open={confirmBulkDelete} onOpenChange={setConfirmBulkDelete}>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="gap-1.5 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                    disabled={bulkDeleteMutation.isPending}
+                    onClick={() => setConfirmBulkDelete(true)}
+                  >
+                    {bulkDeleteMutation.isPending ? (
+                      <LoaderIcon className="size-3.5 animate-spin" aria-hidden="true" />
+                    ) : (
+                      <Trash2Icon className="size-3.5" aria-hidden="true" />
+                    )}
+                    Delete {selectedIds.size} selected
+                  </Button>
+                  <AlertDialogContent size="sm">
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>
+                        Delete {selectedIds.size} {selectedIds.size === 1 ? "session" : "sessions"}?
+                      </AlertDialogTitle>
+                      <AlertDialogDescription>
+                        You are about to permanently delete {selectedIds.size}{" "}
+                        {selectedIds.size === 1 ? "session" : "sessions"}. This cannot be undone.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Cancel</AlertDialogCancel>
+                      <AlertDialogAction
+                        variant="destructive"
+                        disabled={bulkDeleteMutation.isPending}
+                        onClick={handleBulkDelete}
+                      >
+                        Delete
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
               ) : null}
             </div>
             <Frame className="w-full min-w-0">

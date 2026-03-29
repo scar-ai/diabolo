@@ -22,7 +22,7 @@ import {
   type ProjectInviteRecord,
   type ProjectInviteWithProject,
 } from "./data";
-import { projectInvite, projectMember } from "./project.sql";
+import { projectInvite } from "./project.sql";
 
 export namespace ProjectMembers {
   export type Collaborator = ProjectCollaborator;

@@ -46,7 +46,8 @@ function AppLayoutInner() {
   const isSessionsActive =
     location.pathname === "/app/sessions" || location.pathname.startsWith("/app/tasks/");
   const headerSlots = useHeaderSlots();
-  const sharedSearch = location.search.projectId ? { projectId: location.search.projectId } : {};
+  const projectIdForNav = location.search.projectId ?? headerSlots.projectId ?? undefined;
+  const sharedSearch = projectIdForNav ? { projectId: projectIdForNav } : {};
 
   return (
     <div className="flex h-svh flex-col overflow-hidden bg-background">

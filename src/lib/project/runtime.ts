@@ -129,34 +129,6 @@ export const assertParentCanSpawn = async (
   }
 };
 
-export const stopQuickTaskAndDestroySandbox = async (value: TaskRecord) => {
-  await Sandbox.terminateTask(value.id).match(
-    () => {},
-    () => {},
-  );
-
-  if (value.sandboxId) {
-    await Sandbox.destroySandbox(value.sandboxId).match(
-      () => {},
-      () => {},
-    );
-  }
-
-  return (
-    (await findTask(value.id)) ??
-    updateTask(value.id, {
-      completedAt: new Date(),
-      error: "Quick task was stopped by user.",
-      sandboxId: null,
-      sandboxName: null,
-      sandboxPath: null,
-      sandboxStatus: "stopped",
-      stage: "Quick task stopped",
-      status: "failed",
-    })
-  );
-};
-
 export const destroyTaskSandboxRecord = async (value: TaskRecord) => {
   if (value.sandboxId) {
     await Sandbox.destroySandbox(value.sandboxId).match(
