@@ -1,14 +1,16 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link, redirect, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
+import { useSetHeaderSlots } from "@/components/app/header-portal";
 import { BranchSelector } from "@/components/app/home/branch-selector";
 import { CreateProjectDialog } from "@/components/app/home/create-project-dialog";
 import { ProjectSelector } from "@/components/app/home/project-selector";
 import { RunningTasksPanel } from "@/components/app/home/running-tasks-panel";
 import { PromptComposer } from "@/components/app/prompt-composer";
+import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { githubBranchesQueryOptions, githubReposQueryOptions } from "@/lib/github/queries";
 import { $createProject, $createTask } from "@/lib/project/functions";
@@ -16,7 +18,6 @@ import {
   allUserTaskSummariesQueryOptions,
   projectDetailQueryOptions,
   projectKeys,
-  projectsQueryOptions,
   type TaskSummaryResult,
   taskKeys,
 } from "@/lib/project/queries";
@@ -31,18 +32,16 @@ export const Route = createFileRoute("/_auth/app/")({
     branch: typeof search.branch === "string" ? search.branch : undefined,
     projectId: typeof search.projectId === "string" ? search.projectId : undefined,
   }),
+  beforeLoad: ({ search }) => {
+    if (!search.projectId) {
+      throw redirect({ to: "/app/projects" });
+    }
+  },
   loader: async ({ context }) => {
-    const userId = context.user.id;
-    await Promise.all([
-      context.queryClient.ensureQueryData({
-        ...projectsQueryOptions(userId),
-        revalidateIfStale: true,
-      }),
-      context.queryClient.ensureQueryData({
-        ...allUserTaskSummariesQueryOptions(userId),
-        revalidateIfStale: true,
-      }),
-    ]);
+    await context.queryClient.ensureQueryData({
+      ...allUserTaskSummariesQueryOptions(context.user.id),
+      revalidateIfStale: true,
+    });
   },
   component: AppHome,
 });
@@ -54,6 +53,7 @@ function AppHome() {
   const queryClient = useQueryClient();
   const createProject = useServerFn($createProject);
   const createTask = useServerFn($createTask);
+  const setHeaderSlots = useSetHeaderSlots();
 
   const greeting = getGreeting();
   const firstName = user.name?.split(" ")[0] ?? user.name ?? "there";
@@ -70,7 +70,7 @@ function AppHome() {
   const [createProjectRepoId, setCreateProjectRepoId] = useState("");
   const [createProjectName, setCreateProjectName] = useState("");
 
-  const projectsQuery = useQuery(projectsQueryOptions(user.id));
+  const currentProjectId = search.projectId ?? "";
   const recentTasksQuery = useQuery({
     ...allUserTaskSummariesQueryOptions(user.id),
     refetchInterval: (query) => {
@@ -83,18 +83,14 @@ function AppHome() {
     },
   });
 
-  const projects = projectsQuery.data ?? [];
-  const currentProjectId = search.projectId || projects[0]?.id || "";
-  const currentProject = projects.find((project) => project.id === currentProjectId) ?? null;
-  const projectLabel =
-    currentProject?.name ?? (projectsQuery.isPending ? "Loading..." : "Select project");
-
   const currentProjectDetailQuery = useQuery({
     ...projectDetailQueryOptions(currentProjectId),
     enabled: Boolean(currentProjectId),
   });
-  const currentProjectRepoFullName = currentProjectDetailQuery.data?.repoFullName ?? null;
-  const currentProjectDefaultBranch = currentProjectDetailQuery.data?.repoDefaultBranch ?? "main";
+  const currentProject = currentProjectDetailQuery.data ?? null;
+  const projectLabel = currentProject?.name ?? "Select project";
+  const currentProjectRepoFullName = currentProject?.repoFullName ?? null;
+  const currentProjectDefaultBranch = currentProject?.repoDefaultBranch ?? "main";
   const currentBranch = search.branch || currentProjectDefaultBranch;
 
   const branchesQuery = useQuery({
@@ -111,6 +107,9 @@ function AppHome() {
 
   const runningTasks = (recentTasksQuery.data ?? []).filter(
     (task) => task.status === "queued" || task.status === "running" || task.hasActiveChildren,
+  );
+  const currentProjectRunningTasks = runningTasks.filter(
+    (task) => task.projectId === currentProjectId,
   );
 
   const createProjectMutation = useMutation({
@@ -133,9 +132,7 @@ function AppHome() {
       setCreateProjectSearch("");
       setCreateProjectRepoId("");
       setCreateProjectName("");
-      navigate({
-        search: (prev) => ({ ...prev, branch: undefined, projectId: project.id }),
-      });
+      navigate({ search: { branch: undefined, projectId: project.id } });
     },
     onError: (error) => {
       toast.error(error instanceof Error ? error.message : "Failed to create project.");
@@ -170,25 +167,31 @@ function AppHome() {
   });
 
   const canSubmit =
-    inputValue.trim().length >= 1 && Boolean(currentProject) && !taskMutation.isPending;
+    inputValue.trim().length >= 1 && Boolean(currentProjectId) && !taskMutation.isPending;
 
-  const handleSelectProject = (projectId: string) => {
-    navigate({
-      search: (prev) => ({ ...prev, branch: undefined, projectId }),
+  useEffect(() => {
+    setHeaderSlots({
+      left: null,
+      projectId: currentProjectId,
+      projectName: currentProject?.name ?? null,
+      right: (
+        <Button
+          render={<Link to="/app/projects" search={{}} />}
+          variant="ghost"
+          size="sm"
+          nativeButton={false}
+        >
+          Back to home screen
+        </Button>
+      ),
     });
-  };
+    return () => setHeaderSlots({ left: null, projectId: null, projectName: null, right: null });
+  }, [currentProject?.name, currentProjectId, setHeaderSlots]);
 
   const handleSelectBranch = (branch: string) => {
     navigate({
       search: (prev) => ({ ...prev, branch }),
     });
-  };
-
-  const handleOpenCreateProject = () => {
-    setCreateProjectSearch("");
-    setCreateProjectRepoId("");
-    setCreateProjectName("");
-    setCreateProjectOpen(true);
   };
 
   const handleSubmit = () => {
@@ -211,7 +214,7 @@ function AppHome() {
           <h1 className="mb-10 font-serif text-[2.75rem] leading-tight tracking-tight text-muted-foreground/70">
             {greeting}, <span className="text-foreground">{firstName}</span>
           </h1>
-          <RunningTasksPanel tasks={runningTasks} />
+          <RunningTasksPanel tasks={currentProjectRunningTasks} />
         </div>
       </main>
 
@@ -226,10 +229,12 @@ function AppHome() {
           footerLeft={
             <>
               <ProjectSelector
-                onCreateProject={handleOpenCreateProject}
-                onSelectProject={handleSelectProject}
+                onCreateProject={() => setCreateProjectOpen(true)}
+                onSelectProject={(projectId) =>
+                  navigate({ search: { branch: undefined, projectId } })
+                }
                 projectLabel={projectLabel}
-                projects={projects}
+                projects={currentProject ? [currentProject] : []}
               />
               <BranchSelector
                 branches={branchesQuery.data ?? []}

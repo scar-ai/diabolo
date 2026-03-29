@@ -5,6 +5,12 @@ import * as R from "remeda";
 import { db } from "@/lib/db";
 import { Github } from "@/lib/github";
 import { Log } from "@/lib/log";
+import {
+  normalizeProjectEnvEntries,
+  parseStoredProjectEnvEntries,
+  serializeProjectEnvEntries,
+  type ProjectEnvEntry,
+} from "@/lib/project/env";
 import { fromPromise } from "@/lib/result";
 import { Sandbox } from "@/lib/sandbox";
 import { SandboxEvents } from "@/lib/sandbox/events";
@@ -80,6 +86,14 @@ export namespace Project {
       .returning()
       .then((rows) => rows[0]);
 
+  const updateProject = (projectId: string, values: Partial<ProjectRecord>) =>
+    db
+      .update(project)
+      .set(values)
+      .where(eq(project.id, projectId))
+      .returning()
+      .then((rows) => rows[0]);
+
   const deleteProject = (projectId: string) => db.delete(project).where(eq(project.id, projectId));
 
   const findProject = (projectId: string, userId: string) =>
@@ -97,6 +111,7 @@ export namespace Project {
 
   const insertTask = (input: {
     branchName: string;
+    envVars?: string | null;
     id: string;
     opencodeModel?: string | null;
     parentTaskId?: string | null;
@@ -325,6 +340,7 @@ export namespace Project {
     userId: string,
   ): ResultAsync<
     ProjectRecord & {
+      envEntries: ProjectEnvEntry[];
       repoDefaultBranch: string | null;
       repoDescription: string | null;
       repoFullName: string | null;
@@ -335,6 +351,7 @@ export namespace Project {
     requireUserProject(projectId, userId).andThen((value) =>
       Github.getRepo(value.repoId).map((repo) => ({
         ...value,
+        envEntries: parseStoredProjectEnvEntries(value.envVars),
         repoDefaultBranch: repo?.defaultBranch ?? null,
         repoDescription: repo?.description ?? null,
         repoFullName: repo?.fullName ?? null,
@@ -352,6 +369,19 @@ export namespace Project {
         log.info("project deleted", { projectId });
       });
 
+  export const updateProjectSettingsForUser = (input: {
+    envEntries: ProjectEnvEntry[];
+    projectId: string;
+    userId: string;
+  }): ResultAsync<ProjectRecord, Error> =>
+    requireUserProject(input.projectId, input.userId).andThen(() =>
+      fromPromise(
+        updateProject(input.projectId, {
+          envVars: JSON.stringify(normalizeProjectEnvEntries(input.envEntries)),
+        }),
+      ).andThen((value) => (value ? okAsync(value) : errAsync(new Error("Project not found.")))),
+    );
+
   export const createTaskForUser = (input: {
     projectId: string;
     prompt: string;
@@ -365,6 +395,7 @@ export namespace Project {
       .andThen((value) =>
         Sandbox.startTask(
           {
+            envVars: serializeProjectEnvEntries(parseStoredProjectEnvEntries(value.envVars)),
             prompt: input.prompt,
             quickTask: input.quickTask,
             repoId: value.repoId,
@@ -377,6 +408,7 @@ export namespace Project {
         fromPromise(
           insertTask({
             branchName: draft.sourceBranch,
+            envVars: draft.envVars ? JSON.stringify(draft.envVars) : null,
             id: draft.id,
             projectId: input.projectId,
             prompt: draft.prompt,
@@ -418,6 +450,9 @@ export namespace Project {
       return fromPromise(assertParentCanSpawn(parentTask, value.project)).andThen(() =>
         Sandbox.startTask(
           {
+            envVars: serializeProjectEnvEntries(
+              parseStoredProjectEnvEntries(value.project.envVars),
+            ),
             prompt: input.prompt,
             quickTask: false,
             repoId: childRepoId,
@@ -428,6 +463,7 @@ export namespace Project {
           fromPromise(
             insertTask({
               branchName,
+              envVars: draft.envVars ? JSON.stringify(draft.envVars) : null,
               id: draft.id,
               opencodeModel: input.model ?? null,
               parentTaskId: input.parentTaskId,

@@ -19,7 +19,12 @@ import {
   $terminateQuickTaskById,
   $terminateTaskById,
 } from "@/lib/project/functions";
-import { type TaskDetailResult, taskDetailQueryOptions, taskKeys } from "@/lib/project/queries";
+import {
+  projectDetailQueryOptions,
+  type TaskDetailResult,
+  taskDetailQueryOptions,
+  taskKeys,
+} from "@/lib/project/queries";
 import { useTaskStream } from "@/lib/project/use-task-stream";
 
 const TERMINAL_STATUSES = new Set(["failed", "succeeded"]);
@@ -103,12 +108,17 @@ function TaskDetailPage() {
   });
 
   const task = taskQuery.data as TaskDetailResult | undefined;
+  const projectQuery = useQuery({
+    ...projectDetailQueryOptions(task?.projectId ?? ""),
+    enabled: Boolean(task?.projectId),
+  });
   useTaskStream(taskId, true);
   const isRunning = task && !TERMINAL_STATUSES.has(task.status);
   const isCompleted = task && TERMINAL_STATUSES.has(task.status);
   const sandboxAlive = isCompleted && task.sandboxId;
   const isQuickTask = task?.quickTask === true;
   const taskTitle = task?.title ?? task?.repoName ?? "Task";
+  const projectName = projectQuery.data?.name ?? null;
   const canSendFollowUp = Boolean(
     isCompleted && !isQuickTask && followUpInput.trim().length >= 10 && !followUpMutation.isPending,
   );
@@ -151,21 +161,35 @@ function TaskDetailPage() {
       left: taskTitle ? (
         <span className="truncate text-sm font-medium text-foreground">{taskTitle}</span>
       ) : null,
+      projectId: task?.projectId ?? null,
+      projectName,
       right: (
-        <TaskHeaderActions
-          destroyPending={destroyPending}
-          onDestroy={() => destroyMutate()}
-          onTerminate={() => terminateMutate()}
-          sandboxAlive={!!sandboxAlive}
-          taskIsRunning={!!isRunning}
-          terminatePending={terminatePending}
-        />
+        <>
+          <Button
+            render={<Link to="/app/projects" search={{}} />}
+            variant="ghost"
+            size="sm"
+            nativeButton={false}
+          >
+            Back to home screen
+          </Button>
+          <TaskHeaderActions
+            destroyPending={destroyPending}
+            onDestroy={() => destroyMutate()}
+            onTerminate={() => terminateMutate()}
+            sandboxAlive={!!sandboxAlive}
+            taskIsRunning={!!isRunning}
+            terminatePending={terminatePending}
+          />
+        </>
       ),
     });
-    return () => setHeaderSlots({ left: null, right: null });
+    return () => setHeaderSlots({ left: null, projectId: null, projectName: null, right: null });
   }, [
+    task?.projectId,
     task?.id,
     taskTitle,
+    projectName,
     isRunning,
     sandboxAlive,
     terminatePending,

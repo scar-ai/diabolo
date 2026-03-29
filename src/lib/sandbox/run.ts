@@ -38,6 +38,17 @@ const unwrapResult = async <T>(result: ResultAsync<T, Error>): Promise<T> => {
   return res.value;
 };
 
+const getTaskProjectEnvVars = (value: string | null | undefined): Record<string, string> => {
+  if (!value) return {};
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, string>;
+    }
+  } catch {}
+  return {};
+};
+
 const updateStage = async (
   taskId: string,
   messageId: string,
@@ -362,6 +373,7 @@ const buildOpenCodeEnvironment = (input: {
   defaultBranch: string;
   githubToken: string;
   model: string;
+  projectEnvVars?: Record<string, string>;
   repoFullName: string;
   sandboxPath: string;
   taskId: string;
@@ -378,6 +390,7 @@ const buildOpenCodeEnvironment = (input: {
   OPENCODE_GIT_AUTHOR_EMAIL: input.viewer.email,
   OPENCODE_GIT_AUTHOR_NAME: input.viewer.name,
   OPENCODE_REPO_PATH: input.sandboxPath,
+  ...(input.projectEnvVars ?? {}),
   ...Sandbox.getSpawnTaskEnvironment(input.taskId),
 });
 
@@ -411,9 +424,11 @@ const runInitialMessage = async (taskId: string, messageId: string) => {
     status: "running",
   });
 
+  const taskProjectEnvVars = getTaskProjectEnvVars(taskRecord.envVars);
   const prepared = await SandboxWorkspace.prepare({
     authenticatedRemoteUrl,
     branch: taskRecord.branchName?.trim() || repo.defaultBranch,
+    envVars: taskProjectEnvVars,
     githubAccessToken,
     messageId,
     provider: Sandbox.getProvider(),
@@ -428,6 +443,7 @@ const runInitialMessage = async (taskId: string, messageId: string) => {
   await updateStage(taskId, messageId, "Running task");
 
   const prompt = buildOpenCodePrompt(messageRecord.prompt, {
+    envVarKeys: taskProjectEnvVars ? Object.keys(taskProjectEnvVars) : undefined,
     sandboxId: prepared.sandbox.id,
   });
   const response = await run(
@@ -441,6 +457,7 @@ const runInitialMessage = async (taskId: string, messageId: string) => {
       defaultBranch: repo.defaultBranch,
       githubToken: githubAccessToken,
       model,
+      projectEnvVars: taskProjectEnvVars,
       repoFullName: repo.fullName,
       sandboxPath: prepared.sandboxPath,
       taskId,
@@ -529,6 +546,7 @@ const runFollowUpMessage = async (taskId: string, messageId: string) => {
 
   const prepared = await SandboxWorkspace.getOrCreateFollowUp({
     authenticatedRemoteUrl,
+    envVars: getTaskProjectEnvVars(taskRecord.envVars),
     githubAccessToken,
     messageId,
     provider: Sandbox.getProvider(),
@@ -546,7 +564,9 @@ const runFollowUpMessage = async (taskId: string, messageId: string) => {
   await updateStage(taskId, messageId, "Running OpenCode task");
 
   const openCode = ensureOpenCodeConfig();
+  const taskProjectEnvVars = getTaskProjectEnvVars(taskRecord.envVars);
   const prompt = buildOpenCodePrompt(messageRecord.prompt, {
+    envVarKeys: taskProjectEnvVars ? Object.keys(taskProjectEnvVars) : undefined,
     sandboxId: prepared.sandbox.id,
   });
   const response = await run(
@@ -560,6 +580,7 @@ const runFollowUpMessage = async (taskId: string, messageId: string) => {
       defaultBranch: repo.defaultBranch,
       githubToken: githubAccessToken,
       model,
+      projectEnvVars: taskProjectEnvVars,
       repoFullName: repo.fullName,
       sandboxPath: prepared.sandboxPath,
       taskId,

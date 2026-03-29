@@ -30,6 +30,7 @@ export const opencodeInstallCommand = [
 export const buildOpenCodePrompt = (
   userPrompt: string,
   options?: {
+    envVarKeys?: string[];
     sandboxId?: string;
   },
 ) =>
@@ -53,6 +54,15 @@ export const buildOpenCodePrompt = (
     "Key tools available include open_url, snapshot, click, fill, type, keyboard_type, press, wait, screenshot, evaluate, and close.",
     "Preferred workflow: open the page, take a snapshot to get refs like @e1, interact using those refs, then capture a screenshot before finishing when visual verification matters.",
     "",
+    ...(options?.envVarKeys?.length
+      ? [
+          "Project environment variables:",
+          `The following environment variables have been injected into this sandbox by the user: ${options.envVarKeys.join(", ")}.`,
+          "They are available as process environment variables and are also written to a .env file at the repository root.",
+          "Do not tell the user that no environment variables are defined — they are already present in this sandbox.",
+          "",
+        ]
+      : []),
     "User task:",
     userPrompt.trim(),
   ].join("\n");

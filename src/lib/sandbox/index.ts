@@ -20,6 +20,7 @@ const makeJobId = () => `tk-${crypto.randomUUID()}`;
 
 export namespace Sandbox {
   export type TaskInput = {
+    envVars?: Record<string, string>;
     prompt: string;
     quickTask: boolean;
     repoId: string;
@@ -34,6 +35,7 @@ export namespace Sandbox {
   };
 
   export type TaskJob = {
+    envVars?: Record<string, string>;
     id: string;
     prompt: string;
     quickTask: boolean;
@@ -118,6 +120,7 @@ export namespace Sandbox {
         const startedAt = new Date().toISOString();
 
         return {
+          envVars: input.envVars,
           id: makeJobId(),
           prompt,
           quickTask: input.quickTask,

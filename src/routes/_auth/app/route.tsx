@@ -1,8 +1,9 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { createFileRoute, Link, Outlet, useMatchRoute, useRouter } from "@tanstack/react-router";
+import { createFileRoute, Link, Outlet, useRouter, useRouterState } from "@tanstack/react-router";
 import { HouseIcon, HistoryIcon, LogOutIcon } from "lucide-react";
 
 import { HeaderPortalProvider, useHeaderSlots } from "@/components/app/header-portal";
+import { ProjectSettingsDialog } from "@/components/app/project-settings-dialog";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
@@ -28,12 +29,23 @@ function AppLayout() {
 function AppLayoutInner() {
   const { user } = Route.useRouteContext();
   const queryClient = useQueryClient();
-  const matchRoute = useMatchRoute();
   const router = useRouter();
+  const location = useRouterState({
+    select: (state) =>
+      state.location as {
+        pathname: string;
+        projectId?: string;
+        search: {
+          projectId?: string;
+        };
+      },
+  });
   const initials = (user.name ?? user.email ?? "?").slice(0, 1).toUpperCase();
+  const isProjectsActive = location.pathname === "/app/projects";
   const isSessionsActive =
-    !!matchRoute({ to: "/app/sessions" }) || !!matchRoute({ to: "/app/tasks/$taskId" });
+    location.pathname === "/app/sessions" || location.pathname.startsWith("/app/tasks/");
   const headerSlots = useHeaderSlots();
+  const sharedSearch = location.search.projectId ? { projectId: location.search.projectId } : {};
 
   return (
     <div className="flex h-svh flex-col overflow-hidden bg-background">
@@ -50,31 +62,51 @@ function AppLayoutInner() {
           {headerSlots.left}
         </div>
 
-        <nav className="absolute left-1/2 flex -translate-x-1/2 items-center gap-x-0.5 rounded-lg bg-muted p-0.5">
-          <Link
-            to="/app"
-            activeOptions={{ exact: true }}
-            className="relative flex h-8 shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-md px-2.5 text-sm font-medium whitespace-nowrap transition-colors [&_svg]:size-4"
-            activeProps={{ className: "bg-background text-foreground shadow-sm/5 dark:bg-input" }}
-            inactiveProps={{ className: "text-muted-foreground/72 hover:text-muted-foreground" }}
-          >
-            <HouseIcon aria-hidden="true" />
-            Home
-          </Link>
-          <Link
-            to="/app/sessions"
-            className={`relative flex h-8 shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-md px-2.5 text-sm font-medium whitespace-nowrap transition-colors [&_svg]:size-4 ${
-              isSessionsActive
-                ? "bg-background text-foreground shadow-sm/5 dark:bg-input"
-                : "text-muted-foreground/72 hover:text-muted-foreground"
-            }`}
-          >
-            <HistoryIcon aria-hidden="true" />
-            Sessions
-          </Link>
-        </nav>
+        {isProjectsActive ? (
+          <nav className="absolute left-1/2 flex -translate-x-1/2 items-center gap-x-0.5 rounded-lg bg-muted p-0.5">
+            <Link
+              to="/app/projects"
+              activeOptions={{ exact: true }}
+              className="relative flex h-8 shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-md bg-background px-2.5 text-sm font-medium whitespace-nowrap text-foreground shadow-sm/5 dark:bg-input [&_svg]:size-4"
+            >
+              <HouseIcon aria-hidden="true" />
+              Projects
+            </Link>
+          </nav>
+        ) : (
+          <nav className="absolute left-1/2 flex -translate-x-1/2 items-center gap-x-0.5 rounded-lg bg-muted p-0.5">
+            <Link
+              to="/app"
+              search={sharedSearch}
+              activeOptions={{ exact: true }}
+              className="relative flex h-8 shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-md px-2.5 text-sm font-medium whitespace-nowrap transition-colors [&_svg]:size-4"
+              activeProps={{ className: "bg-background text-foreground shadow-sm/5 dark:bg-input" }}
+              inactiveProps={{ className: "text-muted-foreground/72 hover:text-muted-foreground" }}
+            >
+              <HouseIcon aria-hidden="true" />
+              Home
+            </Link>
+            <Link
+              to="/app/sessions"
+              search={sharedSearch}
+              className={`relative flex h-8 shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-md px-2.5 text-sm font-medium whitespace-nowrap transition-colors [&_svg]:size-4 ${
+                isSessionsActive
+                  ? "bg-background text-foreground shadow-sm/5 dark:bg-input"
+                  : "text-muted-foreground/72 hover:text-muted-foreground"
+              }`}
+            >
+              <HistoryIcon aria-hidden="true" />
+              Sessions
+            </Link>
+          </nav>
+        )}
 
         <div className="flex items-center gap-2">
+          <ProjectSettingsDialog
+            disabled={!headerSlots.projectId}
+            projectId={headerSlots.projectId}
+            projectName={headerSlots.projectName}
+          />
           {headerSlots.right}
           <ThemeToggle />
           <DropdownMenu>

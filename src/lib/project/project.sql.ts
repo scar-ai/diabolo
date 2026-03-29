@@ -8,6 +8,7 @@ export const project = pgTable(
   {
     id: text().primaryKey(),
     name: text().notNull(),
+    envVars: text("env_vars"),
     repoId: text().notNull(),
     userId: text()
       .notNull()
@@ -51,6 +52,7 @@ export const task = pgTable(
     lastSpawnError: text("last_spawn_error"),
     lastHeartbeatAt: timestamp("last_heartbeat_at"),
     logs: text(),
+    envVars: text("env_vars"),
     agentMessages: text(),
     followUpHistory: text(),
     error: text(),

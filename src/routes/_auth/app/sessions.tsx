@@ -2,9 +2,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { LoaderIcon, Trash2Icon } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
+import { useSetHeaderSlots } from "@/components/app/header-portal";
 import { SessionRow } from "@/components/app/session-row";
 import { Button } from "@/components/ui/button";
 import {
@@ -18,28 +19,60 @@ import {
 import { Frame } from "@/components/ui/frame";
 import { Table, TableBody, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { $deleteTask } from "@/lib/project/functions";
-import { allUserTaskSummariesQueryOptions, taskKeys } from "@/lib/project/queries";
+import {
+  allUserTaskSummariesQueryOptions,
+  projectsQueryOptions,
+  taskKeys,
+} from "@/lib/project/queries";
+
+type SessionsSearch = {
+  projectId?: string;
+};
 
 export const Route = createFileRoute("/_auth/app/sessions")({
+  validateSearch: (search): SessionsSearch => ({
+    projectId: typeof search.projectId === "string" ? search.projectId : undefined,
+  }),
   loader: async ({ context }) => {
-    await context.queryClient.ensureQueryData({
-      ...allUserTaskSummariesQueryOptions(context.user.id),
-      revalidateIfStale: true,
-    });
+    await Promise.all([
+      context.queryClient.ensureQueryData({
+        ...allUserTaskSummariesQueryOptions(context.user.id),
+        revalidateIfStale: true,
+      }),
+      context.queryClient.ensureQueryData({
+        ...projectsQueryOptions(context.user.id),
+        revalidateIfStale: true,
+      }),
+    ]);
   },
   component: SessionsPage,
 });
 
 function SessionsPage() {
   const { user } = Route.useRouteContext();
+  const search = Route.useSearch();
   const queryClient = useQueryClient();
   const deleteTask = useServerFn($deleteTask);
+  const setHeaderSlots = useSetHeaderSlots();
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const tasksQuery = useQuery({
     ...allUserTaskSummariesQueryOptions(user.id),
     refetchInterval: 5_000,
   });
+  const projectsQuery = useQuery(projectsQueryOptions(user.id));
+  const currentProject =
+    (projectsQuery.data ?? []).find((project) => project.id === search.projectId) ?? null;
+
+  useEffect(() => {
+    setHeaderSlots({
+      left: null,
+      projectId: currentProject?.id ?? null,
+      projectName: currentProject?.name ?? null,
+      right: null,
+    });
+    return () => setHeaderSlots({ left: null, projectId: null, projectName: null, right: null });
+  }, [currentProject?.id, currentProject?.name, setHeaderSlots]);
 
   const deleteMutation = useMutation({
     mutationFn: ({ projectId, taskId }: { projectId: string; taskId: string }) =>
@@ -67,7 +100,9 @@ function SessionsPage() {
     },
   });
 
-  const sessions = tasksQuery.data ?? [];
+  const sessions = search.projectId
+    ? (tasksQuery.data ?? []).filter((session) => session.projectId === search.projectId)
+    : (tasksQuery.data ?? []);
   const runningSessions = sessions.filter((s) => s.status === "queued" || s.status === "running");
   const completedSessions = sessions.filter(
     (s) => s.status === "succeeded" || s.status === "failed",

@@ -3,6 +3,7 @@ import * as z from "zod";
 
 import { authMiddleware } from "@/lib/auth/middleware";
 import { Project } from "@/lib/project";
+import type { ProjectEnvEntry } from "@/lib/project/env";
 import { unwrap } from "@/lib/result";
 
 const createProjectInputSchema = z.object({
@@ -11,6 +12,16 @@ const createProjectInputSchema = z.object({
 });
 
 const projectIdInputSchema = z.object({
+  projectId: z.string().min(1),
+});
+
+const projectEnvEntrySchema: z.ZodType<ProjectEnvEntry> = z.object({
+  key: z.string(),
+  value: z.string(),
+});
+
+const updateProjectSettingsInputSchema = z.object({
+  envEntries: z.array(projectEnvEntrySchema),
   projectId: z.string().min(1),
 });
 
@@ -79,6 +90,18 @@ export const $deleteProject = createServerFn({ method: "POST" })
   .inputValidator((data) => projectIdInputSchema.parse(data))
   .handler(async ({ context, data }) =>
     unwrap(Project.deleteProjectForUser(data.projectId, context.user.id)),
+  );
+
+export const $updateProjectSettings = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .inputValidator((data) => updateProjectSettingsInputSchema.parse(data))
+  .handler(async ({ context, data }) =>
+    unwrap(
+      Project.updateProjectSettingsForUser({
+        ...data,
+        userId: context.user.id,
+      }),
+    ),
   );
 
 export const $deleteTask = createServerFn({ method: "POST" })
