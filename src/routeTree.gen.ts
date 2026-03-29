@@ -20,6 +20,7 @@ import { Route as ApiOpencodeSpawnTaskRouteImport } from './routes/api/opencode/
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 import { Route as AuthAppSessionsRouteImport } from './routes/_auth/app/sessions'
 import { Route as AuthAppProjectsRouteImport } from './routes/_auth/app/projects'
+import { Route as AuthAppOrganisationRouteImport } from './routes/_auth/app/organisation'
 import { Route as ApiTasksTaskIdStreamRouteImport } from './routes/api/tasks/$taskId/stream'
 import { Route as AuthAppTasksTaskIdRouteImport } from './routes/_auth/app/tasks/$taskId'
 
@@ -76,6 +77,11 @@ const AuthAppProjectsRoute = AuthAppProjectsRouteImport.update({
   path: '/projects',
   getParentRoute: () => AuthAppRouteRoute,
 } as any)
+const AuthAppOrganisationRoute = AuthAppOrganisationRouteImport.update({
+  id: '/organisation',
+  path: '/organisation',
+  getParentRoute: () => AuthAppRouteRoute,
+} as any)
 const ApiTasksTaskIdStreamRoute = ApiTasksTaskIdStreamRouteImport.update({
   id: '/api/tasks/$taskId/stream',
   path: '/api/tasks/$taskId/stream',
@@ -92,6 +98,7 @@ export interface FileRoutesByFullPath {
   '/app': typeof AuthAppRouteRouteWithChildren
   '/login': typeof GuestLoginRoute
   '/signup': typeof GuestSignupRoute
+  '/app/organisation': typeof AuthAppOrganisationRoute
   '/app/projects': typeof AuthAppProjectsRoute
   '/app/sessions': typeof AuthAppSessionsRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
@@ -104,6 +111,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/login': typeof GuestLoginRoute
   '/signup': typeof GuestSignupRoute
+  '/app/organisation': typeof AuthAppOrganisationRoute
   '/app/projects': typeof AuthAppProjectsRoute
   '/app/sessions': typeof AuthAppSessionsRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
@@ -120,6 +128,7 @@ export interface FileRoutesById {
   '/_auth/app': typeof AuthAppRouteRouteWithChildren
   '/_guest/login': typeof GuestLoginRoute
   '/_guest/signup': typeof GuestSignupRoute
+  '/_auth/app/organisation': typeof AuthAppOrganisationRoute
   '/_auth/app/projects': typeof AuthAppProjectsRoute
   '/_auth/app/sessions': typeof AuthAppSessionsRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
@@ -135,6 +144,7 @@ export interface FileRouteTypes {
     | '/app'
     | '/login'
     | '/signup'
+    | '/app/organisation'
     | '/app/projects'
     | '/app/sessions'
     | '/api/auth/$'
@@ -147,6 +157,7 @@ export interface FileRouteTypes {
     | '/'
     | '/login'
     | '/signup'
+    | '/app/organisation'
     | '/app/projects'
     | '/app/sessions'
     | '/api/auth/$'
@@ -162,6 +173,7 @@ export interface FileRouteTypes {
     | '/_auth/app'
     | '/_guest/login'
     | '/_guest/signup'
+    | '/_auth/app/organisation'
     | '/_auth/app/projects'
     | '/_auth/app/sessions'
     | '/api/auth/$'
@@ -259,6 +271,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthAppProjectsRouteImport
       parentRoute: typeof AuthAppRouteRoute
     }
+    '/_auth/app/organisation': {
+      id: '/_auth/app/organisation'
+      path: '/organisation'
+      fullPath: '/app/organisation'
+      preLoaderRoute: typeof AuthAppOrganisationRouteImport
+      parentRoute: typeof AuthAppRouteRoute
+    }
     '/api/tasks/$taskId/stream': {
       id: '/api/tasks/$taskId/stream'
       path: '/api/tasks/$taskId/stream'
@@ -277,6 +296,7 @@ declare module '@tanstack/react-router' {
 }
 
 interface AuthAppRouteRouteChildren {
+  AuthAppOrganisationRoute: typeof AuthAppOrganisationRoute
   AuthAppProjectsRoute: typeof AuthAppProjectsRoute
   AuthAppSessionsRoute: typeof AuthAppSessionsRoute
   AuthAppIndexRoute: typeof AuthAppIndexRoute
@@ -284,6 +304,7 @@ interface AuthAppRouteRouteChildren {
 }
 
 const AuthAppRouteRouteChildren: AuthAppRouteRouteChildren = {
+  AuthAppOrganisationRoute: AuthAppOrganisationRoute,
   AuthAppProjectsRoute: AuthAppProjectsRoute,
   AuthAppSessionsRoute: AuthAppSessionsRoute,
   AuthAppIndexRoute: AuthAppIndexRoute,

@@ -138,6 +138,7 @@ export namespace Sandbox {
     taskId: string,
     prompt: string,
     kind: "follow_up" | "initial",
+    createdByUserId?: string | null,
   ): ResultAsync<void, Error> =>
     fromPromise(
       (async () => {
@@ -152,6 +153,7 @@ export namespace Sandbox {
         }
 
         const message = await createTaskMessage({
+          createdByUserId: createdByUserId ?? null,
           kind,
           prompt: trimmedPrompt,
           taskId,
@@ -192,6 +194,9 @@ export namespace Sandbox {
       log.info("sandbox destroyed", { sandboxId });
     });
 
-  export const runTaskFollowUp = (jobId: string, prompt: string): ResultAsync<void, Error> =>
-    enqueueTaskMessage(jobId, prompt, "follow_up");
+  export const runTaskFollowUp = (
+    jobId: string,
+    prompt: string,
+    createdByUserId?: string | null,
+  ): ResultAsync<void, Error> => enqueueTaskMessage(jobId, prompt, "follow_up", createdByUserId);
 }

@@ -143,6 +143,7 @@ export const findNextPendingTaskMessage = (taskId: string) =>
     .then((rows) => rows[0]);
 
 export const createTaskMessage = async (input: {
+  createdByUserId?: string | null;
   kind: "follow_up" | "initial";
   prompt: string;
   taskId: string;
@@ -161,6 +162,7 @@ export const createTaskMessage = async (input: {
     const inserted = await tx
       .insert(taskMessage)
       .values({
+        createdByUserId: input.createdByUserId ?? null,
         id: crypto.randomUUID(),
         kind: input.kind,
         prompt: input.prompt,

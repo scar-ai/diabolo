@@ -2,7 +2,8 @@ import { createServerFn } from "@tanstack/react-start";
 import * as z from "zod";
 
 import { authMiddleware } from "@/lib/auth/middleware";
-import { Project } from "@/lib/project";
+import { Project, ProjectMembers } from "@/lib/project";
+import { listProjectCollaborators, listProjectInvites } from "@/lib/project/data";
 import type { ProjectEnvEntry } from "@/lib/project/env";
 import { unwrap } from "@/lib/result";
 
@@ -168,4 +169,103 @@ export const $runFollowUpById = createServerFn({ method: "POST" })
   .inputValidator((data) => followUpInputSchema.parse(data))
   .handler(async ({ context, data }) =>
     unwrap(Project.runTaskFollowUpForUser(data.taskId, data.prompt, context.user.id)),
+  );
+
+// ─── Collaboration server functions ──────────────────────────────────────────
+
+const inviteMemberInputSchema = z.object({
+  githubUsername: z.string().min(1),
+  projectId: z.string().min(1),
+});
+
+const inviteIdInputSchema = z.object({
+  inviteId: z.string().min(1),
+  projectId: z.string().min(1),
+});
+
+const memberIdInputSchema = z.object({
+  targetUserId: z.string().min(1),
+  projectId: z.string().min(1),
+});
+
+const leaveProjectInputSchema = z.object({
+  projectId: z.string().min(1),
+});
+
+export const $getProjectCollaborators = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .inputValidator((data) => projectIdInputSchema.parse(data))
+  .handler(async ({ data }) => listProjectCollaborators(data.projectId));
+
+export const $getProjectInvites = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .inputValidator((data) => projectIdInputSchema.parse(data))
+  .handler(async ({ context, data }) => {
+    // Only the owner/member can list invites (access checked by collaborators lookup)
+    await unwrap(Project.getProjectForUser(data.projectId, context.user.id));
+    return listProjectInvites(data.projectId);
+  });
+
+export const $getMyProjectInvites = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => unwrap(ProjectMembers.getMyInvites(context.user.id)));
+
+export const $inviteProjectMember = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .inputValidator((data) => inviteMemberInputSchema.parse(data))
+  .handler(async ({ context, data }) =>
+    unwrap(
+      ProjectMembers.inviteMember({
+        githubUsername: data.githubUsername,
+        projectId: data.projectId,
+        userId: context.user.id,
+      }),
+    ),
+  );
+
+export const $cancelProjectInvite = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .inputValidator((data) => inviteIdInputSchema.parse(data))
+  .handler(async ({ context, data }) =>
+    unwrap(
+      ProjectMembers.cancelInvite({
+        inviteId: data.inviteId,
+        projectId: data.projectId,
+        userId: context.user.id,
+      }),
+    ),
+  );
+
+export const $acceptProjectInvite = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .inputValidator((data) => z.object({ inviteId: z.string().min(1) }).parse(data))
+  .handler(async ({ context, data }) =>
+    unwrap(ProjectMembers.acceptInvite({ inviteId: data.inviteId, userId: context.user.id })),
+  );
+
+export const $declineProjectInvite = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .inputValidator((data) => z.object({ inviteId: z.string().min(1) }).parse(data))
+  .handler(async ({ context, data }) =>
+    unwrap(ProjectMembers.declineInvite({ inviteId: data.inviteId, userId: context.user.id })),
+  );
+
+export const $kickProjectMember = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .inputValidator((data) => memberIdInputSchema.parse(data))
+  .handler(async ({ context, data }) =>
+    unwrap(
+      ProjectMembers.kickMember({
+        targetUserId: data.targetUserId,
+        projectId: data.projectId,
+        userId: context.user.id,
+      }),
+    ),
+  );
+
+export const $leaveProject = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .inputValidator((data) => leaveProjectInputSchema.parse(data))
+  .handler(async ({ context, data }) =>
+    unwrap(ProjectMembers.leaveProject({ projectId: data.projectId, userId: context.user.id })),
   );

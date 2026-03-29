@@ -7,6 +7,7 @@ import { toast } from "sonner";
 
 import { useSetHeaderSlots } from "@/components/app/header-portal";
 import { SessionRow } from "@/components/app/session-row";
+import type { CollaboratorMap } from "@/components/app/task-detail/types";
 import { Button } from "@/components/ui/button";
 import {
   Empty,
@@ -21,6 +22,7 @@ import { Table, TableBody, TableHead, TableHeader, TableRow } from "@/components
 import { $deleteTask } from "@/lib/project/functions";
 import {
   allUserTaskSummariesQueryOptions,
+  projectCollaboratorsQueryOptions,
   projectsQueryOptions,
   taskKeys,
 } from "@/lib/project/queries";
@@ -63,6 +65,14 @@ function SessionsPage() {
   const projectsQuery = useQuery(projectsQueryOptions(user.id));
   const currentProject =
     (projectsQuery.data ?? []).find((project) => project.id === search.projectId) ?? null;
+
+  const collaboratorsQuery = useQuery({
+    ...projectCollaboratorsQueryOptions(search.projectId ?? ""),
+    enabled: Boolean(search.projectId),
+  });
+  const collaboratorMap: CollaboratorMap = new Map(
+    (collaboratorsQuery.data ?? []).map((c) => [c.userId, c.user]),
+  );
 
   useEffect(() => {
     setHeaderSlots({
@@ -196,7 +206,11 @@ function SessionsPage() {
                 </TableHeader>
                 <TableBody>
                   {runningSessions.map((session) => (
-                    <SessionRow key={session.id} session={session} />
+                    <SessionRow
+                      key={session.id}
+                      collaborators={collaboratorMap}
+                      session={session}
+                    />
                   ))}
                 </TableBody>
               </Table>
@@ -243,6 +257,7 @@ function SessionsPage() {
                   {completedSessions.map((session) => (
                     <SessionRow
                       key={session.id}
+                      collaborators={collaboratorMap}
                       session={session}
                       selected={selectedIds.has(session.id)}
                       onToggleSelect={() => toggleSelected(session.id)}

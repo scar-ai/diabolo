@@ -4,7 +4,11 @@ import { env } from "@/env/server";
 
 export default {
   out: "./drizzle",
-  schema: ["./src/lib/db/schema/schema.ts", "./src/lib/project/project.sql.ts"],
+  schema: [
+    "./src/lib/db/schema/schema.ts",
+    "./src/lib/project/project.sql.ts",
+    "./src/lib/org/org.sql.ts",
+  ],
   breakpoints: true,
   verbose: true,
   strict: true,

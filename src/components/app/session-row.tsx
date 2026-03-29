@@ -2,6 +2,7 @@ import { Link } from "@tanstack/react-router";
 import { LoaderIcon, Trash2Icon } from "lucide-react";
 import { useState } from "react";
 
+import type { CollaboratorMap } from "@/components/app/task-detail/types";
 import { TaskStatusBadge } from "@/components/app/task-status-badge";
 import {
   AlertDialog,
@@ -13,6 +14,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -22,18 +24,24 @@ import type { TaskSummaryResult } from "@/lib/project/queries";
 export type SessionRowData = TaskSummaryResult;
 
 export function SessionRow({
+  collaborators,
   session,
   onDelete,
   onToggleSelect,
   selected = false,
   isDeleting = false,
 }: {
+  collaborators?: CollaboratorMap;
   session: SessionRowData;
   onDelete?: () => void;
   onToggleSelect?: () => void;
   selected?: boolean;
   isDeleting?: boolean;
 }) {
+  const creator =
+    session.createdByUserId && collaborators
+      ? (collaborators.get(session.createdByUserId) ?? null)
+      : null;
   const [deleteOpen, setDeleteOpen] = useState(false);
 
   return (
@@ -70,6 +78,18 @@ export function SessionRow({
           </div>
           <div className="flex items-center gap-1.5 text-xs text-muted-foreground/50">
             {session.sessionSummaryLine ? <span>{session.sessionSummaryLine}</span> : null}
+            {creator ? (
+              <span className="flex items-center gap-1">
+                <span>·</span>
+                <Avatar className="size-3.5">
+                  {creator.image ? <AvatarImage src={creator.image} alt={creator.name} /> : null}
+                  <AvatarFallback className="text-[8px]">
+                    {creator.name.slice(0, 1).toUpperCase()}
+                  </AvatarFallback>
+                </Avatar>
+                <span>{creator.name}</span>
+              </span>
+            ) : null}
           </div>
         </Link>
       </TableCell>

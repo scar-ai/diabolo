@@ -234,4 +234,22 @@ export namespace Github {
         return R.map(branches, (b) => ({ name: b.name }));
       })(),
     );
+
+  export const lookupUserByUsername = (
+    username: string,
+  ): ResultAsync<{ id: string; login: string } | null, Error> =>
+    fromPromise(
+      (async () => {
+        const { accessToken } = await getAccount();
+        try {
+          const data = await fetchGithub<{ id: number; login: string }>(
+            `/users/${username}`,
+            accessToken,
+          );
+          return { id: String(data.id), login: data.login };
+        } catch {
+          return null;
+        }
+      })(),
+    );
 }

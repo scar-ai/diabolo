@@ -15,6 +15,7 @@ import { Sandbox } from "@/lib/sandbox";
 import {
   deleteProject,
   deleteTask,
+  findOwnedProject,
   findProject,
   findProjectTask,
   findTask,
@@ -55,6 +56,7 @@ import {
 const log = Log.create({ ns: "project" });
 
 export type { ProjectId, TaskId } from "./shared";
+export { ProjectMembers } from "./members";
 
 export namespace Project {
   export type ProjectRecord = TProjectRecord;
@@ -64,8 +66,15 @@ export namespace Project {
   export type TaskForUserRecord = TTaskForUserRecord;
   export type TaskDetailRecord = TTaskDetailRecord;
 
+  /** Require project access: owner OR member. Used by most operations. */
   const requireUserProject = (projectId: string, userId: string) =>
     fromPromise(findProject(projectId, userId)).andThen((value) =>
+      value ? okAsync(value) : errAsync(new Error("Project not found.")),
+    );
+
+  /** Require project ownership. Used by privileged operations (delete, settings). */
+  const requireOwnedProject = (projectId: string, userId: string) =>
+    fromPromise(findOwnedProject(projectId, userId)).andThen((value) =>
       value ? okAsync(value) : errAsync(new Error("Project not found.")),
     );
 
@@ -127,7 +136,7 @@ export namespace Project {
     projectId: string,
     userId: string,
   ): ResultAsync<void, Error> =>
-    requireUserProject(projectId, userId)
+    requireOwnedProject(projectId, userId)
       .andThen(() => fromPromise(deleteProject(projectId)))
       .map(() => {
         log.info("project deleted", { projectId });
@@ -138,7 +147,7 @@ export namespace Project {
     projectId: string;
     userId: string;
   }): ResultAsync<ProjectRecord, Error> =>
-    requireUserProject(input.projectId, input.userId).andThen(() =>
+    requireOwnedProject(input.projectId, input.userId).andThen(() =>
       fromPromise(
         updateProject(input.projectId, {
           envVars: JSON.stringify(normalizeProjectEnvEntries(input.envEntries)),
@@ -172,6 +181,7 @@ export namespace Project {
         fromPromise(
           insertTask({
             branchName: draft.sourceBranch,
+            createdByUserId: input.userId,
             envVars: draft.envVars ? JSON.stringify(draft.envVars) : null,
             id: draft.id,
             projectId: input.projectId,
@@ -185,7 +195,7 @@ export namespace Project {
             title: buildTaskTitle(draft.prompt),
           }),
         ).andThen((createdTask) =>
-          Sandbox.enqueueTaskMessage(createdTask.id, draft.prompt, "initial").map(
+          Sandbox.enqueueTaskMessage(createdTask.id, draft.prompt, "initial", input.userId).map(
             () => createdTask,
           ),
         ),
@@ -374,7 +384,7 @@ export namespace Project {
         return errAsync(new Error("Quick tasks are read-only."));
       }
 
-      return fromPromise(queueFollowUpPrompt(value, prompt)).map((updated) => {
+      return fromPromise(queueFollowUpPrompt(value, prompt, userId)).map((updated) => {
         log.info("follow-up queued", { taskId });
         return updated;
       });

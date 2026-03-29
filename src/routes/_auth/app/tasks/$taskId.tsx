@@ -12,6 +12,7 @@ import {
   TaskFollowUpComposer,
   TaskHeaderActions,
 } from "@/components/app/task-detail";
+import type { CollaboratorMap } from "@/components/app/task-detail/types";
 import { Button } from "@/components/ui/button";
 import {
   $destroyTaskSandboxById,
@@ -20,6 +21,7 @@ import {
   $terminateTaskById,
 } from "@/lib/project/functions";
 import {
+  projectCollaboratorsQueryOptions,
   projectDetailQueryOptions,
   type TaskDetailResult,
   taskDetailQueryOptions,
@@ -112,6 +114,13 @@ function TaskDetailPage() {
     ...projectDetailQueryOptions(task?.projectId ?? ""),
     enabled: Boolean(task?.projectId),
   });
+  const collaboratorsQuery = useQuery({
+    ...projectCollaboratorsQueryOptions(task?.projectId ?? ""),
+    enabled: Boolean(task?.projectId),
+  });
+  const collaboratorMap: CollaboratorMap = new Map(
+    (collaboratorsQuery.data ?? []).map((c) => [c.userId, c.user]),
+  );
   useTaskStream(taskId, true);
   const isRunning = task && !TERMINAL_STATUSES.has(task.status);
   const isCompleted = task && TERMINAL_STATUSES.has(task.status);
@@ -246,6 +255,7 @@ function TaskDetailPage() {
   return (
     <main className="flex flex-1 flex-col overflow-hidden">
       <TaskConversation
+        collaborators={collaboratorMap}
         followUps={followUps}
         pendingFollowUpPrompt={pendingFollowUpPrompt}
         scrollRef={scrollRef}

@@ -1,6 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link, Outlet, useRouter, useRouterState } from "@tanstack/react-router";
-import { HouseIcon, HistoryIcon, LogOutIcon } from "lucide-react";
+import { HouseIcon, HistoryIcon, LogOutIcon, BuildingIcon } from "lucide-react";
 
 import { HeaderPortalProvider, useHeaderSlots } from "@/components/app/header-portal";
 import { ProjectSettingsDialog } from "@/components/app/project-settings-dialog";
@@ -41,7 +41,8 @@ function AppLayoutInner() {
       },
   });
   const initials = (user.name ?? user.email ?? "?").slice(0, 1).toUpperCase();
-  const isProjectsActive = location.pathname === "/app/projects";
+  const isMainNav =
+    location.pathname === "/app/projects" || location.pathname === "/app/organisation";
   const isSessionsActive =
     location.pathname === "/app/sessions" || location.pathname.startsWith("/app/tasks/");
   const headerSlots = useHeaderSlots();
@@ -62,15 +63,27 @@ function AppLayoutInner() {
           {headerSlots.left}
         </div>
 
-        {isProjectsActive ? (
+        {isMainNav ? (
           <nav className="absolute left-1/2 flex -translate-x-1/2 items-center gap-x-0.5 rounded-lg bg-muted p-0.5">
             <Link
               to="/app/projects"
               activeOptions={{ exact: true }}
-              className="relative flex h-8 shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-md bg-background px-2.5 text-sm font-medium whitespace-nowrap text-foreground shadow-sm/5 dark:bg-input [&_svg]:size-4"
+              className="relative flex h-8 shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-md px-2.5 text-sm font-medium whitespace-nowrap transition-colors [&_svg]:size-4"
+              activeProps={{ className: "bg-background text-foreground shadow-sm/5 dark:bg-input" }}
+              inactiveProps={{ className: "text-muted-foreground/72 hover:text-muted-foreground" }}
             >
               <HouseIcon aria-hidden="true" />
               Projects
+            </Link>
+            <Link
+              to="/app/organisation"
+              activeOptions={{ exact: true }}
+              className="relative flex h-8 shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-md px-2.5 text-sm font-medium whitespace-nowrap transition-colors [&_svg]:size-4"
+              activeProps={{ className: "bg-background text-foreground shadow-sm/5 dark:bg-input" }}
+              inactiveProps={{ className: "text-muted-foreground/72 hover:text-muted-foreground" }}
+            >
+              <BuildingIcon aria-hidden="true" />
+              Organisation
             </Link>
           </nav>
         ) : (
@@ -103,6 +116,7 @@ function AppLayoutInner() {
 
         <div className="flex items-center gap-2">
           <ProjectSettingsDialog
+            currentUserId={user.id}
             disabled={!headerSlots.projectId}
             projectId={headerSlots.projectId}
             projectName={headerSlots.projectName}

@@ -174,7 +174,11 @@ export const destroyTaskSandboxRecord = async (value: TaskRecord) => {
   });
 };
 
-export const queueFollowUpPrompt = async (value: TaskRecord, prompt: string) => {
+export const queueFollowUpPrompt = async (
+  value: TaskRecord,
+  prompt: string,
+  userId?: string | null,
+) => {
   await updateTask(value.id, {
     completedAt: null,
     error: null,
@@ -184,7 +188,7 @@ export const queueFollowUpPrompt = async (value: TaskRecord, prompt: string) => 
     status: "queued",
   });
 
-  await Sandbox.runTaskFollowUp(value.id, prompt.trim()).match(
+  await Sandbox.runTaskFollowUp(value.id, prompt.trim(), userId).match(
     () => {},
     (error) => {
       throw error;
