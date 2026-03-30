@@ -10,6 +10,7 @@ import { getSandboxProvider } from "@/lib/sandbox/daytona-provider";
 import { SandboxEvents } from "@/lib/sandbox/events";
 import { SandboxQueue } from "@/lib/sandbox/queue";
 import { createTaskMessage, findTaskRecord } from "@/lib/sandbox/store";
+import type { TaskMessageRecord } from "@/lib/sandbox/store";
 import { SandboxWorkspace } from "@/lib/sandbox/workspace";
 
 const log = Log.create({ ns: "sandbox" });
@@ -72,6 +73,7 @@ export namespace Sandbox {
     id: string;
     name: string;
     stop(timeoutSeconds?: number): Promise<void>;
+    uploadFile(localPath: string, remotePath: string, timeoutSeconds?: number): Promise<void>;
   }
 
   export interface Provider {
@@ -131,12 +133,12 @@ export namespace Sandbox {
       })(),
     );
 
-  export const enqueueTaskMessage = (
+  export const createTaskMessageDraft = (
     taskId: string,
     prompt: string,
     kind: "follow_up" | "initial",
     createdByUserId?: string | null,
-  ): ResultAsync<void, Error> =>
+  ): ResultAsync<TaskMessageRecord, Error> =>
     fromPromise(
       (async () => {
         const trimmedPrompt = prompt.trim();
@@ -149,22 +151,42 @@ export namespace Sandbox {
           throw new Error("Prompt must be at least 10 characters.");
         }
 
-        const message = await createTaskMessage({
+        return createTaskMessage({
           createdByUserId: createdByUserId ?? null,
           kind,
           prompt: trimmedPrompt,
           taskId,
         });
+      })(),
+    );
+
+  export const queueTaskMessage = (
+    taskId: string,
+    messageId: string,
+    prompt: string,
+  ): ResultAsync<void, Error> =>
+    fromPromise(
+      (async () => {
         await SandboxEvents.publish({
-          messageId: message.id,
+          messageId,
           payload: {
-            prompt: trimmedPrompt,
+            prompt: prompt.trim(),
           },
           taskId,
           type: "user_message",
         });
         await SandboxQueue.enqueue(taskId);
       })(),
+    );
+
+  export const enqueueTaskMessage = (
+    taskId: string,
+    prompt: string,
+    kind: "follow_up" | "initial",
+    createdByUserId?: string | null,
+  ): ResultAsync<TaskMessageRecord, Error> =>
+    createTaskMessageDraft(taskId, prompt, kind, createdByUserId).andThen((message) =>
+      queueTaskMessage(taskId, message.id, prompt).map(() => message),
     );
 
   export const getTask = (
@@ -195,5 +217,6 @@ export namespace Sandbox {
     jobId: string,
     prompt: string,
     createdByUserId?: string | null,
-  ): ResultAsync<void, Error> => enqueueTaskMessage(jobId, prompt, "follow_up", createdByUserId);
+  ): ResultAsync<void, Error> =>
+    enqueueTaskMessage(jobId, prompt, "follow_up", createdByUserId).map(() => undefined);
 }

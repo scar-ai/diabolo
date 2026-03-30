@@ -1,9 +1,22 @@
+import path from "node:path";
+
 import { Github } from "@/lib/github";
 import { ensureOpenCodeConfig } from "@/lib/opencode/config";
 import { Sandbox } from "@/lib/sandbox";
 import { buildOpenCodePrompt, buildOpenCodeRunCommand } from "@/lib/sandbox/opencode";
-import { findTaskMessage, findTaskRecord, updateTaskRecord } from "@/lib/sandbox/store";
+import {
+  findTaskMessage,
+  findTaskRecord,
+  getTaskConversation,
+  listTaskArtifactsByMessageId,
+  updateTaskRecord,
+} from "@/lib/sandbox/store";
 import { SandboxWorkspace } from "@/lib/sandbox/workspace";
+import {
+  isTaskAttachmentMetadata,
+  resolveTaskAttachmentPath,
+  TASK_ATTACHMENT_ARTIFACT_TYPE,
+} from "@/lib/task-attachments";
 
 import {
   assertTaskNotCancelled,
@@ -18,6 +31,59 @@ import {
 } from "./run-support";
 
 type Viewer = { email: string; login: string; name: string };
+
+const prepareMessageAttachments = async (input: {
+  messageId: string;
+  prepared: { sandbox: Sandbox.Session; sandboxPath: string };
+}) => {
+  const artifacts = await listTaskArtifactsByMessageId(input.messageId);
+  const attachmentArtifacts = artifacts.flatMap((artifact) => {
+    if (
+      artifact.type !== TASK_ATTACHMENT_ARTIFACT_TYPE ||
+      !isTaskAttachmentMetadata(artifact.parsedMetadata)
+    ) {
+      return [];
+    }
+
+    return [
+      {
+        artifact,
+        metadata: artifact.parsedMetadata,
+      },
+    ];
+  });
+
+  if (attachmentArtifacts.length === 0) {
+    return [];
+  }
+
+  const attachments: Array<{ fileName: string; mediaType: string; sandboxPath: string }> = [];
+
+  for (const attachmentArtifact of attachmentArtifacts) {
+    const { metadata } = attachmentArtifact;
+    const sandboxPath = path.posix.join(
+      input.prepared.sandboxPath,
+      ".diabolo",
+      "attachments",
+      input.messageId,
+      metadata.fileName,
+    );
+
+    await input.prepared.sandbox.uploadFile(
+      resolveTaskAttachmentPath(metadata.storageKey),
+      sandboxPath,
+      180,
+    );
+
+    attachments.push({
+      fileName: metadata.originalName,
+      mediaType: metadata.mediaType,
+      sandboxPath,
+    });
+  }
+
+  return attachments;
+};
 
 const loadTaskExecutionContext = async (taskId: string, messageId: string) => {
   const [taskRecord, messageRecord] = await Promise.all([
@@ -54,6 +120,7 @@ const loadTaskExecutionContext = async (taskId: string, messageId: string) => {
 const runOpenCodeMessage = async (input: {
   defaultCompletionStage: string;
   messageId: string;
+  messagePromptOptions?: Parameters<typeof buildOpenCodePrompt>[1];
   prepared: { sandbox: Sandbox.Session; sandboxPath: string };
   repo: Github.Repo;
   taskId: string;
@@ -65,7 +132,13 @@ const runOpenCodeMessage = async (input: {
 }) => {
   const openCode = ensureOpenCodeConfig();
   const model = input.taskRecord?.opencodeModel?.trim() || openCode.model;
+  const attachments = await prepareMessageAttachments({
+    messageId: input.messageId,
+    prepared: input.prepared,
+  });
   const prompt = buildOpenCodePrompt(input.messagePrompt, {
+    attachments,
+    ...input.messagePromptOptions,
     envVarKeys: Object.keys(input.taskProjectEnvVars),
     sandboxId: input.prepared.sandbox.id,
   });
@@ -73,7 +146,7 @@ const runOpenCodeMessage = async (input: {
     input.prepared.sandbox,
     input.taskId,
     input.messageId,
-    buildOpenCodeRunCommand(model, prompt),
+    buildOpenCodeRunCommand(model, prompt, attachments),
     input.prepared.sandboxPath,
     buildOpenCodeEnvironment({
       apiKey: openCode.apiKey,
@@ -179,6 +252,19 @@ export const runFollowUpMessage = async (taskId: string, messageId: string) => {
     return;
   }
 
+  const previousConversation: NonNullable<
+    Parameters<typeof buildOpenCodePrompt>[1]
+  >["conversationHistory"] = (await getTaskConversation(taskId))
+    .filter((message) => message.sequence < context.messageRecord.sequence)
+    .map((message) => ({
+      error: message.error,
+      kind: message.kind === "initial" ? "initial" : "follow_up",
+      prompt: message.prompt,
+      responseMessages: message.parsedResponseMessages,
+      sequence: message.sequence,
+      status: message.status,
+    }));
+
   const prepared = await SandboxWorkspace.getOrCreateFollowUp({
     authenticatedRemoteUrl: context.authenticatedRemoteUrl,
     envVars: context.taskProjectEnvVars,
@@ -203,6 +289,9 @@ export const runFollowUpMessage = async (taskId: string, messageId: string) => {
     githubAccessToken: context.githubAccessToken,
     messageId,
     messagePrompt: context.messageRecord.prompt,
+    messagePromptOptions: {
+      conversationHistory: previousConversation,
+    },
     prepared,
     repo: context.repo,
     taskId,

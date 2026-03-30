@@ -1,10 +1,10 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link, Outlet, useRouter, useRouterState } from "@tanstack/react-router";
-import { HouseIcon, HistoryIcon, LogOutIcon, BuildingIcon } from "lucide-react";
+import { BuildingIcon, HistoryIcon, HouseIcon, LogOutIcon } from "lucide-react";
 
+import { AttachmentDropProvider } from "@/components/app/attachment-drop";
 import { HeaderPortalProvider, useHeaderSlots } from "@/components/app/header-portal";
 import { ProjectSettingsDialog } from "@/components/app/project-settings-dialog";
-import { ThemeToggle } from "@/components/theme-toggle";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   DropdownMenu,
@@ -20,9 +20,11 @@ export const Route = createFileRoute("/_auth/app")({
 
 function AppLayout() {
   return (
-    <HeaderPortalProvider>
-      <AppLayoutInner />
-    </HeaderPortalProvider>
+    <AttachmentDropProvider>
+      <HeaderPortalProvider>
+        <AppLayoutInner />
+      </HeaderPortalProvider>
+    </AttachmentDropProvider>
   );
 }
 
@@ -30,23 +32,12 @@ function AppLayoutInner() {
   const { user } = Route.useRouteContext();
   const queryClient = useQueryClient();
   const router = useRouter();
-  const location = useRouterState({
-    select: (state) =>
-      state.location as {
-        pathname: string;
-        projectId?: string;
-        search: {
-          projectId?: string;
-        };
-      },
-  });
+  const location = useRouterState({ select: (s) => s.location.pathname });
   const initials = (user.name ?? user.email ?? "?").slice(0, 1).toUpperCase();
-  const isMainNav =
-    location.pathname === "/app/projects" || location.pathname === "/app/organisation";
-  const isSessionsActive =
-    location.pathname === "/app/sessions" || location.pathname.startsWith("/app/tasks/");
   const headerSlots = useHeaderSlots();
-  const projectIdForNav = location.search.projectId ?? headerSlots.projectId ?? undefined;
+  const isMainNav = location === "/app/projects" || location === "/app/organisation";
+  const isSessionsActive = location === "/app/sessions" || location.startsWith("/app/tasks/");
+  const projectIdForNav = headerSlots.projectId ?? undefined;
   const sharedSearch = projectIdForNav ? { projectId: projectIdForNav } : {};
 
   return (
@@ -123,7 +114,6 @@ function AppLayoutInner() {
             projectName={headerSlots.projectName}
           />
           {headerSlots.right}
-          <ThemeToggle />
           <DropdownMenu>
             <DropdownMenuTrigger className="rounded-full">
               <Avatar className="size-9 border border-border">

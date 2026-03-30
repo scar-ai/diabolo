@@ -11,18 +11,24 @@ import { PromptComposer } from "@/components/app/prompt-composer";
 import type { TaskData } from "./types";
 
 export function TaskFollowUpComposer({
+  attachments,
   canSubmit,
   disabled,
   isPending,
+  onAddAttachments,
   onChange,
+  onRemoveAttachment,
   onSubmit,
   task,
   value,
 }: {
+  attachments: Array<{ id: string; name: string; sizeLabel?: string }>;
   canSubmit: boolean;
   disabled: boolean;
   isPending: boolean;
+  onAddAttachments: (files: File[]) => void;
   onChange: (value: string) => void;
+  onRemoveAttachment: (id: string) => void;
   onSubmit: () => void;
   task: TaskData;
   value: string;
@@ -38,8 +44,11 @@ export function TaskFollowUpComposer({
       <div className="fixed inset-x-0 bottom-6 flex justify-center px-4">
         <div className="w-full max-w-3xl">
           <PromptComposer
+            attachments={attachments}
             value={value}
+            onAddAttachments={onAddAttachments}
             onChange={onChange}
+            onRemoveAttachment={onRemoveAttachment}
             onSubmit={onSubmit}
             headerContent={
               task.prUrl ? (

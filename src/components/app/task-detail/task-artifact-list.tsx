@@ -1,4 +1,4 @@
-import { ExternalLinkIcon, GitBranchIcon, ImageIcon } from "lucide-react";
+import { ExternalLinkIcon, FileIcon, GitBranchIcon, ImageIcon } from "lucide-react";
 
 import type { JsonObject } from "@/lib/json";
 
@@ -20,6 +20,14 @@ const getArtifactLabel = (artifact: TaskArtifact) => {
     return typeof artifact.metadata?.branchName === "string"
       ? artifact.metadata.branchName
       : artifact.url;
+  }
+
+  if (artifact.type === "attachment") {
+    return typeof artifact.metadata?.originalName === "string"
+      ? artifact.metadata.originalName
+      : typeof artifact.metadata?.fileName === "string"
+        ? artifact.metadata.fileName
+        : "Attachment";
   }
 
   return artifact.type.replaceAll("_", " ");
@@ -46,12 +54,18 @@ export function TaskArtifactList({
           const Icon =
             artifact.type === "branch"
               ? GitBranchIcon
-              : artifact.type === "screenshot"
+              : artifact.type === "screenshot" ||
+                  (artifact.type === "attachment" &&
+                    typeof artifact.metadata?.mediaType === "string" &&
+                    artifact.metadata.mediaType.startsWith("image/"))
                 ? ImageIcon
-                : ExternalLinkIcon;
+                : artifact.type === "attachment"
+                  ? FileIcon
+                  : ExternalLinkIcon;
 
           const isExternal =
             artifact.url.startsWith("http://") || artifact.url.startsWith("https://");
+          const isLink = isExternal || artifact.url.startsWith("/");
 
           return (
             <div
@@ -62,14 +76,14 @@ export function TaskArtifactList({
                 <Icon className="size-3.5 shrink-0 text-muted-foreground/70" />
                 <span className="truncate text-foreground">{getArtifactLabel(artifact)}</span>
               </div>
-              {isExternal ? (
+              {isLink ? (
                 <a
                   href={artifact.url}
-                  target="_blank"
-                  rel="noreferrer"
+                  target={isExternal ? "_blank" : undefined}
+                  rel={isExternal ? "noreferrer" : undefined}
                   className="shrink-0 text-xs text-muted-foreground/70 underline underline-offset-4"
                 >
-                  Open
+                  {artifact.type === "attachment" ? "Download" : "Open"}
                 </a>
               ) : (
                 <span className="shrink-0 text-xs text-muted-foreground/60">{artifact.url}</span>

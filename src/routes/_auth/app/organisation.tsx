@@ -1,18 +1,20 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import {
   BuildingIcon,
   CheckIcon,
   CrownIcon,
+  HouseIcon,
   PlusIcon,
   ShieldIcon,
   UserPlusIcon,
   XIcon,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
+import { useSetHeaderSlots } from "@/components/app/header-portal";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -56,6 +58,29 @@ export const Route = createFileRoute("/_auth/app/organisation")({
 function OrganisationPage() {
   const { user } = Route.useRouteContext();
   const queryClient = useQueryClient();
+  const setHeaderSlots = useSetHeaderSlots();
+
+  useEffect(() => {
+    setHeaderSlots({
+      left: (
+        <nav className="flex items-center gap-1.5 text-sm">
+          <Link
+            to="/app/projects"
+            className="flex items-center gap-1.5 text-muted-foreground transition-colors hover:text-foreground"
+          >
+            <HouseIcon className="size-4" />
+            Home
+          </Link>
+          <span className="text-muted-foreground/40">/</span>
+          <span className="font-medium text-foreground">Organisation</span>
+        </nav>
+      ),
+      projectId: null,
+      projectName: null,
+      right: null,
+    });
+    return () => setHeaderSlots({ left: null, projectId: null, projectName: null, right: null });
+  }, [setHeaderSlots]);
   const createOrg = useServerFn($createOrg);
   const inviteMember = useServerFn($inviteMember);
   const acceptInvite = useServerFn($acceptInvite);

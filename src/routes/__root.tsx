@@ -5,7 +5,6 @@ import { ReactQueryDevtoolsPanel } from "@tanstack/react-query-devtools";
 import { createRootRouteWithContext, HeadContent, Outlet, Scripts } from "@tanstack/react-router";
 import { TanStackRouterDevtoolsPanel } from "@tanstack/react-router-devtools";
 
-import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
 import type { AuthQueryResult } from "@/lib/auth/queries";
 
@@ -59,16 +58,13 @@ function RootComponent() {
 
 function RootDocument({ children }: { readonly children: React.ReactNode }) {
   return (
-    // suppress since we're updating the "dark" class in ThemeProvider
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en" className="dark">
       <head>
         <HeadContent />
       </head>
       <body>
-        <ThemeProvider>
-          {children}
-          <Toaster richColors />
-        </ThemeProvider>
+        {children}
+        <Toaster richColors />
 
         <TanStackDevtools
           plugins={[

@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import { LoaderIcon, Trash2Icon } from "lucide-react";
+import { HouseIcon, LoaderIcon, Trash2Icon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
@@ -87,7 +87,31 @@ function SessionsPage() {
 
   useEffect(() => {
     setHeaderSlots({
-      left: null,
+      left: (
+        <nav className="flex items-center gap-1.5 text-sm">
+          <Link
+            to="/app/projects"
+            className="flex items-center gap-1.5 text-muted-foreground transition-colors hover:text-foreground"
+          >
+            <HouseIcon className="size-4" />
+            Home
+          </Link>
+          {currentProject ? (
+            <>
+              <span className="text-muted-foreground/40">/</span>
+              <Link
+                to="/app"
+                search={{ projectId: currentProject.id }}
+                className="text-muted-foreground transition-colors hover:text-foreground"
+              >
+                {currentProject.name}
+              </Link>
+            </>
+          ) : null}
+          <span className="text-muted-foreground/40">/</span>
+          <span className="font-medium text-foreground">Sessions</span>
+        </nav>
+      ),
       projectId: currentProject?.id ?? null,
       projectName: currentProject?.name ?? null,
       right: null,

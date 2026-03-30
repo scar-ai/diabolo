@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link, redirect, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
+import { HouseIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
@@ -10,9 +11,8 @@ import { CreateProjectDialog } from "@/components/app/home/create-project-dialog
 import { ProjectSelector } from "@/components/app/home/project-selector";
 import { RunningTasksPanel } from "@/components/app/home/running-tasks-panel";
 import { PromptComposer } from "@/components/app/prompt-composer";
-import { Button } from "@/components/ui/button";
 import { githubBranchesQueryOptions, githubReposQueryOptions } from "@/lib/github/queries";
-import { $createProject, $createTask } from "@/lib/project/functions";
+import { $createProject } from "@/lib/project/functions";
 import {
   allUserTaskSummariesQueryOptions,
   projectDetailQueryOptions,
@@ -21,9 +21,22 @@ import {
   taskKeys,
 } from "@/lib/project/queries";
 
+type PendingAttachment = {
+  file: File;
+  id: string;
+};
+
 type AppHomeSearch = {
   branch?: string;
   projectId?: string;
+};
+
+const formatAttachmentSize = (bytes: number) => {
+  if (bytes < 1024 * 1024) {
+    return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  }
+
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 };
 
 export const Route = createFileRoute("/_auth/app/")({
@@ -51,7 +64,6 @@ function AppHome() {
   const navigate = useNavigate({ from: Route.fullPath });
   const queryClient = useQueryClient();
   const createProject = useServerFn($createProject);
-  const createTask = useServerFn($createTask);
   const setHeaderSlots = useSetHeaderSlots();
 
   const greeting = getGreeting();
@@ -67,6 +79,7 @@ function AppHome() {
   const [createProjectSearch, setCreateProjectSearch] = useState("");
   const [createProjectRepoId, setCreateProjectRepoId] = useState("");
   const [createProjectName, setCreateProjectName] = useState("");
+  const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
 
   const currentProjectId = search.projectId ?? "";
   const recentTasksQuery = useQuery({
@@ -138,23 +151,40 @@ function AppHome() {
   });
 
   const taskMutation = useMutation({
-    mutationFn: async (data: { prompt: string; sourceBranch: string }) => {
+    mutationFn: async (data: { attachments: File[]; prompt: string; sourceBranch: string }) => {
       if (!currentProject) {
         throw new Error("Select a project first.");
       }
 
-      return createTask({
-        data: {
-          projectId: currentProject.id,
-          prompt: data.prompt,
-          sourceBranch: data.sourceBranch,
-        },
+      const formData = new FormData();
+      formData.set("projectId", currentProject.id);
+      formData.set("prompt", data.prompt);
+      formData.set("sourceBranch", data.sourceBranch);
+
+      for (const file of data.attachments) {
+        formData.append("attachments", file);
+      }
+
+      const response = await fetch("/api/tasks/create", {
+        body: formData,
+        method: "POST",
       });
+
+      const payload = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          typeof payload?.error === "string" ? payload.error : "Failed to start task.",
+        );
+      }
+
+      return payload;
     },
     onSuccess: async (newTask) => {
       await queryClient.invalidateQueries({ queryKey: taskKeys.all });
       toast.success("Background task started.");
       setInputValue("");
+      setAttachments([]);
       navigate({ to: "/app/tasks/$taskId", params: { taskId: newTask.id } });
     },
     onError: (error) => {
@@ -163,23 +193,30 @@ function AppHome() {
   });
 
   const canSubmit =
-    inputValue.trim().length >= 1 && Boolean(currentProjectId) && !taskMutation.isPending;
+    inputValue.trim().length >= 10 && Boolean(currentProjectId) && !taskMutation.isPending;
 
   useEffect(() => {
     setHeaderSlots({
-      left: null,
+      left: (
+        <nav className="flex items-center gap-1.5 text-sm">
+          <Link
+            to="/app/projects"
+            className="flex items-center gap-1.5 text-muted-foreground transition-colors hover:text-foreground"
+          >
+            <HouseIcon className="size-4" />
+            Home
+          </Link>
+          {currentProject?.name ? (
+            <>
+              <span className="text-muted-foreground/40">/</span>
+              <span className="font-medium text-foreground">{currentProject.name}</span>
+            </>
+          ) : null}
+        </nav>
+      ),
       projectId: currentProjectId,
       projectName: currentProject?.name ?? null,
-      right: (
-        <Button
-          render={<Link to="/app/projects" search={{}} />}
-          variant="ghost"
-          size="sm"
-          nativeButton={false}
-        >
-          Back to home screen
-        </Button>
-      ),
+      right: null,
     });
     return () => setHeaderSlots({ left: null, projectId: null, projectName: null, right: null });
   }, [currentProject?.name, currentProjectId, setHeaderSlots]);
@@ -196,6 +233,7 @@ function AppHome() {
     }
 
     taskMutation.mutate({
+      attachments: attachments.map((attachment) => attachment.file),
       prompt: inputValue.trim(),
       sourceBranch: currentBranch,
     });
@@ -215,8 +253,25 @@ function AppHome() {
 
       <div className="fixed inset-x-0 bottom-6 flex justify-center px-4">
         <PromptComposer
+          attachments={attachments.map((attachment) => ({
+            id: attachment.id,
+            name: attachment.file.name,
+            sizeLabel: formatAttachmentSize(attachment.file.size),
+          }))}
           value={inputValue}
+          onAddAttachments={(files) => {
+            setAttachments((current) => [
+              ...current,
+              ...Array.from(files).map((file) => ({
+                file,
+                id: crypto.randomUUID(),
+              })),
+            ]);
+          }}
           onChange={setInputValue}
+          onRemoveAttachment={(id) =>
+            setAttachments((current) => current.filter((attachment) => attachment.id !== id))
+          }
           onSubmit={handleSubmit}
           placeholder="Ask anything..."
           canSubmit={canSubmit}
@@ -267,7 +322,29 @@ function AppHome() {
 
 function getGreeting() {
   const hour = new Date().getHours();
-  if (hour < 12) return "Good morning";
-  if (hour < 17) return "Good afternoon";
-  return "Good evening";
+
+  const morning = [
+    "Good morning",
+    "Morning",
+    "Rise and shine",
+    "Hope your morning's going well",
+    "Ready to get things done?",
+  ];
+  const afternoon = [
+    "Good afternoon",
+    "Afternoon",
+    "Hope the day's treating you well",
+    "How's the afternoon going?",
+    "Making the most of the day?",
+  ];
+  const evening = [
+    "Good evening",
+    "Evening",
+    "Winding down?",
+    "Hope you had a good day",
+    "Burning the midnight oil?",
+  ];
+
+  const pool = hour < 12 ? morning : hour < 17 ? afternoon : evening;
+  return pool[Math.floor(Math.random() * pool.length)];
 }

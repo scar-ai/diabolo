@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import { ArrowLeftIcon, PlusIcon } from "lucide-react";
+import { ArrowLeftIcon, HouseIcon, PlusIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
@@ -131,15 +131,20 @@ function ProjectsPage() {
 
   useEffect(() => {
     setHeaderSlots({
-      left: isCreateProjectView ? (
-        <span className="truncate text-sm font-medium text-foreground">Create project</span>
-      ) : null,
+      left: (
+        <nav className="flex items-center gap-1.5 text-sm">
+          <span className="flex items-center gap-1.5 font-medium text-foreground">
+            <HouseIcon className="size-4" />
+            Home
+          </span>
+        </nav>
+      ),
       projectId: null,
       projectName: null,
       right: null,
     });
     return () => setHeaderSlots({ left: null, projectId: null, projectName: null, right: null });
-  }, [isCreateProjectView, setHeaderSlots]);
+  }, [setHeaderSlots]);
 
   const handleOpenCreateProject = () => {
     setCreateProjectSearch("");

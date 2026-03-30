@@ -119,6 +119,19 @@ export const listTaskArtifacts = async (taskId: string) => {
   }));
 };
 
+export const listTaskArtifactsByMessageId = async (messageId: string) => {
+  const rows = await db
+    .select()
+    .from(taskArtifact)
+    .where(eq(taskArtifact.messageId, messageId))
+    .orderBy(asc(taskArtifact.createdAt));
+
+  return rows.map((row) => ({
+    ...row,
+    parsedMetadata: parseJson<JsonObject>(row.metadata),
+  }));
+};
+
 export const findTaskMessage = (messageId: string) =>
   db
     .select()

@@ -30,6 +30,7 @@ import {
   listUserTaskSummaries,
   listUserTasks,
   updateProject,
+  updateTask,
   type ProjectRecord as TProjectRecord,
   type TaskForUserRecord as TTaskForUserRecord,
 } from "./data";
@@ -51,6 +52,7 @@ import {
   type TaskRecord as TTaskRecord,
   type TaskSummaryRecord as TTaskSummaryRecord,
 } from "./shared";
+import { generateTaskTitle } from "./title";
 
 const log = Log.create({ ns: "project" });
 
@@ -175,24 +177,26 @@ export namespace Project {
         ),
       )
       .andThen((draft) =>
-        fromPromise(
-          insertTask({
-            branchName: draft.sourceBranch,
-            createdByUserId: input.userId,
-            envVars: draft.envVars ? JSON.stringify(draft.envVars) : null,
-            id: draft.id,
-            projectId: input.projectId,
-            prompt: draft.prompt,
-            repoId: draft.repoId,
-            sandboxStatus: "pending",
-            stage: draft.stage,
-            startedAt: new Date(draft.startedAt),
-            status: draft.status,
-            title: buildTaskTitle(draft.prompt),
-          }),
-        ).andThen((createdTask) =>
-          Sandbox.enqueueTaskMessage(createdTask.id, draft.prompt, "initial", input.userId).map(
-            () => createdTask,
+        fromPromise(generateTaskTitle(draft.prompt)).andThen((title) =>
+          fromPromise(
+            insertTask({
+              branchName: draft.sourceBranch,
+              createdByUserId: input.userId,
+              envVars: draft.envVars ? JSON.stringify(draft.envVars) : null,
+              id: draft.id,
+              projectId: input.projectId,
+              prompt: draft.prompt,
+              repoId: draft.repoId,
+              sandboxStatus: "pending",
+              stage: draft.stage,
+              startedAt: new Date(draft.startedAt),
+              status: draft.status,
+              title,
+            }),
+          ).andThen((createdTask) =>
+            Sandbox.enqueueTaskMessage(createdTask.id, draft.prompt, "initial", input.userId).map(
+              () => createdTask,
+            ),
           ),
         ),
       )
@@ -201,6 +205,58 @@ export namespace Project {
         return value;
       });
   };
+
+  export const createTaskDraftForUser = (input: {
+    projectId: string;
+    prompt: string;
+    sourceBranch: string;
+    userId: string;
+  }): ResultAsync<{ messageId: string; task: TaskRecord }, Error> =>
+    requireUserProject(input.projectId, input.userId)
+      .andThen((value) =>
+        Sandbox.startTask(
+          {
+            envVars: serializeProjectEnvEntries(parseStoredProjectEnvEntries(value.envVars)),
+            prompt: input.prompt,
+            repoId: value.repoId,
+            sourceBranch: input.sourceBranch,
+          },
+          input.userId,
+        ),
+      )
+      .andThen((draft) =>
+        fromPromise(generateTaskTitle(draft.prompt)).andThen((title) =>
+          fromPromise(
+            insertTask({
+              branchName: draft.sourceBranch,
+              createdByUserId: input.userId,
+              envVars: draft.envVars ? JSON.stringify(draft.envVars) : null,
+              id: draft.id,
+              projectId: input.projectId,
+              prompt: draft.prompt,
+              repoId: draft.repoId,
+              sandboxStatus: "pending",
+              stage: draft.stage,
+              startedAt: new Date(draft.startedAt),
+              status: draft.status,
+              title,
+            }),
+          ).andThen((task) =>
+            Sandbox.createTaskMessageDraft(task.id, draft.prompt, "initial", input.userId).map(
+              (message) => ({
+                messageId: message.id,
+                task,
+              }),
+            ),
+          ),
+        ),
+      );
+
+  export const queueTaskMessageForTask = (
+    taskId: string,
+    messageId: string,
+    prompt: string,
+  ): ResultAsync<void, Error> => Sandbox.queueTaskMessage(taskId, messageId, prompt);
 
   export const createChildTaskForTask = (input: {
     model?: string | null;
@@ -363,6 +419,31 @@ export namespace Project {
         log.info("follow-up queued", { taskId });
         return updated;
       }),
+    );
+
+  export const prepareTaskFollowUpForUser = (
+    taskId: string,
+    prompt: string,
+    userId: string,
+  ): ResultAsync<{ messageId: string; task: TaskRecord }, Error> =>
+    requireTaskForUser(taskId, userId).andThen(({ task: value }) =>
+      fromPromise(
+        updateTask(value.id, {
+          completedAt: null,
+          error: null,
+          lastHeartbeatAt: new Date(),
+          sandboxStatus: value.sandboxId ? "ready" : "pending",
+          stage: "Queued prompt",
+          status: "queued",
+        }),
+      ).andThen((updatedTask) =>
+        Sandbox.createTaskMessageDraft(value.id, prompt.trim(), "follow_up", userId).map(
+          (message) => ({
+            messageId: message.id,
+            task: updatedTask ?? value,
+          }),
+        ),
+      ),
     );
 
   export const listAllTasksForUser = (userId: string): ResultAsync<TaskRecord[], Error> =>
