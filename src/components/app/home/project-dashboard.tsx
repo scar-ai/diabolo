@@ -18,6 +18,7 @@ import { Frame, FramePanel } from "@/components/ui/frame";
 import type { ProjectsResult, TaskSummaryResult } from "@/lib/project/queries";
 
 export function ProjectDashboard({
+  currentUserId,
   deletingProjectId,
   onCreateProject,
   onDeleteProject,
@@ -25,6 +26,7 @@ export function ProjectDashboard({
   repoNamesById,
   runningTasksByProject,
 }: {
+  currentUserId: string;
   deletingProjectId?: string | null;
   onCreateProject: () => void;
   onDeleteProject: (projectId: string) => void;
@@ -77,6 +79,7 @@ export function ProjectDashboard({
             const repoName = repoNamesById.get(project.repoId) ?? project.repoId;
             const runningTasks = runningTasksByProject.get(project.id) ?? [];
             const isDeleting = deletingProjectId === project.id;
+            const isOwner = project.userId === currentUserId;
 
             return (
               <Link
@@ -90,14 +93,22 @@ export function ProjectDashboard({
                     <div className="flex items-start justify-between gap-4">
                       <div className="min-w-0 space-y-2">
                         <div className="space-y-1">
-                          <h2 className="text-xl font-semibold tracking-tight text-foreground">
-                            {project.name}
-                          </h2>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <h2 className="text-xl font-semibold tracking-tight text-foreground">
+                              {project.name}
+                            </h2>
+                            {project.sharedWithOrgId ? (
+                              <span className="rounded-full border border-border px-2 py-0.5 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+                                Organisation
+                              </span>
+                            ) : null}
+                          </div>
                           <p className="truncate text-sm text-muted-foreground">{repoName}</p>
                         </div>
                       </div>
                       <div className="flex items-center gap-2">
                         <ProjectSettingsDialog
+                          currentUserId={currentUserId}
                           projectId={project.id}
                           projectName={project.name}
                           onTriggerClick={(event) => {
@@ -105,50 +116,52 @@ export function ProjectDashboard({
                             event.stopPropagation();
                           }}
                         />
-                        <AlertDialog>
-                          <AlertDialogTrigger
-                            render={
-                              <Button
-                                variant="ghost"
-                                size="icon-sm"
-                                className="text-destructive/75 hover:bg-destructive/10 hover:text-destructive"
-                                disabled={isDeleting}
-                                onClick={(event) => {
-                                  event.preventDefault();
-                                  event.stopPropagation();
-                                }}
-                              />
-                            }
-                          >
-                            <Trash2Icon className="size-4" aria-hidden="true" />
-                            <span className="sr-only">Delete project</span>
-                          </AlertDialogTrigger>
-                          <AlertDialogContent>
-                            <AlertDialogHeader>
-                              <AlertDialogTitle>Delete project?</AlertDialogTitle>
-                              <AlertDialogDescription>
-                                This permanently removes {project.name} and its sessions.
-                              </AlertDialogDescription>
-                            </AlertDialogHeader>
-                            <AlertDialogFooter>
-                              <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
-                              <AlertDialogClose
-                                variant="destructive"
-                                disabled={isDeleting}
-                                onClick={() => onDeleteProject(project.id)}
-                              >
-                                {isDeleting ? (
-                                  <LoaderIcon
-                                    className="size-3.5 animate-spin"
-                                    aria-hidden="true"
-                                  />
-                                ) : (
-                                  "Delete"
-                                )}
-                              </AlertDialogClose>
-                            </AlertDialogFooter>
-                          </AlertDialogContent>
-                        </AlertDialog>
+                        {isOwner ? (
+                          <AlertDialog>
+                            <AlertDialogTrigger
+                              render={
+                                <Button
+                                  variant="ghost"
+                                  size="icon-sm"
+                                  className="text-destructive/75 hover:bg-destructive/10 hover:text-destructive"
+                                  disabled={isDeleting}
+                                  onClick={(event) => {
+                                    event.preventDefault();
+                                    event.stopPropagation();
+                                  }}
+                                />
+                              }
+                            >
+                              <Trash2Icon className="size-4" aria-hidden="true" />
+                              <span className="sr-only">Delete project</span>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>Delete project?</AlertDialogTitle>
+                                <AlertDialogDescription>
+                                  This permanently removes {project.name} and its sessions.
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+                                <AlertDialogClose
+                                  variant="destructive"
+                                  disabled={isDeleting}
+                                  onClick={() => onDeleteProject(project.id)}
+                                >
+                                  {isDeleting ? (
+                                    <LoaderIcon
+                                      className="size-3.5 animate-spin"
+                                      aria-hidden="true"
+                                    />
+                                  ) : (
+                                    "Delete"
+                                  )}
+                                </AlertDialogClose>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
+                        ) : null}
                         <div className="flex items-center gap-2 text-sm text-muted-foreground transition-colors group-hover:text-foreground">
                           Open
                           <ArrowRightIcon className="size-4" aria-hidden="true" />

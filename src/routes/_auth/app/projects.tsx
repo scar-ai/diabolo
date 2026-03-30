@@ -226,6 +226,7 @@ function ProjectsPage() {
 
   return (
     <ProjectDashboard
+      currentUserId={user.id}
       deletingProjectId={deleteProjectMutation.isPending ? deleteProjectMutation.variables : null}
       onCreateProject={handleOpenCreateProject}
       onDeleteProject={(projectId) => deleteProjectMutation.mutate(projectId)}

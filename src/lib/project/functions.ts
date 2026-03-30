@@ -24,6 +24,7 @@ const projectEnvEntrySchema: z.ZodType<ProjectEnvEntry> = z.object({
 const updateProjectSettingsInputSchema = z.object({
   envEntries: z.array(projectEnvEntrySchema),
   projectId: z.string().min(1),
+  shareWithOrganisation: z.boolean(),
 });
 
 const createTaskInputSchema = z.object({
@@ -187,7 +188,10 @@ const leaveProjectInputSchema = z.object({
 export const $getProjectCollaborators = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
   .inputValidator((data) => projectIdInputSchema.parse(data))
-  .handler(async ({ data }) => listProjectCollaborators(data.projectId));
+  .handler(async ({ context, data }) => {
+    await unwrap(Project.getProjectForUser(data.projectId, context.user.id));
+    return listProjectCollaborators(data.projectId);
+  });
 
 export const $getProjectInvites = createServerFn({ method: "GET" })
   .middleware([authMiddleware])

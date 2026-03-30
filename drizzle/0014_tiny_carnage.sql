@@ -1,0 +1,2 @@
+ALTER TABLE "project" ADD COLUMN "shared_with_org_id" text;--> statement-breakpoint
+ALTER TABLE "project" ADD CONSTRAINT "project_shared_with_org_id_organisation_id_fk" FOREIGN KEY ("shared_with_org_id") REFERENCES "public"."organisation"("id") ON DELETE set null ON UPDATE no action;

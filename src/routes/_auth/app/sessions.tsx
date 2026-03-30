@@ -117,7 +117,7 @@ function SessionsPage() {
       right: null,
     });
     return () => setHeaderSlots({ left: null, projectId: null, projectName: null, right: null });
-  }, [currentProject?.id, currentProject?.name, setHeaderSlots]);
+  }, [currentProject, setHeaderSlots]);
 
   const deleteMutation = useMutation({
     mutationFn: ({ projectId, taskId }: { projectId: string; taskId: string }) =>

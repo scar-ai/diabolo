@@ -2,6 +2,7 @@ import { and, desc, eq, inArray, isNotNull, or } from "drizzle-orm";
 import { getTableColumns } from "drizzle-orm";
 
 import { db } from "@/lib/db";
+import { organisationMember } from "@/lib/org/org.sql";
 
 import { project, projectInvite, projectMember, task } from "./project.sql";
 import { taskSummarySelection } from "./shared";
@@ -26,10 +27,21 @@ export const findProject = (projectId: string, userId: string) =>
       projectMember,
       and(eq(projectMember.projectId, project.id), eq(projectMember.userId, userId)),
     )
+    .leftJoin(
+      organisationMember,
+      and(
+        eq(organisationMember.orgId, project.sharedWithOrgId),
+        eq(organisationMember.userId, userId),
+      ),
+    )
     .where(
       and(
         eq(project.id, projectId),
-        or(eq(project.userId, userId), isNotNull(projectMember.userId)),
+        or(
+          eq(project.userId, userId),
+          isNotNull(projectMember.userId),
+          isNotNull(organisationMember.userId),
+        ),
       ),
     )
     .then((rows) => rows[0] as ProjectRecord | undefined);
@@ -74,7 +86,20 @@ export const listProjects = (userId: string) =>
       projectMember,
       and(eq(projectMember.projectId, project.id), eq(projectMember.userId, userId)),
     )
-    .where(or(eq(project.userId, userId), isNotNull(projectMember.userId)))
+    .leftJoin(
+      organisationMember,
+      and(
+        eq(organisationMember.orgId, project.sharedWithOrgId),
+        eq(organisationMember.userId, userId),
+      ),
+    )
+    .where(
+      or(
+        eq(project.userId, userId),
+        isNotNull(projectMember.userId),
+        isNotNull(organisationMember.userId),
+      ),
+    )
     .orderBy(desc(project.createdAt))
     .then((rows) => rows as ProjectRecord[]);
 
@@ -87,7 +112,20 @@ export const listProjectIds = (userId: string) =>
       projectMember,
       and(eq(projectMember.projectId, project.id), eq(projectMember.userId, userId)),
     )
-    .where(or(eq(project.userId, userId), isNotNull(projectMember.userId)));
+    .leftJoin(
+      organisationMember,
+      and(
+        eq(organisationMember.orgId, project.sharedWithOrgId),
+        eq(organisationMember.userId, userId),
+      ),
+    )
+    .where(
+      or(
+        eq(project.userId, userId),
+        isNotNull(projectMember.userId),
+        isNotNull(organisationMember.userId),
+      ),
+    );
 
 // ─── Task queries ─────────────────────────────────────────────────────────────
 
@@ -150,8 +188,22 @@ export const findUserTask = (taskId: string, userId: string) =>
       projectMember,
       and(eq(projectMember.projectId, project.id), eq(projectMember.userId, userId)),
     )
+    .leftJoin(
+      organisationMember,
+      and(
+        eq(organisationMember.orgId, project.sharedWithOrgId),
+        eq(organisationMember.userId, userId),
+      ),
+    )
     .where(
-      and(eq(task.id, taskId), or(eq(project.userId, userId), isNotNull(projectMember.userId))),
+      and(
+        eq(task.id, taskId),
+        or(
+          eq(project.userId, userId),
+          isNotNull(projectMember.userId),
+          isNotNull(organisationMember.userId),
+        ),
+      ),
     )
     .then((rows) => rows[0] as TaskForUserRecord | undefined);
 

@@ -1,5 +1,6 @@
 import { BookMarkedIcon, ChevronDownIcon, PlusIcon } from "lucide-react";
 
+import { Badge } from "@/components/ui/badge";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -34,7 +35,14 @@ export function ProjectSelector({
           <>
             {projects.map((project) => (
               <DropdownMenuItem key={project.id} onClick={() => onSelectProject(project.id)}>
-                {project.name}
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className="truncate">{project.name}</span>
+                  {project.sharedWithOrgId ? (
+                    <Badge variant="secondary" className="text-[10px]">
+                      Organisation
+                    </Badge>
+                  ) : null}
+                </div>
               </DropdownMenuItem>
             ))}
             <DropdownMenuSeparator />

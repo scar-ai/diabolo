@@ -2,6 +2,7 @@ import { relations } from "drizzle-orm";
 import { index, integer, pgTable, primaryKey, text, timestamp } from "drizzle-orm/pg-core";
 
 import { user } from "@/lib/db/schema";
+import { organisation } from "@/lib/org/org.sql";
 
 export const project = pgTable(
   "project",
@@ -10,6 +11,9 @@ export const project = pgTable(
     name: text().notNull(),
     envVars: text("env_vars"),
     repoId: text().notNull(),
+    sharedWithOrgId: text("shared_with_org_id").references(() => organisation.id, {
+      onDelete: "set null",
+    }),
     userId: text()
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
@@ -209,6 +213,10 @@ export const projectRelations = relations(project, ({ many, one }) => ({
   members: many(projectMember),
   invites: many(projectInvite),
   owner: one(user, { fields: [project.userId], references: [user.id] }),
+  sharedWithOrg: one(organisation, {
+    fields: [project.sharedWithOrgId],
+    references: [organisation.id],
+  }),
 }));
 
 export const projectMemberRelations = relations(projectMember, ({ one }) => ({

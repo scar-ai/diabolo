@@ -3,6 +3,7 @@ import * as R from "remeda";
 
 import { Github } from "@/lib/github";
 import { Log } from "@/lib/log";
+import { Org } from "@/lib/org";
 import {
   normalizeProjectEnvEntries,
   parseStoredProjectEnvEntries,
@@ -146,14 +147,22 @@ export namespace Project {
   export const updateProjectSettingsForUser = (input: {
     envEntries: ProjectEnvEntry[];
     projectId: string;
+    shareWithOrganisation: boolean;
     userId: string;
   }): ResultAsync<ProjectRecord, Error> =>
     requireOwnedProject(input.projectId, input.userId).andThen(() =>
-      fromPromise(
-        updateProject(input.projectId, {
-          envVars: JSON.stringify(normalizeProjectEnvEntries(input.envEntries)),
-        }),
-      ).andThen((value) => (value ? okAsync(value) : errAsync(new Error("Project not found.")))),
+      Org.getMembershipForUser(input.userId).andThen((membership) => {
+        if (input.shareWithOrganisation && !membership) {
+          return errAsync(new Error("Join an organisation before sharing projects with it."));
+        }
+
+        return fromPromise(
+          updateProject(input.projectId, {
+            envVars: JSON.stringify(normalizeProjectEnvEntries(input.envEntries)),
+            sharedWithOrgId: input.shareWithOrganisation ? (membership?.orgId ?? null) : null,
+          }),
+        ).andThen((value) => (value ? okAsync(value) : errAsync(new Error("Project not found."))));
+      }),
     );
 
   export const createTaskForUser = (input: {

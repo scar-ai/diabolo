@@ -14,6 +14,7 @@ import { toast } from "sonner";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -24,6 +25,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { myOrgQueryOptions } from "@/lib/org/queries";
 import { parseDotEnvText, type ProjectEnvEntry } from "@/lib/project/env";
 import {
   $cancelProjectInvite,
@@ -69,9 +71,10 @@ export function ProjectSettingsDialog({
   const fileInputId = useId();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [open, setOpen] = useState(false);
-  const [environmentOpen, setEnvironmentOpen] = useState(true);
+  const [environmentOpen, setEnvironmentOpen] = useState(false);
   const [membersOpen, setMembersOpen] = useState(false);
   const [manualEntries, setManualEntries] = useState<ProjectEnvDraftEntry[]>([createDraftEntry()]);
+  const [shareWithOrganisation, setShareWithOrganisation] = useState(false);
   const [uploadPreview, setUploadPreview] = useState("");
   const [inviteUsername, setInviteUsername] = useState("");
 
@@ -80,6 +83,11 @@ export function ProjectSettingsDialog({
   const projectQuery = useQuery({
     ...projectDetailQueryOptions(projectId ?? ""),
     enabled: open && Boolean(projectId),
+  });
+
+  const orgQuery = useQuery({
+    ...myOrgQueryOptions(currentUserId ?? ""),
+    enabled: open && Boolean(currentUserId),
   });
 
   const collaboratorsQuery = useQuery({
@@ -92,26 +100,25 @@ export function ProjectSettingsDialog({
     enabled: open && membersOpen && Boolean(projectId),
   });
 
-  const isOwner = collaboratorsQuery.data?.some(
-    (c) => c.userId === currentUserId && c.role === "owner",
-  );
+  const isOwner = projectQuery.data?.userId === currentUserId;
 
   useEffect(() => {
     if (!open) return;
     const envEntries = projectQuery.data?.envEntries ?? [];
-    setEnvironmentOpen(true);
+    setEnvironmentOpen(false);
     setManualEntries(
       envEntries.length > 0
         ? envEntries.map((entry) => createDraftEntry(entry))
         : [createDraftEntry()],
     );
+    setShareWithOrganisation(Boolean(projectQuery.data?.sharedWithOrgId));
     setUploadPreview("");
-  }, [open, projectQuery.data?.envEntries]);
+  }, [open, projectQuery.data?.envEntries, projectQuery.data?.sharedWithOrgId]);
 
   const saveMutation = useMutation({
     mutationFn: (envEntries: ProjectEnvEntry[]) => {
       if (!projectId) throw new Error("Project not found.");
-      return updateProjectSettings({ data: { envEntries, projectId } });
+      return updateProjectSettings({ data: { envEntries, projectId, shareWithOrganisation } });
     },
     onSuccess: async () => {
       if (projectId) {
@@ -203,6 +210,12 @@ export function ProjectSettingsDialog({
     saveMutation.mutate(manualEntries.map(({ key, value }) => ({ key, value })));
   };
 
+  const currentOrg = orgQuery.data;
+  const sharedOrgLabel =
+    currentOrg && currentOrg.id === projectQuery.data?.sharedWithOrgId
+      ? currentOrg.name
+      : "your organisation";
+
   const updateEntry = (id: string, patch: Partial<ProjectEnvEntry>) => {
     setManualEntries((current) =>
       current.map((entry) => (entry.id === id ? { ...entry, ...patch } : entry)),
@@ -274,6 +287,7 @@ export function ProjectSettingsDialog({
                     <Button
                       variant="outline"
                       size="sm"
+                      disabled={!isOwner}
                       onClick={() => fileInputRef.current?.click()}
                     >
                       <UploadIcon className="size-4" aria-hidden="true" />
@@ -294,6 +308,7 @@ export function ProjectSettingsDialog({
                           <Input
                             id={`project-env-key-${index}`}
                             value={entry.key}
+                            disabled={!isOwner}
                             onChange={(event) => updateEntry(entry.id, { key: event.target.value })}
                             placeholder="API_TOKEN"
                           />
@@ -303,6 +318,7 @@ export function ProjectSettingsDialog({
                             variant="ghost"
                             size="icon-sm"
                             className="text-muted-foreground/70 hover:text-foreground"
+                            disabled={!isOwner}
                             onClick={() => removeEntry(entry.id)}
                           >
                             <XIcon className="size-4" aria-hidden="true" />
@@ -315,6 +331,7 @@ export function ProjectSettingsDialog({
                         <Textarea
                           id={`project-env-value-${index}`}
                           value={entry.value}
+                          disabled={!isOwner}
                           onChange={(event) => updateEntry(entry.id, { value: event.target.value })}
                           placeholder="secret"
                           className="min-h-24"
@@ -326,11 +343,18 @@ export function ProjectSettingsDialog({
                   <Button
                     variant="outline"
                     size="sm"
+                    disabled={!isOwner}
                     onClick={() => setManualEntries((current) => [...current, createDraftEntry()])}
                   >
                     Add variable
                   </Button>
                 </div>
+
+                {!isOwner ? (
+                  <p className="text-xs text-muted-foreground">
+                    Only the project owner can edit environment variables or organisation sharing.
+                  </p>
+                ) : null}
               </div>
             ) : null}
           </section>
@@ -358,6 +382,37 @@ export function ProjectSettingsDialog({
 
             {membersOpen ? (
               <div className="space-y-4 border-t border-border px-4 py-4">
+                {isOwner ? (
+                  <div className="rounded-2xl border border-border p-4">
+                    <div className="flex items-start gap-3">
+                      <Checkbox
+                        checked={shareWithOrganisation}
+                        disabled={!currentOrg}
+                        onCheckedChange={(checked) => setShareWithOrganisation(checked === true)}
+                      />
+                      <div className="space-y-1">
+                        <p className="text-sm font-medium text-foreground">
+                          Share with organisation
+                        </p>
+                        <p className="text-sm text-muted-foreground">
+                          {currentOrg
+                            ? `Everyone in ${sharedOrgLabel} can open this project and its sessions.`
+                            : "Join an organisation to share this project more broadly."}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+
+                {projectQuery.data?.sharedWithOrgId ? (
+                  <div className="flex items-center gap-2 rounded-xl border border-border bg-muted/30 px-3 py-2.5 text-sm text-muted-foreground">
+                    <Badge variant="secondary" className="text-xs">
+                      Organisation
+                    </Badge>
+                    Shared with {sharedOrgLabel}.
+                  </div>
+                ) : null}
+
                 {/* Current members */}
                 {collaboratorsQuery.data && collaboratorsQuery.data.length > 0 ? (
                   <div className="space-y-2">
@@ -491,7 +546,7 @@ export function ProjectSettingsDialog({
           <Button variant="outline" onClick={() => setOpen(false)}>
             Cancel
           </Button>
-          <Button disabled={saveMutation.isPending} onClick={handleSave}>
+          <Button disabled={!isOwner || saveMutation.isPending} onClick={handleSave}>
             {saveMutation.isPending ? "Saving..." : "Save settings"}
           </Button>
         </div>

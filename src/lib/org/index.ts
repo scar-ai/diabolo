@@ -24,6 +24,15 @@ export namespace Org {
     org: { id: string; name: string };
   };
 
+  export const getMembershipForUser = (userId: string): ResultAsync<MemberRecord | null, Error> =>
+    fromPromise(
+      db.query.organisationMember
+        .findFirst({
+          where: eq(organisationMember.userId, userId),
+        })
+        .then((membership) => membership ?? null),
+    );
+
   // Get the GitHub account ID for a user
   const getGithubAccountId = (userId: string): ResultAsync<string, Error> =>
     fromPromise(
