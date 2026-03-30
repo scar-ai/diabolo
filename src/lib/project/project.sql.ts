@@ -122,6 +122,35 @@ export const task = pgTable(
   ],
 );
 
+export const scheduledTask = pgTable(
+  "scheduled_task",
+  {
+    id: text().primaryKey(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => project.id, { onDelete: "cascade" }),
+    name: text().notNull(),
+    scheduleCron: text("schedule_cron").notNull(),
+    scheduleTimezone: text("schedule_timezone").notNull(),
+    instructions: text().notNull(),
+    branchName: text("branch_name"),
+    enabled: integer().notNull().default(1),
+    createdByUserId: text("created_by_user_id").references(() => user.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp().defaultNow().notNull(),
+    updatedAt: timestamp()
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    index("scheduled_task_projectId_idx").on(table.projectId),
+    index("scheduled_task_createdByUserId_idx").on(table.createdByUserId),
+    index("scheduled_task_enabled_idx").on(table.enabled),
+  ],
+);
+
 export const taskMessage = pgTable(
   "task_message",
   {
@@ -210,6 +239,7 @@ export const taskEventSequence = pgTable(
 
 export const projectRelations = relations(project, ({ many, one }) => ({
   tasks: many(task),
+  scheduledTasks: many(scheduledTask),
   members: many(projectMember),
   invites: many(projectInvite),
   owner: one(user, { fields: [project.userId], references: [user.id] }),
@@ -245,6 +275,17 @@ export const taskRelations = relations(task, ({ many, one }) => ({
   }),
   createdBy: one(user, {
     fields: [task.createdByUserId],
+    references: [user.id],
+  }),
+}));
+
+export const scheduledTaskRelations = relations(scheduledTask, ({ one }) => ({
+  project: one(project, {
+    fields: [scheduledTask.projectId],
+    references: [project.id],
+  }),
+  createdBy: one(user, {
+    fields: [scheduledTask.createdByUserId],
     references: [user.id],
   }),
 }));

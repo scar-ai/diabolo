@@ -1,11 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import { HouseIcon, LoaderIcon, Trash2Icon } from "lucide-react";
+import { CalendarClockIcon, HouseIcon, LoaderIcon, PlusIcon, Trash2Icon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
 import { useSetHeaderSlots } from "@/components/app/header-portal";
+import { ScheduledTaskDialog } from "@/components/app/scheduled-task-dialog";
 import { SessionRow } from "@/components/app/session-row";
 import type { CollaboratorMap } from "@/components/app/task-detail/types";
 import {
@@ -29,13 +30,18 @@ import {
 } from "@/components/ui/empty";
 import { Frame } from "@/components/ui/frame";
 import { Table, TableBody, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { $deleteTask } from "@/lib/project/functions";
+import { githubBranchesQueryOptions } from "@/lib/github/queries";
+import { $createScheduledTask, $deleteTask } from "@/lib/project/functions";
 import {
   allUserTaskSummariesQueryOptions,
   projectCollaboratorsQueryOptions,
+  projectDetailQueryOptions,
   projectsQueryOptions,
+  projectScheduledTasksQueryOptions,
+  scheduledTaskKeys,
   taskKeys,
 } from "@/lib/project/queries";
+import { describeSchedule } from "@/lib/project/scheduled-tasks";
 
 type SessionsSearch = {
   projectId?: string;
@@ -65,9 +71,11 @@ function SessionsPage() {
   const search = Route.useSearch();
   const queryClient = useQueryClient();
   const deleteTask = useServerFn($deleteTask);
+  const createScheduledTask = useServerFn($createScheduledTask);
   const setHeaderSlots = useSetHeaderSlots();
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
+  const [scheduledTaskDialogOpen, setScheduledTaskDialogOpen] = useState(false);
 
   const tasksQuery = useQuery({
     ...allUserTaskSummariesQueryOptions(user.id),
@@ -76,6 +84,19 @@ function SessionsPage() {
   const projectsQuery = useQuery(projectsQueryOptions(user.id));
   const currentProject =
     (projectsQuery.data ?? []).find((project) => project.id === search.projectId) ?? null;
+  const currentProjectDetailQuery = useQuery({
+    ...projectDetailQueryOptions(currentProject?.id ?? ""),
+    enabled: Boolean(currentProject?.id),
+  });
+  const currentProjectDetail = currentProjectDetailQuery.data ?? null;
+  const branchesQuery = useQuery({
+    ...githubBranchesQueryOptions(user.id, currentProjectDetail?.repoFullName ?? ""),
+    enabled: Boolean(currentProjectDetail?.repoFullName),
+  });
+  const scheduledTasksQuery = useQuery({
+    ...projectScheduledTasksQueryOptions(currentProject?.id ?? ""),
+    enabled: Boolean(currentProject?.id),
+  });
 
   const collaboratorsQuery = useQuery({
     ...projectCollaboratorsQueryOptions(search.projectId ?? ""),
@@ -145,6 +166,40 @@ function SessionsPage() {
     },
   });
 
+  const createScheduledTaskMutation = useMutation({
+    mutationFn: async (input: {
+      branchName: string | null;
+      instructions: string;
+      name: string;
+      scheduleCron: string;
+      scheduleTimezone: string;
+    }) => {
+      if (!currentProject?.id) {
+        throw new Error("Project not found.");
+      }
+
+      return createScheduledTask({
+        data: {
+          ...input,
+          projectId: currentProject.id,
+        },
+      });
+    },
+    onSuccess: async () => {
+      if (currentProject?.id) {
+        await queryClient.invalidateQueries({
+          queryKey: scheduledTaskKeys.list(currentProject.id),
+        });
+      }
+
+      setScheduledTaskDialogOpen(false);
+      toast.success("Scheduled task created.");
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Failed to create scheduled task.");
+    },
+  });
+
   const sessions = search.projectId
     ? (tasksQuery.data ?? []).filter((session) => session.projectId === search.projectId)
     : (tasksQuery.data ?? []);
@@ -173,6 +228,65 @@ function SessionsPage() {
   return (
     <main className="flex flex-1 flex-col items-center px-4 pt-8 pb-16">
       <div className="w-full max-w-3xl">
+        {currentProject ? (
+          <div className="mb-8">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2">
+                  <CalendarClockIcon className="size-4 text-muted-foreground" aria-hidden="true" />
+                  <span className="text-sm font-semibold text-foreground">Scheduled tasks</span>
+                </div>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Save repeatable automations that open new sessions for this project.
+                </p>
+              </div>
+              <Button
+                size="sm"
+                className="gap-1.5"
+                onClick={() => setScheduledTaskDialogOpen(true)}
+              >
+                <PlusIcon className="size-3.5" aria-hidden="true" />
+                Start scheduled task
+              </Button>
+            </div>
+
+            <Frame className="w-full min-w-0">
+              <div className="divide-y divide-border/60">
+                {(scheduledTasksQuery.data ?? []).length > 0 ? (
+                  (scheduledTasksQuery.data ?? []).map((scheduledTask) => (
+                    <div
+                      key={scheduledTask.id}
+                      className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-start sm:justify-between"
+                    >
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-medium text-foreground">
+                          {scheduledTask.name}
+                        </div>
+                        <div className="mt-1 text-sm text-muted-foreground">
+                          {describeSchedule(scheduledTask.scheduleCron)}
+                        </div>
+                        <div className="mt-1 text-xs text-muted-foreground">
+                          {scheduledTask.scheduleTimezone}
+                          {" · "}
+                          {scheduledTask.branchName ??
+                            `Project default (${currentProjectDetail?.repoDefaultBranch ?? "main"})`}
+                        </div>
+                      </div>
+                      <div className="max-w-md text-sm text-muted-foreground">
+                        {scheduledTask.instructions}
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="px-4 py-6 text-sm text-muted-foreground">
+                    No scheduled tasks yet.
+                  </div>
+                )}
+              </div>
+            </Frame>
+          </div>
+        ) : null}
+
         {sessions.length === 0 && !tasksQuery.isPending ? (
           <Empty className="min-h-[48vh] border-0 bg-transparent py-16">
             <EmptyContent>
@@ -334,6 +448,15 @@ function SessionsPage() {
           </div>
         ) : null}
       </div>
+
+      <ScheduledTaskDialog
+        branches={(branchesQuery.data ?? []).map((branch) => branch.name)}
+        defaultBranch={currentProjectDetail?.repoDefaultBranch ?? "main"}
+        isPending={createScheduledTaskMutation.isPending}
+        onOpenChange={setScheduledTaskDialogOpen}
+        onSubmit={(input) => createScheduledTaskMutation.mutate(input)}
+        open={scheduledTaskDialogOpen}
+      />
     </main>
   );
 }

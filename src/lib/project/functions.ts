@@ -5,6 +5,12 @@ import { authMiddleware } from "@/lib/auth/middleware";
 import { Project, ProjectMembers } from "@/lib/project";
 import { listProjectCollaborators, listProjectInvites } from "@/lib/project/data";
 import type { ProjectEnvEntry } from "@/lib/project/env";
+import {
+  isValidCronExpression,
+  isValidTimezone,
+  MAX_SCHEDULED_TASK_INSTRUCTIONS_LENGTH,
+  MAX_SCHEDULED_TASK_NAME_LENGTH,
+} from "@/lib/project/scheduled-tasks";
 import { unwrap } from "@/lib/result";
 
 const createProjectInputSchema = z.object({
@@ -31,6 +37,15 @@ const createTaskInputSchema = z.object({
   projectId: z.string().min(1),
   prompt: z.string().min(10),
   sourceBranch: z.string().min(1),
+});
+
+const createScheduledTaskInputSchema = z.object({
+  branchName: z.string().min(1).nullable().optional(),
+  instructions: z.string().min(1).max(MAX_SCHEDULED_TASK_INSTRUCTIONS_LENGTH),
+  name: z.string().min(1).max(MAX_SCHEDULED_TASK_NAME_LENGTH),
+  projectId: z.string().min(1),
+  scheduleCron: z.string().refine(isValidCronExpression, "Invalid cron expression."),
+  scheduleTimezone: z.string().refine(isValidTimezone, "Invalid timezone."),
 });
 
 const getTaskInputSchema = z.object({
@@ -72,11 +87,25 @@ export const $createTask = createServerFn({ method: "POST" })
     unwrap(Project.createTaskForUser({ ...data, userId: context.user.id })),
   );
 
+export const $createScheduledTask = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .inputValidator((data) => createScheduledTaskInputSchema.parse(data))
+  .handler(async ({ context, data }) =>
+    unwrap(Project.createScheduledTaskForUser({ ...data, userId: context.user.id })),
+  );
+
 export const $listTasks = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
   .inputValidator((data) => projectIdInputSchema.parse(data))
   .handler(async ({ context, data }) =>
     unwrap(Project.listTasksForProject(data.projectId, context.user.id)),
+  );
+
+export const $listScheduledTasks = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .inputValidator((data) => projectIdInputSchema.parse(data))
+  .handler(async ({ context, data }) =>
+    unwrap(Project.listScheduledTasksForProject(data.projectId, context.user.id)),
   );
 
 export const $getTask = createServerFn({ method: "GET" })

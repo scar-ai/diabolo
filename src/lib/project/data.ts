@@ -4,11 +4,12 @@ import { getTableColumns } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { organisationMember } from "@/lib/org/org.sql";
 
-import { project, projectInvite, projectMember, task } from "./project.sql";
+import { project, projectInvite, projectMember, scheduledTask, task } from "./project.sql";
 import { taskSummarySelection } from "./shared";
 
 export type ProjectRecord = typeof project.$inferSelect;
 export type TaskRecord = typeof task.$inferSelect;
+export type ScheduledTaskRecord = typeof scheduledTask.$inferSelect;
 export type ProjectMemberRecord = typeof projectMember.$inferSelect;
 export type ProjectInviteRecord = typeof projectInvite.$inferSelect;
 export type TaskForUserRecord = {
@@ -241,6 +242,29 @@ export const updateTask = (taskId: string, values: Partial<TaskRecord>) =>
     .where(eq(task.id, taskId))
     .returning()
     .then((rows) => rows[0]);
+
+export const insertScheduledTask = (input: {
+  branchName?: string | null;
+  createdByUserId?: string | null;
+  id: string;
+  instructions: string;
+  name: string;
+  projectId: string;
+  scheduleCron: string;
+  scheduleTimezone: string;
+}) =>
+  db
+    .insert(scheduledTask)
+    .values(input)
+    .returning()
+    .then((rows) => rows[0]);
+
+export const listProjectScheduledTasks = (projectId: string) =>
+  db
+    .select()
+    .from(scheduledTask)
+    .where(eq(scheduledTask.projectId, projectId))
+    .orderBy(desc(scheduledTask.createdAt));
 
 // ─── Project member queries ───────────────────────────────────────────────────
 

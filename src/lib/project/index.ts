@@ -23,9 +23,11 @@ import {
   findTaskWithProject,
   findUserTask,
   insertProject,
+  insertScheduledTask,
   insertTask,
   listChildTaskSummaries,
   listProjectIds,
+  listProjectScheduledTasks,
   listProjectTasks,
   listProjects,
   listUserTaskSummaries,
@@ -63,6 +65,7 @@ export { ProjectMembers } from "./members";
 export namespace Project {
   export type ProjectRecord = TProjectRecord;
   export type TaskRecord = TTaskRecord;
+  export type ScheduledTaskRecord = import("./data").ScheduledTaskRecord;
   export type TaskMessageRecord = TTaskMessageRecord;
   export type TaskSummaryRecord = TTaskSummaryRecord;
   export type TaskForUserRecord = TTaskForUserRecord;
@@ -214,6 +217,38 @@ export namespace Project {
         return value;
       });
   };
+
+  export const createScheduledTaskForUser = (input: {
+    branchName?: string | null;
+    instructions: string;
+    name: string;
+    projectId: string;
+    scheduleCron: string;
+    scheduleTimezone: string;
+    userId: string;
+  }): ResultAsync<ScheduledTaskRecord, Error> =>
+    requireUserProject(input.projectId, input.userId).andThen(() =>
+      fromPromise(
+        insertScheduledTask({
+          branchName: input.branchName ?? null,
+          createdByUserId: input.userId,
+          id: crypto.randomUUID(),
+          instructions: input.instructions,
+          name: input.name,
+          projectId: input.projectId,
+          scheduleCron: input.scheduleCron,
+          scheduleTimezone: input.scheduleTimezone,
+        }),
+      ),
+    );
+
+  export const listScheduledTasksForProject = (
+    projectId: string,
+    userId: string,
+  ): ResultAsync<ScheduledTaskRecord[], Error> =>
+    requireUserProject(projectId, userId).andThen(() =>
+      fromPromise(listProjectScheduledTasks(projectId)),
+    );
 
   export const createTaskDraftForUser = (input: {
     projectId: string;

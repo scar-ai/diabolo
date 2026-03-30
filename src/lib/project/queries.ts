@@ -8,6 +8,7 @@ import {
   $getProject,
   $getProjectCollaborators,
   $getProjectInvites,
+  $listScheduledTasks,
   $getTaskById,
   $listAllUserTaskSummaries,
   $listAllUserTasks,
@@ -285,6 +286,11 @@ export const projectKeys = {
   list: (userId: string) => [...projectKeys.all, "list", userId] as const,
 };
 
+export const scheduledTaskKeys = {
+  all: ["scheduled-tasks"] as const,
+  list: (projectId: string) => [...scheduledTaskKeys.all, "list", projectId] as const,
+};
+
 export const taskKeys = {
   all: ["tasks"] as const,
   detail: (taskId: string) => [...taskKeys.all, "detail", taskId] as const,
@@ -304,6 +310,13 @@ export const projectDetailQueryOptions = (projectId: string) =>
     queryFn: ({ signal }) => $getProject({ data: { projectId }, signal }),
     queryKey: projectKeys.detail(projectId),
     staleTime: 30_000,
+  });
+
+export const projectScheduledTasksQueryOptions = (projectId: string) =>
+  queryOptions({
+    queryFn: ({ signal }) => $listScheduledTasks({ data: { projectId }, signal }),
+    queryKey: scheduledTaskKeys.list(projectId),
+    staleTime: 5_000,
   });
 
 export const allUserTasksQueryOptions = (userId: string) =>
