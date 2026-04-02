@@ -11,7 +11,9 @@ import {
   MAX_SCHEDULED_TASK_INSTRUCTIONS_LENGTH,
   MAX_SCHEDULED_TASK_NAME_LENGTH,
 } from "@/lib/project/scheduled-tasks";
+import type { ProjectSkillEntry } from "@/lib/project/skills";
 import { unwrap } from "@/lib/result";
+import { searchSkills } from "@/lib/skills/search";
 
 const createProjectInputSchema = z.object({
   name: z.string().min(1),
@@ -27,10 +29,22 @@ const projectEnvEntrySchema: z.ZodType<ProjectEnvEntry> = z.object({
   value: z.string(),
 });
 
+const projectSkillEntrySchema: z.ZodType<ProjectSkillEntry> = z.object({
+  installSpec: z.string().min(1),
+  name: z.string().min(1),
+  source: z.string().min(1),
+  url: z.url(),
+});
+
 const updateProjectSettingsInputSchema = z.object({
   envEntries: z.array(projectEnvEntrySchema),
   projectId: z.string().min(1),
   shareWithOrganisation: z.boolean(),
+  skills: z.array(projectSkillEntrySchema),
+});
+
+const searchSkillsInputSchema = z.object({
+  query: z.string().min(2),
 });
 
 const createTaskInputSchema = z.object({
@@ -44,8 +58,19 @@ const createScheduledTaskInputSchema = z.object({
   instructions: z.string().min(1).max(MAX_SCHEDULED_TASK_INSTRUCTIONS_LENGTH),
   name: z.string().min(1).max(MAX_SCHEDULED_TASK_NAME_LENGTH),
   projectId: z.string().min(1),
+  runOnce: z.boolean().optional().default(false),
   scheduleCron: z.string().refine(isValidCronExpression, "Invalid cron expression."),
   scheduleTimezone: z.string().refine(isValidTimezone, "Invalid timezone."),
+});
+
+const scheduledTaskIdInputSchema = z.object({
+  projectId: z.string().min(1),
+  scheduledTaskId: z.string().min(1),
+});
+
+const updateScheduledTaskInputSchema = createScheduledTaskInputSchema.extend({
+  runOnce: z.boolean(),
+  scheduledTaskId: z.string().min(1),
 });
 
 const getTaskInputSchema = z.object({
@@ -94,6 +119,22 @@ export const $createScheduledTask = createServerFn({ method: "POST" })
     unwrap(Project.createScheduledTaskForUser({ ...data, userId: context.user.id })),
   );
 
+export const $updateScheduledTask = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .inputValidator((data) => updateScheduledTaskInputSchema.parse(data))
+  .handler(async ({ context, data }) =>
+    unwrap(Project.updateScheduledTaskForUser({ ...data, userId: context.user.id })),
+  );
+
+export const $deleteScheduledTask = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .inputValidator((data) => scheduledTaskIdInputSchema.parse(data))
+  .handler(async ({ context, data }) =>
+    unwrap(
+      Project.deleteScheduledTaskForUser(data.projectId, data.scheduledTaskId, context.user.id),
+    ),
+  );
+
 export const $listTasks = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
   .inputValidator((data) => projectIdInputSchema.parse(data))
@@ -107,6 +148,12 @@ export const $listScheduledTasks = createServerFn({ method: "GET" })
   .handler(async ({ context, data }) =>
     unwrap(Project.listScheduledTasksForProject(data.projectId, context.user.id)),
   );
+
+export const $getServerTime = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async () => ({
+    iso: new Date().toISOString(),
+  }));
 
 export const $getTask = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
@@ -133,6 +180,11 @@ export const $updateProjectSettings = createServerFn({ method: "POST" })
       }),
     ),
   );
+
+export const $searchSkills = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .inputValidator((data) => searchSkillsInputSchema.parse(data))
+  .handler(async ({ data }) => searchSkills(data.query));
 
 export const $deleteTask = createServerFn({ method: "POST" })
   .middleware([authMiddleware])

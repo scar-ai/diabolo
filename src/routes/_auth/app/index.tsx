@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link, redirect, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import { HouseIcon } from "lucide-react";
+import { ChevronRightIcon, HouseIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
@@ -198,7 +198,7 @@ function AppHome() {
   useEffect(() => {
     setHeaderSlots({
       left: (
-        <nav className="flex items-center gap-1.5 text-sm">
+        <nav className="flex items-center gap-2 rounded-lg border border-border/50 bg-muted/70 px-4 py-2 text-base">
           <Link
             to="/app/projects"
             className="flex items-center gap-1.5 text-muted-foreground transition-colors hover:text-foreground"
@@ -208,7 +208,7 @@ function AppHome() {
           </Link>
           {currentProject?.name ? (
             <>
-              <span className="text-muted-foreground/40">/</span>
+              <ChevronRightIcon className="size-3.5 text-muted-foreground/40" aria-hidden="true" />
               <span className="font-medium text-foreground">{currentProject.name}</span>
             </>
           ) : null}

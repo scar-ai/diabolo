@@ -1,6 +1,7 @@
-import { useEffect, useId, useMemo, useState } from "react";
+import { useId, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -10,6 +11,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -21,6 +23,7 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   buildScheduleCron,
   DEFAULT_SCHEDULE_PRESET_CONFIG,
+  detectSchedulePreset,
   getSchedulePreset,
   isValidCronExpression,
   isValidTimezone,
@@ -46,6 +49,7 @@ const weekdays = [
   { label: "Saturday", value: 6 },
 ];
 const monthDays = Array.from({ length: 31 }, (_, index) => index + 1);
+const localTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
 
 function formatTwoDigits(value: number) {
   return String(value).padStart(2, "0");
@@ -55,60 +59,91 @@ function timeLabel(hour: number, minute: number) {
   return `${formatTwoDigits(hour)}:${formatTwoDigits(minute)}`;
 }
 
+export type ScheduledTaskDialogInput = {
+  branchName: string | null;
+  instructions: string;
+  name: string;
+  runOnce: boolean;
+  scheduleCron: string;
+  scheduleTimezone: string;
+};
+
+type ScheduledTaskDialogValue = ScheduledTaskDialogInput & {
+  id?: string;
+};
+
+function buildInitialDialogState(
+  defaultBranch: string,
+  initialValue?: ScheduledTaskDialogValue | null,
+) {
+  const detectedSchedule = initialValue
+    ? getSchedulePresetState(initialValue.scheduleCron)
+    : {
+        customCron: "",
+        preset: "daily" as SchedulePresetValue,
+        presetConfig: DEFAULT_SCHEDULE_PRESET_CONFIG,
+      };
+  const activeBranchName = initialValue?.branchName ?? defaultBranch;
+
+  return {
+    branchMode: initialValue?.branchName ? ("custom" as const) : ("default" as const),
+    branchName: activeBranchName,
+    customCron: detectedSchedule.customCron,
+    instructions: initialValue?.instructions ?? "",
+    name: initialValue?.name ?? "",
+    preset: detectedSchedule.preset,
+    presetConfig: detectedSchedule.presetConfig,
+    runOnce: initialValue?.runOnce ?? false,
+    scheduleTimezone: initialValue?.scheduleTimezone ?? localTimezone,
+  };
+}
+
+function getSchedulePresetState(scheduleCron: string) {
+  const detected = detectSchedulePreset(scheduleCron);
+
+  return {
+    customCron: detected.preset === "custom" ? scheduleCron : "",
+    preset: detected.preset,
+    presetConfig: detected.config,
+  };
+}
+
 export function ScheduledTaskDialog({
   branches,
   defaultBranch,
+  initialValue,
   isPending,
+  mode = "create",
   onOpenChange,
   onSubmit,
   open,
 }: {
   branches: string[];
   defaultBranch: string;
+  initialValue?: ScheduledTaskDialogValue | null;
   isPending: boolean;
+  mode?: "create" | "edit";
   onOpenChange: (open: boolean) => void;
-  onSubmit: (input: {
-    branchName: string | null;
-    instructions: string;
-    name: string;
-    scheduleCron: string;
-    scheduleTimezone: string;
-  }) => void;
+  onSubmit: (input: ScheduledTaskDialogInput) => void;
   open: boolean;
 }) {
+  const initialState = buildInitialDialogState(defaultBranch, initialValue);
   const timezoneListId = useId();
   const nameInputId = useId();
   const scheduleInputId = useId();
   const timezoneInputId = useId();
   const branchInputId = useId();
   const instructionsInputId = useId();
-  const [name, setName] = useState("");
-  const [preset, setPreset] = useState<SchedulePresetValue>("daily");
-  const [customCron, setCustomCron] = useState("");
-  const [scheduleTimezone, setScheduleTimezone] = useState(
-    Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
-  );
-  const [instructions, setInstructions] = useState("");
-  const [branchMode, setBranchMode] = useState<"default" | "custom">("default");
-  const [branchName, setBranchName] = useState(defaultBranch);
-  const [presetConfig, setPresetConfig] = useState<SchedulePresetConfig>(
-    DEFAULT_SCHEDULE_PRESET_CONFIG,
-  );
-
-  useEffect(() => {
-    if (!open) {
-      return;
-    }
-
-    setName("");
-    setPreset("daily");
-    setCustomCron("");
-    setScheduleTimezone(Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC");
-    setInstructions("");
-    setBranchMode("default");
-    setBranchName(defaultBranch);
-    setPresetConfig(DEFAULT_SCHEDULE_PRESET_CONFIG);
-  }, [defaultBranch, open]);
+  const runOnceInputId = useId();
+  const [name, setName] = useState(initialState.name);
+  const [preset, setPreset] = useState<SchedulePresetValue>(initialState.preset);
+  const [customCron, setCustomCron] = useState(initialState.customCron);
+  const [scheduleTimezone, setScheduleTimezone] = useState(initialState.scheduleTimezone);
+  const [instructions, setInstructions] = useState(initialState.instructions);
+  const [branchMode, setBranchMode] = useState<"default" | "custom">(initialState.branchMode);
+  const [branchName, setBranchName] = useState(initialState.branchName);
+  const [presetConfig, setPresetConfig] = useState<SchedulePresetConfig>(initialState.presetConfig);
+  const [runOnce, setRunOnce] = useState(initialState.runOnce);
 
   const selectedPreset = getSchedulePreset(preset);
   const scheduleCron = useMemo(() => {
@@ -141,9 +176,13 @@ export function ScheduledTaskDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl">
         <DialogHeader>
-          <DialogTitle>New scheduled task</DialogTitle>
+          <DialogTitle>
+            {mode === "edit" ? "Edit scheduled task" : "New scheduled task"}
+          </DialogTitle>
           <DialogDescription>
-            Save an automation that will start future sessions on a schedule for this project.
+            {mode === "edit"
+              ? "Update this automation's schedule, instructions, or recurrence."
+              : "Save an automation that will start future sessions on a schedule for this project."}
           </DialogDescription>
         </DialogHeader>
 
@@ -498,6 +537,25 @@ export function ScheduledTaskDialog({
               {instructions.length}/{MAX_SCHEDULED_TASK_INSTRUCTIONS_LENGTH}
             </p>
           </div>
+
+          <div className="sm:col-span-2">
+            <div className="flex items-start gap-3 rounded-xl border border-border p-4">
+              <Checkbox
+                id={runOnceInputId}
+                checked={!runOnce}
+                onCheckedChange={(checked) => setRunOnce(checked !== true)}
+                className="mt-0.5"
+              />
+              <div className="space-y-0.5">
+                <Label htmlFor={runOnceInputId} className="text-sm font-medium">
+                  Repeat after each run
+                </Label>
+                <p className="text-sm text-muted-foreground">
+                  Uncheck this to let the schedule fire once, then disable itself.
+                </p>
+              </div>
+            </div>
+          </div>
         </div>
 
         <DialogFooter>
@@ -511,12 +569,19 @@ export function ScheduledTaskDialog({
                 branchName: selectedBranchName,
                 instructions: instructionsValue,
                 name: nameValue,
+                runOnce,
                 scheduleCron,
                 scheduleTimezone,
               })
             }
           >
-            {isPending ? "Starting..." : "Start scheduled task"}
+            {isPending
+              ? mode === "edit"
+                ? "Saving..."
+                : "Starting..."
+              : mode === "edit"
+                ? "Save changes"
+                : "Start scheduled task"}
           </Button>
         </DialogFooter>
       </DialogContent>

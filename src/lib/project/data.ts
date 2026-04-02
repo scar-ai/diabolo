@@ -16,6 +16,10 @@ export type TaskForUserRecord = {
   project: ProjectRecord;
   task: TaskRecord;
 };
+export type ScheduledTaskWithProjectRecord = {
+  project: ProjectRecord;
+  scheduledTask: ScheduledTaskRecord;
+};
 
 // ─── Project queries ──────────────────────────────────────────────────────────
 
@@ -140,6 +144,7 @@ export const insertTask = (input: {
   projectId: string;
   prompt: string;
   repoId: string;
+  scheduledTaskId?: string | null;
   sandboxStatus?: string;
   spawnDepth?: number;
   spawnSource?: string;
@@ -250,6 +255,7 @@ export const insertScheduledTask = (input: {
   instructions: string;
   name: string;
   projectId: string;
+  runOnce?: number;
   scheduleCron: string;
   scheduleTimezone: string;
 }) =>
@@ -265,6 +271,54 @@ export const listProjectScheduledTasks = (projectId: string) =>
     .from(scheduledTask)
     .where(eq(scheduledTask.projectId, projectId))
     .orderBy(desc(scheduledTask.createdAt));
+
+export const listEnabledScheduledTasksWithProjects = () =>
+  db
+    .select({ project: getTableColumns(project), scheduledTask: getTableColumns(scheduledTask) })
+    .from(scheduledTask)
+    .innerJoin(project, eq(scheduledTask.projectId, project.id))
+    .where(eq(scheduledTask.enabled, 1))
+    .orderBy(desc(scheduledTask.createdAt))
+    .then((rows) => rows as ScheduledTaskWithProjectRecord[]);
+
+export const listScheduledTaskRuns = (scheduledTaskIds: string[]) =>
+  scheduledTaskIds.length === 0
+    ? Promise.resolve(
+        [] as Array<Pick<TaskRecord, "id" | "scheduledTaskId" | "startedAt" | "status">>,
+      )
+    : db
+        .select({
+          id: task.id,
+          scheduledTaskId: task.scheduledTaskId,
+          startedAt: task.startedAt,
+          status: task.status,
+        })
+        .from(task)
+        .where(inArray(task.scheduledTaskId, scheduledTaskIds))
+        .orderBy(desc(task.startedAt));
+
+export const findProjectScheduledTask = (scheduledTaskId: string, projectId: string) =>
+  db
+    .select()
+    .from(scheduledTask)
+    .where(and(eq(scheduledTask.id, scheduledTaskId), eq(scheduledTask.projectId, projectId)))
+    .then((rows) => rows[0]);
+
+export const updateScheduledTask = (
+  scheduledTaskId: string,
+  values: Partial<ScheduledTaskRecord>,
+) =>
+  db
+    .update(scheduledTask)
+    .set(values)
+    .where(eq(scheduledTask.id, scheduledTaskId))
+    .returning()
+    .then((rows) => rows[0]);
+
+export const deleteScheduledTask = (scheduledTaskId: string, projectId: string) =>
+  db
+    .delete(scheduledTask)
+    .where(and(eq(scheduledTask.id, scheduledTaskId), eq(scheduledTask.projectId, projectId)));
 
 // ─── Project member queries ───────────────────────────────────────────────────
 

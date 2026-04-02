@@ -2,6 +2,8 @@ import path from "node:path";
 
 import { Github } from "@/lib/github";
 import { ensureOpenCodeConfig } from "@/lib/opencode/config";
+import { findTaskWithProject } from "@/lib/project/data";
+import { parseStoredProjectSkills } from "@/lib/project/skills";
 import { Sandbox } from "@/lib/sandbox";
 import { buildOpenCodePrompt, buildOpenCodeRunCommand } from "@/lib/sandbox/opencode";
 import {
@@ -86,20 +88,23 @@ const prepareMessageAttachments = async (input: {
 };
 
 const loadTaskExecutionContext = async (taskId: string, messageId: string) => {
-  const [taskRecord, messageRecord] = await Promise.all([
+  const [taskRecord, messageRecord, taskWithProject] = await Promise.all([
     findTaskRecord(taskId),
     findTaskMessage(messageId),
+    findTaskWithProject(taskId),
   ]);
 
-  if (!taskRecord || !messageRecord) {
+  if (!taskRecord || !messageRecord || !taskWithProject) {
     return null;
   }
 
+  const executionUserId = taskRecord.createdByUserId ?? taskWithProject.project.userId;
+
   const [repo, githubAccessToken, viewer, authenticatedRemoteUrl] = await Promise.all([
-    unwrapResult(Github.getRepo(taskRecord.repoId ?? "")),
-    unwrapResult(Github.getAccessToken()),
-    unwrapResult(Github.getViewer()),
-    unwrapResult(Github.getAuthenticatedRemoteUrl(taskRecord.repoId ?? "")),
+    unwrapResult(Github.getRepoForUser(taskRecord.repoId ?? "", executionUserId)),
+    unwrapResult(Github.getAccessTokenForUser(executionUserId)),
+    unwrapResult(Github.getViewerForUser(executionUserId)),
+    unwrapResult(Github.getAuthenticatedRemoteUrlForUser(taskRecord.repoId ?? "", executionUserId)),
   ]);
 
   if (!repo) {
@@ -111,6 +116,7 @@ const loadTaskExecutionContext = async (taskId: string, messageId: string) => {
     githubAccessToken,
     messageRecord,
     repo,
+    taskProjectSkills: parseStoredProjectSkills(taskWithProject.project.agentSkills),
     taskProjectEnvVars: getTaskProjectEnvVars(taskRecord.envVars),
     taskRecord,
     viewer,
@@ -225,6 +231,7 @@ export const runInitialMessage = async (taskId: string, messageId: string) => {
     repoOwnerLogin: context.repo.ownerLogin,
     repoUrl: context.repo.cloneUrl,
     run: runSandboxCommand,
+    skills: context.taskProjectSkills,
     taskId,
     viewer: context.viewer,
   });
@@ -275,6 +282,7 @@ export const runFollowUpMessage = async (taskId: string, messageId: string) => {
     run: runSandboxCommand,
     taskId,
     taskRecord: context.taskRecord,
+    skills: context.taskProjectSkills,
     viewer: context.viewer,
   });
 

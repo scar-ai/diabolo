@@ -58,6 +58,7 @@ export const buildOpenCodeConfigContent = (model: string) => {
         "*": "allow",
       },
       edit: "allow",
+      skill: "allow",
       webfetch: "allow",
     },
     provider: {

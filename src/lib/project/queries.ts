@@ -8,6 +8,7 @@ import {
   $getProject,
   $getProjectCollaborators,
   $getProjectInvites,
+  $getServerTime,
   $listScheduledTasks,
   $getTaskById,
   $listAllUserTaskSummaries,
@@ -19,6 +20,7 @@ export type AllUserTasksResult = Awaited<ReturnType<typeof $listAllUserTasks>>;
 export type AllUserTaskSummariesResult = Awaited<ReturnType<typeof $listAllUserTaskSummaries>>;
 export type ProjectsResult = Awaited<ReturnType<typeof $listProjects>>;
 export type ProjectDetailResult = Awaited<ReturnType<typeof $getProject>>;
+export type ServerTimeResult = Awaited<ReturnType<typeof $getServerTime>>;
 
 const formatTaskSummaryDate = (value: Date | string) =>
   new Date(value).toLocaleDateString("en-US", {
@@ -35,13 +37,21 @@ const createTaskSummaryLine = ({
   repoName,
   sandboxStatus,
   stage,
+  spawnSource,
 }: {
   branchName: string | null;
   repoName: string | null;
   sandboxStatus: string;
+  spawnSource: string;
   stage: string;
 }) =>
-  [repoName, branchName, sandboxStatus !== "ready" ? sandboxStatus : null, stage]
+  [
+    repoName,
+    branchName,
+    spawnSource === "scheduled" ? "scheduled" : null,
+    sandboxStatus !== "ready" ? sandboxStatus : null,
+    stage,
+  ]
     .filter(Boolean)
     .join(" · ");
 
@@ -291,6 +301,10 @@ export const scheduledTaskKeys = {
   list: (projectId: string) => [...scheduledTaskKeys.all, "list", projectId] as const,
 };
 
+export const serverTimeKeys = {
+  all: ["server-time"] as const,
+};
+
 export const taskKeys = {
   all: ["tasks"] as const,
   detail: (taskId: string) => [...taskKeys.all, "detail", taskId] as const,
@@ -317,6 +331,13 @@ export const projectScheduledTasksQueryOptions = (projectId: string) =>
     queryFn: ({ signal }) => $listScheduledTasks({ data: { projectId }, signal }),
     queryKey: scheduledTaskKeys.list(projectId),
     staleTime: 5_000,
+  });
+
+export const serverTimeQueryOptions = () =>
+  queryOptions({
+    queryFn: ({ signal }) => $getServerTime({ signal }),
+    queryKey: serverTimeKeys.all,
+    staleTime: 0,
   });
 
 export const allUserTasksQueryOptions = (userId: string) =>

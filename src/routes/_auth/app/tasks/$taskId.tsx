@@ -1,8 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import { LoaderIcon } from "lucide-react";
-import { HouseIcon } from "lucide-react";
+import { ChevronRightIcon, HouseIcon, LoaderIcon } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
@@ -184,7 +183,7 @@ function TaskDetailPage() {
   useEffect(() => {
     setHeaderSlots({
       left: (
-        <nav className="flex items-center gap-1.5 text-sm">
+        <nav className="flex items-center gap-2 rounded-lg border border-border/50 bg-muted/70 px-4 py-2 text-base">
           <Link
             to="/app/projects"
             className="flex items-center gap-1.5 text-muted-foreground transition-colors hover:text-foreground"
@@ -194,7 +193,7 @@ function TaskDetailPage() {
           </Link>
           {projectName ? (
             <>
-              <span className="text-muted-foreground/40">/</span>
+              <ChevronRightIcon className="size-3.5 text-muted-foreground/40" aria-hidden="true" />
               <Link
                 to="/app"
                 search={{ projectId: task?.projectId }}
@@ -206,7 +205,7 @@ function TaskDetailPage() {
           ) : null}
           {taskTitle ? (
             <>
-              <span className="text-muted-foreground/40">/</span>
+              <ChevronRightIcon className="size-3.5 text-muted-foreground/40" aria-hidden="true" />
               <span className="max-w-48 truncate font-medium text-foreground">{taskTitle}</span>
             </>
           ) : null}

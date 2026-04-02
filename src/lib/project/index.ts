@@ -10,14 +10,22 @@ import {
   serializeProjectEnvEntries,
   type ProjectEnvEntry,
 } from "@/lib/project/env";
+import { ensureScheduledTaskScheduler } from "@/lib/project/scheduler.server";
+import {
+  normalizeProjectSkills,
+  parseStoredProjectSkills,
+  type ProjectSkillEntry,
+} from "@/lib/project/skills";
 import { fromPromise } from "@/lib/result";
 import { Sandbox } from "@/lib/sandbox";
 
 import {
+  deleteScheduledTask,
   deleteProject,
   deleteTask,
   findOwnedProject,
   findProject,
+  findProjectScheduledTask,
   findProjectTask,
   findTask,
   findTaskWithProject,
@@ -33,6 +41,7 @@ import {
   listUserTaskSummaries,
   listUserTasks,
   updateProject,
+  updateScheduledTask,
   updateTask,
   type ProjectRecord as TProjectRecord,
   type TaskForUserRecord as TTaskForUserRecord,
@@ -93,6 +102,11 @@ export namespace Project {
       value ? okAsync(value) : errAsync(new Error("Task not found.")),
     );
 
+  const requireScheduledTaskForProject = (projectId: string, scheduledTaskId: string) =>
+    fromPromise(findProjectScheduledTask(scheduledTaskId, projectId)).andThen((value) =>
+      value ? okAsync(value) : errAsync(new Error("Scheduled task not found.")),
+    );
+
   export const createProjectForUser = (input: {
     name: string;
     repoId: string;
@@ -119,6 +133,7 @@ export namespace Project {
   ): ResultAsync<
     ProjectRecord & {
       envEntries: ProjectEnvEntry[];
+      skills: ProjectSkillEntry[];
       repoDefaultBranch: string | null;
       repoDescription: string | null;
       repoFullName: string | null;
@@ -130,6 +145,7 @@ export namespace Project {
       Github.getRepo(value.repoId).map((repo) => ({
         ...value,
         envEntries: parseStoredProjectEnvEntries(value.envVars),
+        skills: parseStoredProjectSkills(value.agentSkills),
         repoDefaultBranch: repo?.defaultBranch ?? null,
         repoDescription: repo?.description ?? null,
         repoFullName: repo?.fullName ?? null,
@@ -151,6 +167,7 @@ export namespace Project {
     envEntries: ProjectEnvEntry[];
     projectId: string;
     shareWithOrganisation: boolean;
+    skills: ProjectSkillEntry[];
     userId: string;
   }): ResultAsync<ProjectRecord, Error> =>
     requireOwnedProject(input.projectId, input.userId).andThen(() =>
@@ -161,6 +178,7 @@ export namespace Project {
 
         return fromPromise(
           updateProject(input.projectId, {
+            agentSkills: JSON.stringify(normalizeProjectSkills(input.skills)),
             envVars: JSON.stringify(normalizeProjectEnvEntries(input.envEntries)),
             sharedWithOrgId: input.shareWithOrganisation ? (membership?.orgId ?? null) : null,
           }),
@@ -218,16 +236,81 @@ export namespace Project {
       });
   };
 
+  export const createTaskForScheduledTask = (input: {
+    projectId: string;
+    prompt: string;
+    scheduledTaskId: string;
+    sourceBranch: string;
+    userId: string;
+  }): ResultAsync<TaskRecord, Error> => {
+    const op = log.child({
+      projectId: input.projectId,
+      scheduledTaskId: input.scheduledTaskId,
+      userId: input.userId,
+    });
+
+    return requireUserProject(input.projectId, input.userId)
+      .andThen((project) =>
+        requireScheduledTaskForProject(input.projectId, input.scheduledTaskId).map(
+          (scheduledTask) => ({ project, scheduledTask }),
+        ),
+      )
+      .andThen(({ project }) =>
+        Sandbox.startTask(
+          {
+            envVars: serializeProjectEnvEntries(parseStoredProjectEnvEntries(project.envVars)),
+            prompt: input.prompt,
+            repoId: project.repoId,
+            sourceBranch: input.sourceBranch,
+          },
+          input.userId,
+        ),
+      )
+      .andThen((draft) =>
+        fromPromise(generateTaskTitle(draft.prompt)).andThen((title) =>
+          fromPromise(
+            insertTask({
+              branchName: draft.sourceBranch,
+              createdByUserId: input.userId,
+              envVars: draft.envVars ? JSON.stringify(draft.envVars) : null,
+              id: draft.id,
+              projectId: input.projectId,
+              prompt: draft.prompt,
+              repoId: draft.repoId,
+              scheduledTaskId: input.scheduledTaskId,
+              sandboxStatus: "pending",
+              spawnSource: "scheduled",
+              stage: draft.stage,
+              startedAt: new Date(draft.startedAt),
+              status: draft.status,
+              title,
+            }),
+          ).andThen((createdTask) =>
+            Sandbox.enqueueTaskMessage(createdTask.id, draft.prompt, "initial", input.userId).map(
+              () => createdTask,
+            ),
+          ),
+        ),
+      )
+      .map((value) => {
+        op.info("scheduled task run created", { taskId: value.id });
+        return value;
+      });
+  };
+
   export const createScheduledTaskForUser = (input: {
     branchName?: string | null;
     instructions: string;
     name: string;
     projectId: string;
+    runOnce?: boolean;
     scheduleCron: string;
     scheduleTimezone: string;
     userId: string;
-  }): ResultAsync<ScheduledTaskRecord, Error> =>
-    requireUserProject(input.projectId, input.userId).andThen(() =>
+  }): ResultAsync<ScheduledTaskRecord, Error> => {
+    ensureScheduledTaskScheduler();
+
+    return requireUserProject(input.projectId, input.userId).andThen(() =>
       fromPromise(
         insertScheduledTask({
           branchName: input.branchName ?? null,
@@ -236,19 +319,62 @@ export namespace Project {
           instructions: input.instructions,
           name: input.name,
           projectId: input.projectId,
+          runOnce: input.runOnce ? 1 : 0,
           scheduleCron: input.scheduleCron,
           scheduleTimezone: input.scheduleTimezone,
         }),
       ),
     );
+  };
 
   export const listScheduledTasksForProject = (
     projectId: string,
     userId: string,
-  ): ResultAsync<ScheduledTaskRecord[], Error> =>
-    requireUserProject(projectId, userId).andThen(() =>
+  ): ResultAsync<ScheduledTaskRecord[], Error> => {
+    ensureScheduledTaskScheduler();
+
+    return requireUserProject(projectId, userId).andThen(() =>
       fromPromise(listProjectScheduledTasks(projectId)),
     );
+  };
+
+  export const updateScheduledTaskForUser = (input: {
+    branchName?: string | null;
+    instructions: string;
+    name: string;
+    projectId: string;
+    runOnce: boolean;
+    scheduleCron: string;
+    scheduleTimezone: string;
+    scheduledTaskId: string;
+    userId: string;
+  }): ResultAsync<ScheduledTaskRecord, Error> =>
+    requireUserProject(input.projectId, input.userId)
+      .andThen(() => requireScheduledTaskForProject(input.projectId, input.scheduledTaskId))
+      .andThen(() =>
+        fromPromise(
+          updateScheduledTask(input.scheduledTaskId, {
+            branchName: input.branchName ?? null,
+            instructions: input.instructions,
+            name: input.name,
+            runOnce: input.runOnce ? 1 : 0,
+            scheduleCron: input.scheduleCron,
+            scheduleTimezone: input.scheduleTimezone,
+          }),
+        ),
+      );
+
+  export const deleteScheduledTaskForUser = (
+    projectId: string,
+    scheduledTaskId: string,
+    userId: string,
+  ): ResultAsync<void, Error> =>
+    requireUserProject(projectId, userId)
+      .andThen(() => requireScheduledTaskForProject(projectId, scheduledTaskId))
+      .andThen(() => fromPromise(deleteScheduledTask(scheduledTaskId, projectId)))
+      .map(() => {
+        log.info("scheduled task deleted", { projectId, scheduledTaskId });
+      });
 
   export const createTaskDraftForUser = (input: {
     projectId: string;

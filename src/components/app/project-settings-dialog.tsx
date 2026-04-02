@@ -1,9 +1,18 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { FileIcon, Settings2Icon, UploadCloudIcon, UserPlusIcon, XIcon } from "lucide-react";
+import {
+  FileIcon,
+  LoaderIcon,
+  SearchIcon,
+  Settings2Icon,
+  UploadCloudIcon,
+  UserPlusIcon,
+  XIcon,
+} from "lucide-react";
 import {
   useEffect,
   useId,
+  useMemo,
   useRef,
   useState,
   type ChangeEvent,
@@ -31,6 +40,7 @@ import { parseDotEnvText, type ProjectEnvEntry } from "@/lib/project/env";
 import {
   $cancelProjectInvite,
   $inviteProjectMember,
+  $searchSkills,
   $kickProjectMember,
   $updateProjectSettings,
 } from "@/lib/project/functions";
@@ -40,9 +50,14 @@ import {
   projectCollaboratorsQueryOptions,
   projectInvitesQueryOptions,
 } from "@/lib/project/queries";
+import type { ProjectSkillEntry } from "@/lib/project/skills";
 
 type ProjectEnvDraftEntry = ProjectEnvEntry & {
   id: string;
+};
+
+type SkillSearchResult = ProjectSkillEntry & {
+  installsLabel: string;
 };
 
 const createDraftEntry = (entry?: Partial<ProjectEnvEntry>): ProjectEnvDraftEntry => ({
@@ -51,7 +66,7 @@ const createDraftEntry = (entry?: Partial<ProjectEnvEntry>): ProjectEnvDraftEntr
   value: entry?.value ?? "",
 });
 
-type Tab = "environment" | "collaborators";
+type Tab = "environment" | "skills" | "collaborators";
 
 export function ProjectSettingsDialog({
   currentUserId,
@@ -71,15 +86,21 @@ export function ProjectSettingsDialog({
   const inviteMember = useServerFn($inviteProjectMember);
   const cancelInvite = useServerFn($cancelProjectInvite);
   const kickMember = useServerFn($kickProjectMember);
+  const searchSkills = useServerFn($searchSkills);
   const fileInputId = useId();
+  const orgShareCheckboxId = useId();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [open, setOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>("environment");
   const [manualEntries, setManualEntries] = useState<ProjectEnvDraftEntry[]>([createDraftEntry()]);
+  const [selectedSkills, setSelectedSkills] = useState<ProjectSkillEntry[]>([]);
+  const [skillSearch, setSkillSearch] = useState("");
+  const [hasSearchedSkills, setHasSearchedSkills] = useState(false);
   const [shareWithOrganisation, setShareWithOrganisation] = useState(false);
   const [uploadPreview, setUploadPreview] = useState("");
   const [isDragging, setIsDragging] = useState(false);
   const [inviteUsername, setInviteUsername] = useState("");
+  const [skillSearchResults, setSkillSearchResults] = useState<SkillSearchResult[]>([]);
 
   const title = projectName ? `${projectName}` : "Project Settings";
 
@@ -105,6 +126,22 @@ export function ProjectSettingsDialog({
 
   const isOwner = projectQuery.data?.userId === currentUserId;
 
+  const searchSkillsMutation = useMutation({
+    mutationFn: (query: string) =>
+      searchSkills({
+        data: { query },
+      }),
+    onSuccess: (results) => {
+      setHasSearchedSkills(true);
+      setSkillSearchResults(results);
+    },
+    onError: (error) => {
+      setHasSearchedSkills(true);
+      toast.error(error instanceof Error ? error.message : "Failed to search skills.");
+    },
+  });
+  const { isPending: isSearchingSkills, mutate: runSkillSearch } = searchSkillsMutation;
+
   useEffect(() => {
     if (!open) return;
     const envEntries = projectQuery.data?.envEntries ?? [];
@@ -114,14 +151,45 @@ export function ProjectSettingsDialog({
         ? envEntries.map((entry) => createDraftEntry(entry))
         : [createDraftEntry()],
     );
+    setSelectedSkills(projectQuery.data?.skills ?? []);
+    setSkillSearch("");
+    setHasSearchedSkills(false);
+    setSkillSearchResults([]);
     setShareWithOrganisation(Boolean(projectQuery.data?.sharedWithOrgId));
     setUploadPreview("");
-  }, [open, projectQuery.data?.envEntries, projectQuery.data?.sharedWithOrgId]);
+  }, [
+    open,
+    projectQuery.data?.envEntries,
+    projectQuery.data?.sharedWithOrgId,
+    projectQuery.data?.skills,
+  ]);
+
+  useEffect(() => {
+    if (!open || activeTab !== "skills" || !isOwner) {
+      return;
+    }
+
+    const trimmedQuery = skillSearch.trim();
+
+    if (trimmedQuery.length < 2 || hasSearchedSkills) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      runSkillSearch(trimmedQuery);
+    }, 350);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [activeTab, hasSearchedSkills, isOwner, open, runSkillSearch, skillSearch]);
 
   const saveMutation = useMutation({
     mutationFn: (envEntries: ProjectEnvEntry[]) => {
       if (!projectId) throw new Error("Project not found.");
-      return updateProjectSettings({ data: { envEntries, projectId, shareWithOrganisation } });
+      return updateProjectSettings({
+        data: { envEntries, projectId, shareWithOrganisation, skills: selectedSkills },
+      });
     },
     onSuccess: async () => {
       if (projectId) {
@@ -233,11 +301,37 @@ export function ProjectSettingsDialog({
     saveMutation.mutate(manualEntries.map(({ key, value }) => ({ key, value })));
   };
 
+  const addSkill = (skill: ProjectSkillEntry) => {
+    setSelectedSkills((current) =>
+      current.some((entry) => entry.installSpec === skill.installSpec)
+        ? current
+        : [...current, skill],
+    );
+  };
+
+  const removeSkill = (installSpec: string) => {
+    setSelectedSkills((current) => current.filter((skill) => skill.installSpec !== installSpec));
+  };
+
+  const handleSkillSearch = () => {
+    if (skillSearch.trim().length < 2) {
+      setHasSearchedSkills(false);
+      setSkillSearchResults([]);
+      return;
+    }
+
+    runSkillSearch(skillSearch.trim());
+  };
+
   const currentOrg = orgQuery.data;
   const sharedOrgLabel =
     currentOrg && currentOrg.id === projectQuery.data?.sharedWithOrgId
       ? currentOrg.name
       : "your organisation";
+  const selectedSkillSpecs = useMemo(
+    () => new Set(selectedSkills.map((skill) => skill.installSpec)),
+    [selectedSkills],
+  );
 
   const updateEntry = (id: string, patch: Partial<ProjectEnvEntry>) => {
     setManualEntries((current) =>
@@ -254,6 +348,7 @@ export function ProjectSettingsDialog({
 
   const tabs: { id: Tab; label: string }[] = [
     { id: "environment", label: "Environment" },
+    { id: "skills", label: "Skills" },
     { id: "collaborators", label: "Collaborators" },
   ];
 
@@ -438,24 +533,27 @@ export function ProjectSettingsDialog({
             <div className="space-y-5">
               {/* Org sharing */}
               {isOwner ? (
-                <label
-                  className={`flex cursor-pointer items-start gap-3 rounded-xl border border-border p-4 transition-colors hover:bg-muted/40 ${!currentOrg ? "cursor-not-allowed opacity-50" : ""}`}
+                <div
+                  className={`flex items-start gap-3 rounded-xl border border-border p-4 transition-colors hover:bg-muted/40 ${!currentOrg ? "cursor-not-allowed opacity-50" : ""}`}
                 >
                   <Checkbox
+                    id={orgShareCheckboxId}
                     checked={shareWithOrganisation}
                     disabled={!currentOrg}
                     onCheckedChange={(checked) => setShareWithOrganisation(checked === true)}
                     className="mt-0.5"
                   />
                   <div className="space-y-0.5">
-                    <p className="text-sm font-medium">Share with organisation</p>
+                    <Label htmlFor={orgShareCheckboxId} className="text-sm font-medium">
+                      Share with organisation
+                    </Label>
                     <p className="text-sm text-muted-foreground">
                       {currentOrg
                         ? `Everyone in ${sharedOrgLabel} can open this project and its sessions.`
                         : "Join an organisation to share this project more broadly."}
                     </p>
                   </div>
-                </label>
+                </div>
               ) : projectQuery.data?.sharedWithOrgId ? (
                 <div className="flex items-center gap-2 rounded-xl border border-border bg-muted/30 px-3 py-2.5 text-sm text-muted-foreground">
                   <Badge variant="secondary" className="text-xs">
@@ -600,6 +698,146 @@ export function ProjectSettingsDialog({
                     Invited members must have access to the GitHub repository to start tasks.
                   </p>
                 </div>
+              ) : null}
+            </div>
+          ) : null}
+
+          {activeTab === "skills" ? (
+            <div className="space-y-5">
+              <p className="text-sm text-muted-foreground">
+                Selected skills are installed into `.agents/skills` in every sandbox for this
+                project before OpenCode runs.
+              </p>
+
+              {isOwner ? (
+                <div className="space-y-3 rounded-xl border border-border p-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="skill-search">Search skills</Label>
+                    <div className="flex gap-2">
+                      <div className="relative flex-1">
+                        <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground/60" />
+                        <Input
+                          id="skill-search"
+                          value={skillSearch}
+                          onChange={(event) => {
+                            const nextValue = event.target.value;
+                            setSkillSearch(nextValue);
+                            setHasSearchedSkills(false);
+                            setSkillSearchResults([]);
+                          }}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter") {
+                              event.preventDefault();
+                              handleSkillSearch();
+                            }
+                          }}
+                          placeholder="Search skills.sh"
+                          className="pl-9"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-border bg-background">
+                    {isSearchingSkills ? (
+                      <div className="flex items-center justify-center gap-2 px-4 py-10 text-sm text-muted-foreground">
+                        <LoaderIcon className="size-4 animate-spin" />
+                        Searching skills…
+                      </div>
+                    ) : skillSearch.length < 2 && skillSearchResults.length === 0 ? (
+                      <div className="px-4 py-6 text-sm text-muted-foreground">
+                        Search by keyword to add skills from skills.sh.
+                      </div>
+                    ) : hasSearchedSkills && skillSearchResults.length === 0 ? (
+                      <div className="px-4 py-6 text-sm text-muted-foreground">
+                        No skills matched that search.
+                      </div>
+                    ) : (
+                      <div className="divide-y divide-border">
+                        {skillSearchResults.map((skill) => {
+                          const isSelected = selectedSkillSpecs.has(skill.installSpec);
+
+                          return (
+                            <div
+                              key={skill.installSpec}
+                              className="flex items-start justify-between gap-3 px-4 py-3"
+                            >
+                              <div className="min-w-0 space-y-1">
+                                <p className="text-sm font-medium">{skill.name}</p>
+                                <p className="text-xs text-muted-foreground">{skill.source}</p>
+                                <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                                  <Badge variant="secondary" className="text-[11px]">
+                                    {skill.installsLabel}
+                                  </Badge>
+                                  <a
+                                    href={skill.url}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="underline underline-offset-4"
+                                  >
+                                    View listing
+                                  </a>
+                                </div>
+                              </div>
+                              <Button
+                                variant={isSelected ? "secondary" : "outline"}
+                                size="sm"
+                                disabled={isSelected}
+                                onClick={() => addSkill(skill)}
+                              >
+                                {isSelected ? "Added" : "Add"}
+                              </Button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : null}
+
+              <div className="space-y-2">
+                <p className="px-0.5 text-xs font-medium tracking-wide text-muted-foreground uppercase">
+                  Selected for this project
+                </p>
+                <div className="overflow-hidden rounded-xl border border-border">
+                  {selectedSkills.length === 0 ? (
+                    <div className="px-4 py-6 text-sm text-muted-foreground">
+                      No project skills selected.
+                    </div>
+                  ) : (
+                    selectedSkills.map((skill, index) => (
+                      <div
+                        key={skill.installSpec}
+                        className={`flex items-start justify-between gap-3 px-4 py-3 ${
+                          index !== 0 ? "border-t border-border" : ""
+                        }`}
+                      >
+                        <div className="min-w-0 space-y-1">
+                          <p className="text-sm font-medium">{skill.name}</p>
+                          <p className="text-xs text-muted-foreground">{skill.source}</p>
+                        </div>
+                        {isOwner ? (
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            className="text-muted-foreground/60 hover:text-foreground"
+                            onClick={() => removeSkill(skill.installSpec)}
+                          >
+                            <XIcon className="size-4" aria-hidden="true" />
+                            <span className="sr-only">Remove skill</span>
+                          </Button>
+                        ) : null}
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              {!isOwner ? (
+                <p className="text-xs text-muted-foreground">
+                  Only the project owner can change which skills are installed for this project.
+                </p>
               ) : null}
             </div>
           ) : null}

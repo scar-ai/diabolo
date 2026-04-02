@@ -8,6 +8,7 @@ export const project = pgTable(
   "project",
   {
     id: text().primaryKey(),
+    agentSkills: text("agent_skills"),
     name: text().notNull(),
     envVars: text("env_vars"),
     repoId: text().notNull(),
@@ -90,6 +91,7 @@ export const task = pgTable(
     sandboxStatus: text("sandbox_status").notNull().default("pending"),
     branchName: text(),
     spawnSource: text().notNull().default("user"),
+    scheduledTaskId: text("scheduled_task_id"),
     opencodeModel: text(),
     sandboxPath: text("clone_path"),
     nextMessageSequence: integer("next_message_sequence").notNull().default(0),
@@ -135,6 +137,7 @@ export const scheduledTask = pgTable(
     instructions: text().notNull(),
     branchName: text("branch_name"),
     enabled: integer().notNull().default(1),
+    runOnce: integer("run_once").notNull().default(0),
     createdByUserId: text("created_by_user_id").references(() => user.id, {
       onDelete: "set null",
     }),

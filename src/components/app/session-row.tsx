@@ -69,6 +69,11 @@ export function SessionRow({
             <span className="truncate text-sm font-medium text-foreground group-hover:underline">
               {session.promptPreview}
             </span>
+            {session.spawnSource === "scheduled" ? (
+              <span className="rounded-sm border border-border bg-muted px-1.5 py-0.5 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
+                Scheduled
+              </span>
+            ) : null}
           </div>
           <div className="flex items-center gap-1.5 text-xs text-muted-foreground/50">
             {session.sessionSummaryLine ? <span>{session.sessionSummaryLine}</span> : null}

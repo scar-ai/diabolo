@@ -2,6 +2,7 @@ import { Buffer } from "node:buffer";
 
 import type { Github } from "@/lib/github";
 import { formatProjectEnvVarsForDotEnv } from "@/lib/project/env";
+import type { ProjectSkillEntry } from "@/lib/project/skills";
 import type { Sandbox } from "@/lib/sandbox";
 import { SandboxRuntimeState } from "@/lib/sandbox/runtime-state";
 import type { TaskRecord } from "@/lib/sandbox/store";
@@ -38,6 +39,7 @@ const updateStage = async (
 
 const PROJECT_ENV_START_MARKER = "# >>> diabolo project env >>>";
 const PROJECT_ENV_END_MARKER = "# <<< diabolo project env <<<";
+const PROJECT_SKILLS_MANIFEST_PATH = ".diabolo/project-skills.json";
 
 const escapeForSingleQuotedShell = (value: string) => value.replace(/'/g, `'\\''`);
 
@@ -92,6 +94,69 @@ const syncProjectEnvFile = async (input: {
     120,
   );
 
+const buildProjectSkillsSyncCommand = (skills: ProjectSkillEntry[]) => {
+  const skillsB64 = Buffer.from(JSON.stringify(skills), "utf8").toString("base64");
+
+  return [
+    `export DIABOLO_PROJECT_SKILLS_B64='${escapeForSingleQuotedShell(skillsB64)}'`,
+    "node - <<'JS'",
+    "const fs = require('fs');",
+    "const path = require('path');",
+    "const { spawnSync } = require('child_process');",
+    `const manifestPath = ${JSON.stringify(PROJECT_SKILLS_MANIFEST_PATH)};`,
+    "const skillsRoot = path.join('.agents', 'skills');",
+    "const raw = Buffer.from(process.env.DIABOLO_PROJECT_SKILLS_B64 || '', 'base64').toString('utf8');",
+    "const payload = raw ? JSON.parse(raw) : [];",
+    "let previous = [];",
+    "if (fs.existsSync(manifestPath)) {",
+    "  try {",
+    "    const parsed = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));",
+    "    previous = Array.isArray(parsed) ? parsed.filter((value) => typeof value === 'string') : [];",
+    "  } catch {}",
+    "}",
+    "fs.mkdirSync(path.dirname(manifestPath), { recursive: true });",
+    "fs.mkdirSync(skillsRoot, { recursive: true });",
+    "for (const skillName of previous) {",
+    "  fs.rmSync(path.join(skillsRoot, skillName), { force: true, recursive: true });",
+    "}",
+    "for (const skill of payload) {",
+    "  if (!skill || typeof skill !== 'object' || Array.isArray(skill)) continue;",
+    "  if (typeof skill.installSpec !== 'string' || !skill.installSpec.trim()) continue;",
+    "  const result = spawnSync(",
+    "    'pnpm',",
+    "    ['dlx', 'skills@latest', 'add', skill.installSpec, '-a', 'opencode', '-y'],",
+    "    { cwd: process.cwd(), encoding: 'utf8', env: process.env },",
+    "  );",
+    "  if (result.stdout) process.stdout.write(result.stdout);",
+    "  if (result.stderr) process.stderr.write(result.stderr);",
+    "  if (result.status !== 0) process.exit(result.status ?? 1);",
+    "}",
+    "const installed = payload",
+    "  .map((skill) => (skill && typeof skill.name === 'string' ? skill.name.trim() : ''))",
+    "  .filter(Boolean);",
+    "fs.writeFileSync(manifestPath, JSON.stringify(installed, null, 2) + '\\n');",
+    "JS",
+  ].join("\n");
+};
+
+const syncProjectSkills = async (input: {
+  messageId: string;
+  run: Run;
+  sandbox: Sandbox.Session;
+  sandboxPath: string;
+  skills: ProjectSkillEntry[];
+  taskId: string;
+}) =>
+  input.run(
+    input.sandbox,
+    input.taskId,
+    input.messageId,
+    buildProjectSkillsSyncCommand(input.skills),
+    input.sandboxPath,
+    undefined,
+    1800,
+  );
+
 export namespace SandboxWorkspace {
   export const destroy = async (
     provider: Sandbox.Provider,
@@ -129,6 +194,7 @@ export namespace SandboxWorkspace {
     repoOwnerLogin: string;
     repoUrl: string;
     run: Run;
+    skills: ProjectSkillEntry[];
     taskId: string;
     viewer: Viewer;
   }) => {
@@ -192,6 +258,15 @@ export namespace SandboxWorkspace {
         taskId: input.taskId,
       });
 
+      await syncProjectSkills({
+        messageId: input.messageId,
+        run: input.run,
+        sandbox,
+        sandboxPath,
+        skills: input.skills,
+        taskId: input.taskId,
+      });
+
       return {
         sandbox,
         sandboxPath,
@@ -215,6 +290,7 @@ export namespace SandboxWorkspace {
     taskId: string;
     taskRecord: TaskRecord;
     envVars?: Record<string, string>;
+    skills: ProjectSkillEntry[];
     viewer: Viewer;
   }) => {
     if (input.taskRecord.sandboxId && input.taskRecord.sandboxPath) {
@@ -227,6 +303,15 @@ export namespace SandboxWorkspace {
           run: input.run,
           sandbox,
           sandboxPath: input.taskRecord.sandboxPath,
+          taskId: input.taskId,
+        });
+
+        await syncProjectSkills({
+          messageId: input.messageId,
+          run: input.run,
+          sandbox,
+          sandboxPath: input.taskRecord.sandboxPath,
+          skills: input.skills,
           taskId: input.taskId,
         });
 
@@ -250,6 +335,7 @@ export namespace SandboxWorkspace {
       repoOwnerLogin: input.repo.ownerLogin,
       repoUrl: input.repo.cloneUrl,
       run: input.run,
+      skills: input.skills,
       taskId: input.taskId,
       viewer: input.viewer,
     });

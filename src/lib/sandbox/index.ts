@@ -104,7 +104,7 @@ export namespace Sandbox {
           throw new Error("Prompt must be at least 10 characters.");
         }
 
-        const repo = await Github.getRepo(input.repoId).match(
+        const repo = await Github.getRepoForUser(input.repoId, userId).match(
           (value) => value,
           (error) => {
             throw error;

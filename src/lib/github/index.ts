@@ -1,10 +1,12 @@
 import "@tanstack/react-start/server-only";
+import { and, eq } from "drizzle-orm";
 import { errAsync, okAsync, ResultAsync } from "neverthrow";
 import { Octokit } from "octokit";
 import * as R from "remeda";
 
 import { _getUser } from "@/lib/auth/functions.server";
 import { db } from "@/lib/db";
+import { account } from "@/lib/db/schema/schema";
 import { Log } from "@/lib/log";
 import { fromPromise } from "@/lib/result";
 
@@ -63,15 +65,9 @@ export namespace Github {
     return response.json() as Promise<TData>;
   };
 
-  const getAccount = async (): Promise<GithubAccount> => {
-    const user = await _getUser({ disableCookieCache: true });
-    if (!user) {
-      throw new Error("You must be signed in.");
-    }
-
+  const getAccountForUserId = async (userId: string): Promise<GithubAccount> => {
     const githubAccount = await db.query.account.findFirst({
-      where: (account, { and, eq }) =>
-        and(eq(account.userId, user.id), eq(account.providerId, "github")),
+      where: and(eq(account.userId, userId), eq(account.providerId, "github")),
     });
 
     if (!githubAccount?.accessToken) {
@@ -81,9 +77,27 @@ export namespace Github {
     return { accessToken: githubAccount.accessToken };
   };
 
+  const getAccount = async (): Promise<GithubAccount> => {
+    const user = await _getUser({ disableCookieCache: true });
+    if (!user) {
+      throw new Error("You must be signed in.");
+    }
+
+    return getAccountForUserId(user.id);
+  };
+
+  const getOctokitForAccessToken = async (accessToken: string) => {
+    return new Octokit({ auth: accessToken });
+  };
+
+  const getOctokitForUserId = async (userId: string) => {
+    const { accessToken } = await getAccountForUserId(userId);
+    return getOctokitForAccessToken(accessToken);
+  };
+
   const getOctokit = async () => {
     const { accessToken } = await getAccount();
-    return new Octokit({ auth: accessToken });
+    return getOctokitForAccessToken(accessToken);
   };
 
   const mapRepo = (repo: GithubRepoApiItem): Repo => ({
@@ -106,7 +120,24 @@ export namespace Github {
   export const listRepos = (): ResultAsync<Repo[], Error> =>
     fromPromise(
       (async () => {
-        const octokit = await getOctokit();
+        const { accessToken } = await getAccount();
+        const octokit = await getOctokitForAccessToken(accessToken);
+        const repos = (await octokit.paginate(octokit.rest.repos.listForAuthenticatedUser, {
+          affiliation: "owner,collaborator,organization_member",
+          per_page: 100,
+          sort: "updated",
+          visibility: "all",
+        })) as GithubRepoApiItem[];
+
+        log.info("repos listed", { count: repos.length });
+        return R.map(repos, mapRepo);
+      })(),
+    );
+
+  export const listReposForUser = (userId: string): ResultAsync<Repo[], Error> =>
+    fromPromise(
+      (async () => {
+        const octokit = await getOctokitForUserId(userId);
         const repos = (await octokit.paginate(octokit.rest.repos.listForAuthenticatedUser, {
           affiliation: "owner,collaborator,organization_member",
           per_page: 100,
@@ -126,6 +157,13 @@ export namespace Github {
       return found;
     });
 
+  export const getRepoForUser = (repoId: string, userId: string): ResultAsync<Repo | null, Error> =>
+    listReposForUser(userId).map((repos) => {
+      const found = repos.find((repo) => repo.id === repoId) ?? null;
+      if (!found) log.warn("repo not found", { repoId, userId });
+      return found;
+    });
+
   export const requireRepo = (repoId: string): ResultAsync<Repo, Error> =>
     getRepo(repoId).andThen((repo) =>
       repo ? okAsync(repo) : errAsync(new Error("Unknown repository selection.")),
@@ -133,6 +171,9 @@ export namespace Github {
 
   export const getAccessToken = (): ResultAsync<string, Error> =>
     fromPromise(getAccount().then((a) => a.accessToken));
+
+  export const getAccessTokenForUser = (userId: string): ResultAsync<string, Error> =>
+    fromPromise(getAccountForUserId(userId).then((a) => a.accessToken));
 
   export const getViewer = (): ResultAsync<{ email: string; login: string; name: string }, Error> =>
     fromPromise(
@@ -148,11 +189,42 @@ export namespace Github {
       })(),
     );
 
+  export const getViewerForUser = (
+    userId: string,
+  ): ResultAsync<{ email: string; login: string; name: string }, Error> =>
+    fromPromise(
+      (async () => {
+        const octokit = await getOctokitForUserId(userId);
+        const { data: viewer } = await octokit.rest.users.getAuthenticated();
+
+        return {
+          email: viewer.email || `${viewer.login}@users.noreply.github.com`,
+          login: viewer.login,
+          name: viewer.name || viewer.login,
+        };
+      })(),
+    );
+
   export const getAuthenticatedRemoteUrl = (repoId: string): ResultAsync<string, Error> =>
     ResultAsync.combine([requireRepo(repoId), getAccessToken()]).map(([repo, token]) => {
       const encoded = encodeURIComponent(token);
       return `https://x-access-token:${encoded}@github.com/${repo.fullName}.git`;
     });
+
+  export const getAuthenticatedRemoteUrlForUser = (
+    repoId: string,
+    userId: string,
+  ): ResultAsync<string, Error> =>
+    ResultAsync.combine([getRepoForUser(repoId, userId), getAccessTokenForUser(userId)]).andThen(
+      ([repo, token]) => {
+        if (!repo) {
+          return errAsync(new Error("Unknown repository selection."));
+        }
+
+        const encoded = encodeURIComponent(token);
+        return okAsync(`https://x-access-token:${encoded}@github.com/${repo.fullName}.git`);
+      },
+    );
 
   export const createPullRequest = (input: {
     base: string;

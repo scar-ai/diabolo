@@ -132,7 +132,7 @@ function ProjectsPage() {
   useEffect(() => {
     setHeaderSlots({
       left: (
-        <nav className="flex items-center gap-1.5 text-sm">
+        <nav className="flex items-center gap-2 rounded-lg border border-border/50 bg-muted/70 px-4 py-2 text-base">
           <span className="flex items-center gap-1.5 font-medium text-foreground">
             <HouseIcon className="size-4" />
             Home
