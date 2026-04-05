@@ -93,6 +93,7 @@ export const task = pgTable(
     spawnSource: text().notNull().default("user"),
     scheduledTaskId: text("scheduled_task_id"),
     opencodeModel: text(),
+    opencodeProviderId: text("opencode_provider_id"),
     sandboxPath: text("clone_path"),
     nextMessageSequence: integer("next_message_sequence").notNull().default(0),
     spawnFailureCount: integer("spawn_failure_count").notNull().default(0),

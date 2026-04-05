@@ -1,7 +1,7 @@
 import path from "node:path";
 
 import { Github } from "@/lib/github";
-import { normalizeOpenCodeModelForProvider, resolveOpenCodeConfig } from "@/lib/opencode/config";
+import { resolveOpenCodeConfig } from "@/lib/opencode/config";
 import { findTaskWithProject } from "@/lib/project/data";
 import { parseStoredProjectSkills } from "@/lib/project/skills";
 import { Sandbox } from "@/lib/sandbox";
@@ -19,7 +19,7 @@ import {
   resolveTaskAttachmentPath,
   TASK_ATTACHMENT_ARTIFACT_TYPE,
 } from "@/lib/task-attachments";
-import { findUserProviderSettings } from "@/lib/user/data";
+import { findUserLlmProvider, findUserProviderSettings } from "@/lib/user/data";
 
 import {
   assertTaskNotCancelled,
@@ -101,21 +101,36 @@ const loadTaskExecutionContext = async (taskId: string, messageId: string) => {
 
   const executionUserId = taskRecord.createdByUserId ?? taskWithProject.project.userId;
 
-  const [repo, githubAccessToken, viewer, authenticatedRemoteUrl] = await Promise.all([
+  const [
+    repo,
+    githubAccessToken,
+    viewer,
+    authenticatedRemoteUrl,
+    userProviderSettings,
+    llmProvider,
+  ] = await Promise.all([
     unwrapResult(Github.getRepoForUser(taskRecord.repoId ?? "", executionUserId)),
     unwrapResult(Github.getAccessTokenForUser(executionUserId)),
     unwrapResult(Github.getViewerForUser(executionUserId)),
     unwrapResult(Github.getAuthenticatedRemoteUrlForUser(taskRecord.repoId ?? "", executionUserId)),
+    findUserProviderSettings(executionUserId),
+    taskRecord.opencodeProviderId
+      ? findUserLlmProvider(executionUserId, taskRecord.opencodeProviderId)
+      : Promise.resolve(null),
   ]);
-  const userProviderSettings = await findUserProviderSettings(executionUserId);
 
   if (!repo) {
     throw new Error("Unknown repository selection.");
   }
 
+  if (taskRecord.opencodeProviderId && !llmProvider) {
+    throw new Error("The provider selected for this task no longer exists.");
+  }
+
   return {
     authenticatedRemoteUrl,
     githubAccessToken,
+    llmProvider,
     messageRecord,
     repo,
     taskProjectSkills: parseStoredProjectSkills(taskWithProject.project.agentSkills),
@@ -137,13 +152,16 @@ const runOpenCodeMessage = async (input: {
   taskRecord: Awaited<ReturnType<typeof findTaskRecord>>;
   viewer: Viewer;
   githubAccessToken: string;
+  llmProvider: Awaited<ReturnType<typeof findUserLlmProvider>> | null;
   messagePrompt: string;
   userProviderSettings: Awaited<ReturnType<typeof findUserProviderSettings>>;
 }) => {
-  const openCode = resolveOpenCodeConfig(input.userProviderSettings ?? undefined);
-  const model = input.taskRecord?.opencodeModel?.trim()
-    ? normalizeOpenCodeModelForProvider(input.taskRecord.opencodeModel, openCode.providerId)
-    : openCode.model;
+  const openCode = resolveOpenCodeConfig({
+    legacySettings: input.userProviderSettings ?? undefined,
+    model: input.taskRecord?.opencodeModel?.trim() || null,
+    provider: input.llmProvider ?? undefined,
+  });
+  const model = openCode.model;
   const attachments = await prepareMessageAttachments({
     messageId: input.messageId,
     prepared: input.prepared,
@@ -168,6 +186,7 @@ const runOpenCodeMessage = async (input: {
       githubToken: input.githubAccessToken,
       model,
       providerId: openCode.providerId,
+      providerName: openCode.providerName,
       projectEnvVars: input.taskProjectEnvVars,
       repoFullName: input.repo.fullName,
       sandboxPath: input.prepared.sandboxPath,
@@ -251,6 +270,7 @@ export const runInitialMessage = async (taskId: string, messageId: string) => {
     defaultCompletionStage: "Task completed",
     githubAccessToken: context.githubAccessToken,
     messageId,
+    llmProvider: context.llmProvider,
     messagePrompt: context.messageRecord.prompt,
     prepared,
     repo: context.repo,
@@ -306,6 +326,7 @@ export const runFollowUpMessage = async (taskId: string, messageId: string) => {
     defaultCompletionStage: "Follow-up completed",
     githubAccessToken: context.githubAccessToken,
     messageId,
+    llmProvider: context.llmProvider,
     messagePrompt: context.messageRecord.prompt,
     messagePromptOptions: {
       conversationHistory: previousConversation,

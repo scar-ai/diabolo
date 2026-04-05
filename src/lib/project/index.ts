@@ -3,6 +3,7 @@ import * as R from "remeda";
 
 import { Github } from "@/lib/github";
 import { Log } from "@/lib/log";
+import { type OpenCodeConfig, resolveOpenCodeConfig } from "@/lib/opencode/config";
 import { Org } from "@/lib/org";
 import {
   normalizeProjectEnvEntries,
@@ -18,6 +19,7 @@ import {
 } from "@/lib/project/skills";
 import { fromPromise } from "@/lib/result";
 import { Sandbox } from "@/lib/sandbox";
+import { findUserLlmProvider, findUserProviderSettings } from "@/lib/user/data";
 
 import {
   deleteScheduledTask,
@@ -107,6 +109,34 @@ export namespace Project {
       value ? okAsync(value) : errAsync(new Error("Scheduled task not found.")),
     );
 
+  const resolveTaskOpenCodeConfig = (
+    userId: string,
+    providerRecordId?: string | null,
+    model?: string | null,
+  ): ResultAsync<OpenCodeConfig, Error> =>
+    fromPromise(
+      Promise.all([
+        providerRecordId ? findUserLlmProvider(userId, providerRecordId) : Promise.resolve(null),
+        findUserProviderSettings(userId),
+      ]),
+    ).andThen(([provider, legacySettings]) => {
+      if (providerRecordId && !provider) {
+        return errAsync(new Error("Selected provider was not found."));
+      }
+
+      try {
+        return okAsync(
+          resolveOpenCodeConfig({
+            legacySettings,
+            model,
+            provider,
+          }),
+        );
+      } catch (error) {
+        return errAsync(error instanceof Error ? error : new Error(String(error)));
+      }
+    });
+
   export const createProjectForUser = (input: {
     name: string;
     repoId: string;
@@ -187,6 +217,7 @@ export namespace Project {
     );
 
   export const createTaskForUser = (input: {
+    providerId?: string | null;
     projectId: string;
     prompt: string;
     sourceBranch: string;
@@ -196,24 +227,33 @@ export namespace Project {
 
     return requireUserProject(input.projectId, input.userId)
       .andThen((value) =>
+        resolveTaskOpenCodeConfig(input.userId, input.providerId ?? null).map((openCodeConfig) => ({
+          openCodeConfig,
+          project: value,
+        })),
+      )
+      .andThen(({ openCodeConfig, project }) =>
         Sandbox.startTask(
           {
-            envVars: serializeProjectEnvEntries(parseStoredProjectEnvEntries(value.envVars)),
+            envVars: serializeProjectEnvEntries(parseStoredProjectEnvEntries(project.envVars)),
+            openCodeConfig,
             prompt: input.prompt,
-            repoId: value.repoId,
+            repoId: project.repoId,
             sourceBranch: input.sourceBranch,
           },
           input.userId,
-        ),
+        ).map((draft) => ({ draft, openCodeConfig })),
       )
-      .andThen((draft) =>
-        fromPromise(generateTaskTitle(draft.prompt)).andThen((title) =>
+      .andThen(({ draft, openCodeConfig }) =>
+        fromPromise(generateTaskTitle(draft.prompt, openCodeConfig)).andThen((title) =>
           fromPromise(
             insertTask({
               branchName: draft.sourceBranch,
               createdByUserId: input.userId,
               envVars: draft.envVars ? JSON.stringify(draft.envVars) : null,
               id: draft.id,
+              opencodeModel: openCodeConfig.model,
+              opencodeProviderId: openCodeConfig.selectedProviderId,
               projectId: input.projectId,
               prompt: draft.prompt,
               repoId: draft.repoId,
@@ -377,6 +417,7 @@ export namespace Project {
       });
 
   export const createTaskDraftForUser = (input: {
+    providerId?: string | null;
     projectId: string;
     prompt: string;
     sourceBranch: string;
@@ -384,24 +425,33 @@ export namespace Project {
   }): ResultAsync<{ messageId: string; task: TaskRecord }, Error> =>
     requireUserProject(input.projectId, input.userId)
       .andThen((value) =>
+        resolveTaskOpenCodeConfig(input.userId, input.providerId ?? null).map((openCodeConfig) => ({
+          openCodeConfig,
+          project: value,
+        })),
+      )
+      .andThen(({ openCodeConfig, project }) =>
         Sandbox.startTask(
           {
-            envVars: serializeProjectEnvEntries(parseStoredProjectEnvEntries(value.envVars)),
+            envVars: serializeProjectEnvEntries(parseStoredProjectEnvEntries(project.envVars)),
+            openCodeConfig,
             prompt: input.prompt,
-            repoId: value.repoId,
+            repoId: project.repoId,
             sourceBranch: input.sourceBranch,
           },
           input.userId,
-        ),
+        ).map((draft) => ({ draft, openCodeConfig })),
       )
-      .andThen((draft) =>
-        fromPromise(generateTaskTitle(draft.prompt)).andThen((title) =>
+      .andThen(({ draft, openCodeConfig }) =>
+        fromPromise(generateTaskTitle(draft.prompt, openCodeConfig)).andThen((title) =>
           fromPromise(
             insertTask({
               branchName: draft.sourceBranch,
               createdByUserId: input.userId,
               envVars: draft.envVars ? JSON.stringify(draft.envVars) : null,
               id: draft.id,
+              opencodeModel: openCodeConfig.model,
+              opencodeProviderId: openCodeConfig.selectedProviderId,
               projectId: input.projectId,
               prompt: draft.prompt,
               repoId: draft.repoId,
@@ -460,7 +510,8 @@ export namespace Project {
               branchName,
               envVars: draft.envVars ? JSON.stringify(draft.envVars) : null,
               id: draft.id,
-              opencodeModel: input.model ?? null,
+              opencodeModel: input.model ?? parentTask.opencodeModel ?? null,
+              opencodeProviderId: parentTask.opencodeProviderId ?? null,
               parentTaskId: input.parentTaskId,
               projectId: parentTask.projectId,
               prompt: input.prompt,

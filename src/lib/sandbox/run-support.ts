@@ -369,6 +369,7 @@ export const buildOpenCodeEnvironment = (input: {
   githubToken: string;
   model: string;
   providerId: string;
+  providerName: string;
   projectEnvVars?: Record<string, string>;
   repoFullName: string;
   sandboxPath: string;
@@ -383,6 +384,8 @@ export const buildOpenCodeEnvironment = (input: {
       baseUrl: input.baseUrl,
       model: input.model,
       providerId: input.providerId,
+      providerName: input.providerName,
+      selectedProviderId: null,
     }),
     "utf8",
   ).toString("base64"),

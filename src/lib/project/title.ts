@@ -1,5 +1,10 @@
 import "@tanstack/react-start/server-only";
-import { ensureOpenCodeConfig, getProviderScopedModelId } from "@/lib/opencode/config";
+import {
+  type OpenCodeConfig,
+  ensureOpenCodeConfig,
+  getOpenCodeChatCompletionsEndpoint,
+  getProviderScopedModelId,
+} from "@/lib/opencode/config";
 
 import { buildTaskTitle } from "./shared";
 
@@ -20,16 +25,16 @@ const normalizeGeneratedTaskTitle = (value: string) => {
   return normalized.slice(0, TASK_TITLE_MAX_LENGTH).trim() || null;
 };
 
-export const generateTaskTitle = async (prompt: string) => {
+export const generateTaskTitle = async (prompt: string, openCodeConfig?: OpenCodeConfig) => {
   const fallbackTitle = buildTaskTitle(prompt);
 
   try {
-    const config = ensureOpenCodeConfig();
+    const config = openCodeConfig ?? ensureOpenCodeConfig();
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), TASK_TITLE_TIMEOUT_MS);
 
     try {
-      const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      const response = await fetch(getOpenCodeChatCompletionsEndpoint(config), {
         method: "POST",
         signal: controller.signal,
         headers: {
@@ -53,7 +58,7 @@ export const generateTaskTitle = async (prompt: string) => {
               content: prompt.trim(),
             },
           ],
-          model: getProviderScopedModelId(config.model),
+          model: getProviderScopedModelId(config.model, config.providerId),
           temperature: 0.3,
         }),
       });

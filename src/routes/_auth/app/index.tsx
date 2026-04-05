@@ -9,6 +9,10 @@ import { useSetHeaderSlots } from "@/components/app/header-portal";
 import { BranchSelector } from "@/components/app/home/branch-selector";
 import { CreateProjectDialog } from "@/components/app/home/create-project-dialog";
 import { ProjectSelector } from "@/components/app/home/project-selector";
+import {
+  ProviderSelector,
+  SERVER_DEFAULT_PROVIDER_VALUE,
+} from "@/components/app/home/provider-selector";
 import { RunningTasksPanel } from "@/components/app/home/running-tasks-panel";
 import { PromptComposer } from "@/components/app/prompt-composer";
 import { githubBranchesQueryOptions, githubReposQueryOptions } from "@/lib/github/queries";
@@ -20,6 +24,7 @@ import {
   type TaskSummaryResult,
   taskKeys,
 } from "@/lib/project/queries";
+import { userLlmProvidersQueryOptions } from "@/lib/user/queries";
 
 type PendingAttachment = {
   file: File;
@@ -80,6 +85,7 @@ function AppHome() {
   const [createProjectRepoId, setCreateProjectRepoId] = useState("");
   const [createProjectName, setCreateProjectName] = useState("");
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
+  const [selectedProviderId, setSelectedProviderId] = useState<string | null>(null);
 
   const currentProjectId = search.projectId ?? "";
   const recentTasksQuery = useQuery({
@@ -113,8 +119,16 @@ function AppHome() {
     ...githubReposQueryOptions(user.id),
     enabled: createProjectOpen,
   });
+  const providerQuery = useQuery(userLlmProvidersQueryOptions());
   const repos = createProjectRepoQuery.data ?? [];
   const createProjectRepo = repos.find((repo) => repo.id === createProjectRepoId) ?? null;
+  const providers = providerQuery.data ?? [];
+  const defaultProviderId =
+    providers.find((provider) => provider.isDefault)?.id ?? SERVER_DEFAULT_PROVIDER_VALUE;
+  const effectiveProviderId =
+    selectedProviderId && providers.some((provider) => provider.id === selectedProviderId)
+      ? selectedProviderId
+      : defaultProviderId;
 
   const runningTasks = (recentTasksQuery.data ?? []).filter(
     (task) => task.status === "queued" || task.status === "running" || task.hasActiveChildren,
@@ -151,7 +165,12 @@ function AppHome() {
   });
 
   const taskMutation = useMutation({
-    mutationFn: async (data: { attachments: File[]; prompt: string; sourceBranch: string }) => {
+    mutationFn: async (data: {
+      attachments: File[];
+      prompt: string;
+      providerId: string | null;
+      sourceBranch: string;
+    }) => {
       if (!currentProject) {
         throw new Error("Select a project first.");
       }
@@ -160,6 +179,9 @@ function AppHome() {
       formData.set("projectId", currentProject.id);
       formData.set("prompt", data.prompt);
       formData.set("sourceBranch", data.sourceBranch);
+      if (data.providerId) {
+        formData.set("providerId", data.providerId);
+      }
 
       for (const file of data.attachments) {
         formData.append("attachments", file);
@@ -235,6 +257,8 @@ function AppHome() {
     taskMutation.mutate({
       attachments: attachments.map((attachment) => attachment.file),
       prompt: inputValue.trim(),
+      providerId:
+        effectiveProviderId === SERVER_DEFAULT_PROVIDER_VALUE ? null : effectiveProviderId,
       sourceBranch: currentBranch,
     });
   };
@@ -292,6 +316,13 @@ function AppHome() {
                 disabled={!currentProject}
                 isPending={branchesQuery.isPending}
                 onSelectBranch={handleSelectBranch}
+              />
+              <ProviderSelector
+                currentProviderId={effectiveProviderId}
+                disabled={taskMutation.isPending}
+                isPending={providerQuery.isPending}
+                onSelectProvider={setSelectedProviderId}
+                providers={providers}
               />
             </>
           }

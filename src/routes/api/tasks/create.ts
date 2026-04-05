@@ -32,6 +32,7 @@ export const Route = createFileRoute("/api/tasks/create")({
           const formData = await request.formData();
           const projectId = getFormString(formData, "projectId");
           const prompt = getFormString(formData, "prompt");
+          const providerId = getFormString(formData, "providerId");
           const sourceBranch = getFormString(formData, "sourceBranch");
           const files = collectTaskAttachmentFiles(formData);
 
@@ -51,6 +52,7 @@ export const Route = createFileRoute("/api/tasks/create")({
 
           const draft = await unwrap(
             Project.createTaskDraftForUser({
+              providerId: providerId || null,
               projectId,
               prompt,
               sourceBranch,

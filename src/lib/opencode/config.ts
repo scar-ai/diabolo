@@ -3,14 +3,25 @@ import { env } from "@/env/server";
 
 const DEFAULT_OPENCODE_PROVIDER_ID = "openrouter";
 const DEFAULT_OPENCODE_MODEL = "openrouter/openai/gpt-5-codex";
-const CUSTOM_OPENCODE_PROVIDER_ID = "user-provider";
-const CUSTOM_OPENCODE_PROVIDER_NAME = "User Provider";
+const DEFAULT_OPENCODE_NAME = "OpenRouter";
 const CUSTOM_OPENCODE_PROVIDER_PACKAGE = "@ai-sdk/openai-compatible";
 const CUSTOM_OPENCODE_API_KEY_ENV_VAR = "OPENCODE_PROVIDER_API_KEY";
+const LEGACY_CUSTOM_PROVIDER_ID = "openai";
+const OPENROUTER_CHAT_COMPLETIONS_URL = "https://openrouter.ai/api/v1/chat/completions";
 
-type UserProviderSettings = {
+type LegacyUserProviderSettings = {
   providerApiKey?: string | null;
   providerBaseUrl?: string | null;
+  providerModel?: string | null;
+};
+
+type SavedUserProvider = {
+  id?: string | null;
+  isDefault?: boolean | null;
+  name?: string | null;
+  providerApiKey?: string | null;
+  providerBaseUrl?: string | null;
+  providerId?: string | null;
   providerModel?: string | null;
 };
 
@@ -20,12 +31,16 @@ export type OpenCodeConfig = {
   baseUrl: string | null;
   model: string;
   providerId: string;
+  providerName: string;
+  selectedProviderId: string | null;
 };
 
 const trimToNull = (value?: string | null) => {
   const trimmed = value?.trim();
   return trimmed ? trimmed : null;
 };
+
+const normalizeBaseUrl = (value: string) => value.replace(/\/+$/, "");
 
 export const getProviderScopedModelId = (
   model: string,
@@ -66,41 +81,86 @@ export const getConfiguredOpenCodeModel = () =>
     DEFAULT_OPENCODE_PROVIDER_ID,
   );
 
-export const resolveOpenCodeConfig = (
-  userProviderSettings?: UserProviderSettings,
+const buildSavedProviderConfig = (
+  provider: SavedUserProvider,
+  modelOverride?: string | null,
 ): OpenCodeConfig => {
-  const customBaseUrl = trimToNull(userProviderSettings?.providerBaseUrl);
-  const customModel = trimToNull(userProviderSettings?.providerModel);
-  const customApiKey = trimToNull(userProviderSettings?.providerApiKey);
-  const hasAnyCustomSetting = Boolean(customBaseUrl || customModel || customApiKey);
+  const providerId = trimToNull(provider.providerId);
+  const baseUrl = trimToNull(provider.providerBaseUrl);
+  const model = trimToNull(modelOverride ?? provider.providerModel);
+  const apiKey = trimToNull(provider.providerApiKey);
 
-  if (hasAnyCustomSetting) {
-    if (!customBaseUrl || !customModel || !customApiKey) {
-      throw new Error(
-        "Custom provider settings are incomplete. Set API Base URL, Model, and API Key, or clear all three fields to use the server default.",
-      );
-    }
-
-    return {
-      apiKey: customApiKey,
-      apiKeyEnvVar: CUSTOM_OPENCODE_API_KEY_ENV_VAR,
-      baseUrl: customBaseUrl,
-      model: normalizeOpenCodeModelForProvider(customModel, CUSTOM_OPENCODE_PROVIDER_ID),
-      providerId: CUSTOM_OPENCODE_PROVIDER_ID,
-    };
-  }
-
-  if (!env.OPENROUTER_API_KEY) {
-    throw new Error("OPENROUTER_API_KEY is not configured.");
+  if (!providerId || !baseUrl || !model || !apiKey) {
+    throw new Error(
+      "Selected provider is incomplete. Set Provider ID, API Base URL, Model, and API Key before starting a task.",
+    );
   }
 
   return {
-    apiKey: env.OPENROUTER_API_KEY,
-    apiKeyEnvVar: "OPENROUTER_API_KEY",
-    baseUrl: null,
-    model: getConfiguredOpenCodeModel(),
-    providerId: DEFAULT_OPENCODE_PROVIDER_ID,
+    apiKey,
+    apiKeyEnvVar: CUSTOM_OPENCODE_API_KEY_ENV_VAR,
+    baseUrl: normalizeBaseUrl(baseUrl),
+    model: normalizeOpenCodeModelForProvider(model, providerId),
+    providerId,
+    providerName: trimToNull(provider.name) || providerId,
+    selectedProviderId: provider.id ?? null,
   };
+};
+
+const buildLegacyCustomProviderConfig = (
+  legacySettings: LegacyUserProviderSettings,
+  modelOverride?: string | null,
+): OpenCodeConfig => {
+  const baseUrl = trimToNull(legacySettings.providerBaseUrl);
+  const model = trimToNull(modelOverride ?? legacySettings.providerModel);
+  const apiKey = trimToNull(legacySettings.providerApiKey);
+  const hasAnyCustomSetting = Boolean(baseUrl || model || apiKey);
+
+  if (!hasAnyCustomSetting) {
+    if (!env.OPENROUTER_API_KEY) {
+      throw new Error("OPENROUTER_API_KEY is not configured.");
+    }
+
+    return {
+      apiKey: env.OPENROUTER_API_KEY,
+      apiKeyEnvVar: "OPENROUTER_API_KEY",
+      baseUrl: null,
+      model: modelOverride?.trim()
+        ? normalizeOpenCodeModelForProvider(modelOverride, DEFAULT_OPENCODE_PROVIDER_ID)
+        : getConfiguredOpenCodeModel(),
+      providerId: DEFAULT_OPENCODE_PROVIDER_ID,
+      providerName: DEFAULT_OPENCODE_NAME,
+      selectedProviderId: null,
+    };
+  }
+
+  if (!baseUrl || !model || !apiKey) {
+    throw new Error(
+      "Custom provider settings are incomplete. Set API Base URL, Model, and API Key, or clear all three fields to use the server default.",
+    );
+  }
+
+  return {
+    apiKey,
+    apiKeyEnvVar: CUSTOM_OPENCODE_API_KEY_ENV_VAR,
+    baseUrl: normalizeBaseUrl(baseUrl),
+    model: normalizeOpenCodeModelForProvider(model, LEGACY_CUSTOM_PROVIDER_ID),
+    providerId: LEGACY_CUSTOM_PROVIDER_ID,
+    providerName: "Legacy Provider",
+    selectedProviderId: null,
+  };
+};
+
+export const resolveOpenCodeConfig = (input?: {
+  legacySettings?: LegacyUserProviderSettings | null;
+  model?: string | null;
+  provider?: SavedUserProvider | null;
+}): OpenCodeConfig => {
+  if (input?.provider) {
+    return buildSavedProviderConfig(input.provider, input.model);
+  }
+
+  return buildLegacyCustomProviderConfig(input?.legacySettings ?? {}, input?.model);
 };
 
 export const ensureOpenCodeConfig = () => resolveOpenCodeConfig();
@@ -124,7 +184,7 @@ export const buildOpenCodeConfigContent = (config: OpenCodeConfig) => {
             models: {
               [providerScopedModelId]: {},
             },
-            name: CUSTOM_OPENCODE_PROVIDER_NAME,
+            name: config.providerName,
             npm: CUSTOM_OPENCODE_PROVIDER_PACKAGE,
             options: {
               apiKey: `{env:${config.apiKeyEnvVar}}`,
@@ -149,3 +209,8 @@ export const buildOpenCodeConfigContent = (config: OpenCodeConfig) => {
 
   return JSON.stringify(output);
 };
+
+export const getOpenCodeChatCompletionsEndpoint = (config: OpenCodeConfig) =>
+  config.providerId === DEFAULT_OPENCODE_PROVIDER_ID
+    ? OPENROUTER_CHAT_COMPLETIONS_URL
+    : `${normalizeBaseUrl(config.baseUrl ?? "")}/chat/completions`;

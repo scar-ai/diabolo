@@ -89,10 +89,36 @@ export const userProviderSettings = pgTable(
   (table) => [index("user_provider_settings_user_id_idx").on(table.userId)],
 );
 
+export const userLlmProvider = pgTable(
+  "user_llm_provider",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    providerId: text("provider_id").notNull(),
+    providerBaseUrl: text("provider_base_url").notNull(),
+    providerModel: text("provider_model").notNull(),
+    providerApiKey: text("provider_api_key").notNull(),
+    isDefault: boolean("is_default").default(false).notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at")
+      .defaultNow()
+      .$onUpdate(() => /* @__PURE__ */ new Date())
+      .notNull(),
+  },
+  (table) => [
+    index("user_llm_provider_user_id_idx").on(table.userId),
+    index("user_llm_provider_user_id_is_default_idx").on(table.userId, table.isDefault),
+  ],
+);
+
 export const userRelations = relations(user, ({ many }) => ({
   sessions: many(session),
   accounts: many(account),
   scheduledTasks: many(scheduledTask),
+  llmProviders: many(userLlmProvider),
   providerSettings: many(userProviderSettings),
 }));
 
@@ -113,6 +139,13 @@ export const accountRelations = relations(account, ({ one }) => ({
 export const userProviderSettingsRelations = relations(userProviderSettings, ({ one }) => ({
   user: one(user, {
     fields: [userProviderSettings.userId],
+    references: [user.id],
+  }),
+}));
+
+export const userLlmProviderRelations = relations(userLlmProvider, ({ one }) => ({
+  user: one(user, {
+    fields: [userLlmProvider.userId],
     references: [user.id],
   }),
 }));

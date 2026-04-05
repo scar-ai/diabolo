@@ -48,6 +48,7 @@ const searchSkillsInputSchema = z.object({
 });
 
 const createTaskInputSchema = z.object({
+  providerId: z.string().min(1).nullable().optional(),
   projectId: z.string().min(1),
   prompt: z.string().min(10),
   sourceBranch: z.string().min(1),

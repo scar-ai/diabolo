@@ -140,6 +140,7 @@ export const insertTask = (input: {
   envVars?: string | null;
   id: string;
   opencodeModel?: string | null;
+  opencodeProviderId?: string | null;
   parentTaskId?: string | null;
   projectId: string;
   prompt: string;

@@ -134,6 +134,13 @@
       "when": 1775137215005,
       "tag": "0018_gray_leader",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1775413383699,
+      "tag": "0020_blushing_blonde_phantom",
+      "breakpoints": true
     }
   ]
 }

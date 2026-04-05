@@ -3,6 +3,7 @@ import { ResultAsync } from "neverthrow";
 
 import { Github } from "@/lib/github";
 import { Log } from "@/lib/log";
+import type { OpenCodeConfig } from "@/lib/opencode/config";
 import { ensureOpenCodeConfig } from "@/lib/opencode/config";
 import { createSpawnTaskToken, getSpawnTaskEndpoint } from "@/lib/opencode/spawn-task";
 import { fromPromise, toError } from "@/lib/result";
@@ -22,6 +23,7 @@ const makeJobId = () => `tk-${crypto.randomUUID()}`;
 export namespace Sandbox {
   export type TaskInput = {
     envVars?: Record<string, string>;
+    openCodeConfig?: OpenCodeConfig;
     prompt: string;
     repoId: string;
     sourceBranch: string;
@@ -111,7 +113,9 @@ export namespace Sandbox {
           },
         );
 
-        ensureOpenCodeConfig();
+        if (!input.openCodeConfig) {
+          ensureOpenCodeConfig();
+        }
 
         if (!repo) {
           throw new Error("Unknown repository selection.");
