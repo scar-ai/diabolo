@@ -75,10 +75,25 @@ export const verification = pgTable(
   (table) => [index("verification_identifier_idx").on(table.identifier)],
 );
 
+export const userProviderSettings = pgTable(
+  "user_provider_settings",
+  {
+    userId: text("user_id")
+      .primaryKey()
+      .references(() => user.id, { onDelete: "cascade" }),
+    providerBaseUrl: text("provider_base_url"),
+    providerModel: text("provider_model"),
+    providerApiKey: text("provider_api_key"),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => [index("user_provider_settings_user_id_idx").on(table.userId)],
+);
+
 export const userRelations = relations(user, ({ many }) => ({
   sessions: many(session),
   accounts: many(account),
   scheduledTasks: many(scheduledTask),
+  providerSettings: many(userProviderSettings),
 }));
 
 export const sessionRelations = relations(session, ({ one }) => ({
@@ -91,6 +106,13 @@ export const sessionRelations = relations(session, ({ one }) => ({
 export const accountRelations = relations(account, ({ one }) => ({
   user: one(user, {
     fields: [account.userId],
+    references: [user.id],
+  }),
+}));
+
+export const userProviderSettingsRelations = relations(userProviderSettings, ({ one }) => ({
+  user: one(user, {
+    fields: [userProviderSettings.userId],
     references: [user.id],
   }),
 }));

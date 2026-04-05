@@ -20,6 +20,7 @@ import { Route as AuthAppIndexRouteImport } from './routes/_auth/app/index'
 import { Route as ApiTasksCreateRouteImport } from './routes/api/tasks/create'
 import { Route as ApiOpencodeSpawnTaskRouteImport } from './routes/api/opencode/spawn-task'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
+import { Route as AuthAppSettingsRouteImport } from './routes/_auth/app/settings'
 import { Route as AuthAppSessionsRouteImport } from './routes/_auth/app/sessions'
 import { Route as AuthAppProjectsRouteImport } from './routes/_auth/app/projects'
 import { Route as AuthAppOrganisationRouteImport } from './routes/_auth/app/organisation'
@@ -81,6 +82,11 @@ const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   path: '/api/auth/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AuthAppSettingsRoute = AuthAppSettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => AuthAppRouteRoute,
+} as any)
 const AuthAppSessionsRoute = AuthAppSessionsRouteImport.update({
   id: '/sessions',
   path: '/sessions',
@@ -127,6 +133,7 @@ export interface FileRoutesByFullPath {
   '/app/organisation': typeof AuthAppOrganisationRoute
   '/app/projects': typeof AuthAppProjectsRoute
   '/app/sessions': typeof AuthAppSessionsRoute
+  '/app/settings': typeof AuthAppSettingsRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/opencode/spawn-task': typeof ApiOpencodeSpawnTaskRoute
   '/api/tasks/create': typeof ApiTasksCreateRoute
@@ -144,6 +151,7 @@ export interface FileRoutesByTo {
   '/app/organisation': typeof AuthAppOrganisationRoute
   '/app/projects': typeof AuthAppProjectsRoute
   '/app/sessions': typeof AuthAppSessionsRoute
+  '/app/settings': typeof AuthAppSettingsRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/opencode/spawn-task': typeof ApiOpencodeSpawnTaskRoute
   '/api/tasks/create': typeof ApiTasksCreateRoute
@@ -165,6 +173,7 @@ export interface FileRoutesById {
   '/_auth/app/organisation': typeof AuthAppOrganisationRoute
   '/_auth/app/projects': typeof AuthAppProjectsRoute
   '/_auth/app/sessions': typeof AuthAppSessionsRoute
+  '/_auth/app/settings': typeof AuthAppSettingsRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/opencode/spawn-task': typeof ApiOpencodeSpawnTaskRoute
   '/api/tasks/create': typeof ApiTasksCreateRoute
@@ -185,6 +194,7 @@ export interface FileRouteTypes {
     | '/app/organisation'
     | '/app/projects'
     | '/app/sessions'
+    | '/app/settings'
     | '/api/auth/$'
     | '/api/opencode/spawn-task'
     | '/api/tasks/create'
@@ -202,6 +212,7 @@ export interface FileRouteTypes {
     | '/app/organisation'
     | '/app/projects'
     | '/app/sessions'
+    | '/app/settings'
     | '/api/auth/$'
     | '/api/opencode/spawn-task'
     | '/api/tasks/create'
@@ -222,6 +233,7 @@ export interface FileRouteTypes {
     | '/_auth/app/organisation'
     | '/_auth/app/projects'
     | '/_auth/app/sessions'
+    | '/_auth/app/settings'
     | '/api/auth/$'
     | '/api/opencode/spawn-task'
     | '/api/tasks/create'
@@ -324,6 +336,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAuthSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_auth/app/settings': {
+      id: '/_auth/app/settings'
+      path: '/settings'
+      fullPath: '/app/settings'
+      preLoaderRoute: typeof AuthAppSettingsRouteImport
+      parentRoute: typeof AuthAppRouteRoute
+    }
     '/_auth/app/sessions': {
       id: '/_auth/app/sessions'
       path: '/sessions'
@@ -380,6 +399,7 @@ interface AuthAppRouteRouteChildren {
   AuthAppOrganisationRoute: typeof AuthAppOrganisationRoute
   AuthAppProjectsRoute: typeof AuthAppProjectsRoute
   AuthAppSessionsRoute: typeof AuthAppSessionsRoute
+  AuthAppSettingsRoute: typeof AuthAppSettingsRoute
   AuthAppIndexRoute: typeof AuthAppIndexRoute
   AuthAppTasksTaskIdRoute: typeof AuthAppTasksTaskIdRoute
 }
@@ -388,6 +408,7 @@ const AuthAppRouteRouteChildren: AuthAppRouteRouteChildren = {
   AuthAppOrganisationRoute: AuthAppOrganisationRoute,
   AuthAppProjectsRoute: AuthAppProjectsRoute,
   AuthAppSessionsRoute: AuthAppSessionsRoute,
+  AuthAppSettingsRoute: AuthAppSettingsRoute,
   AuthAppIndexRoute: AuthAppIndexRoute,
   AuthAppTasksTaskIdRoute: AuthAppTasksTaskIdRoute,
 }

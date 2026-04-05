@@ -363,18 +363,27 @@ export const syncGitHandoffState = async (input: {
 
 export const buildOpenCodeEnvironment = (input: {
   apiKey: string;
+  apiKeyEnvVar: string;
+  baseUrl: string | null;
   defaultBranch: string;
   githubToken: string;
   model: string;
+  providerId: string;
   projectEnvVars?: Record<string, string>;
   repoFullName: string;
   sandboxPath: string;
   taskId: string;
   viewer: { email: string; name: string };
 }) => ({
-  OPENROUTER_API_KEY: input.apiKey,
+  [input.apiKeyEnvVar]: input.apiKey,
   OPENCODE_CONFIG_CONTENT_B64: Buffer.from(
-    buildOpenCodeConfigContent(input.model),
+    buildOpenCodeConfigContent({
+      apiKey: input.apiKey,
+      apiKeyEnvVar: input.apiKeyEnvVar,
+      baseUrl: input.baseUrl,
+      model: input.model,
+      providerId: input.providerId,
+    }),
     "utf8",
   ).toString("base64"),
   OPENCODE_GITHUB_DEFAULT_BRANCH: input.defaultBranch,

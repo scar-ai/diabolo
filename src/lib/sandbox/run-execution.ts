@@ -1,7 +1,7 @@
 import path from "node:path";
 
 import { Github } from "@/lib/github";
-import { ensureOpenCodeConfig } from "@/lib/opencode/config";
+import { normalizeOpenCodeModelForProvider, resolveOpenCodeConfig } from "@/lib/opencode/config";
 import { findTaskWithProject } from "@/lib/project/data";
 import { parseStoredProjectSkills } from "@/lib/project/skills";
 import { Sandbox } from "@/lib/sandbox";
@@ -19,6 +19,7 @@ import {
   resolveTaskAttachmentPath,
   TASK_ATTACHMENT_ARTIFACT_TYPE,
 } from "@/lib/task-attachments";
+import { findUserProviderSettings } from "@/lib/user/data";
 
 import {
   assertTaskNotCancelled,
@@ -106,6 +107,7 @@ const loadTaskExecutionContext = async (taskId: string, messageId: string) => {
     unwrapResult(Github.getViewerForUser(executionUserId)),
     unwrapResult(Github.getAuthenticatedRemoteUrlForUser(taskRecord.repoId ?? "", executionUserId)),
   ]);
+  const userProviderSettings = await findUserProviderSettings(executionUserId);
 
   if (!repo) {
     throw new Error("Unknown repository selection.");
@@ -119,6 +121,7 @@ const loadTaskExecutionContext = async (taskId: string, messageId: string) => {
     taskProjectSkills: parseStoredProjectSkills(taskWithProject.project.agentSkills),
     taskProjectEnvVars: getTaskProjectEnvVars(taskRecord.envVars),
     taskRecord,
+    userProviderSettings,
     viewer,
   };
 };
@@ -135,9 +138,12 @@ const runOpenCodeMessage = async (input: {
   viewer: Viewer;
   githubAccessToken: string;
   messagePrompt: string;
+  userProviderSettings: Awaited<ReturnType<typeof findUserProviderSettings>>;
 }) => {
-  const openCode = ensureOpenCodeConfig();
-  const model = input.taskRecord?.opencodeModel?.trim() || openCode.model;
+  const openCode = resolveOpenCodeConfig(input.userProviderSettings ?? undefined);
+  const model = input.taskRecord?.opencodeModel?.trim()
+    ? normalizeOpenCodeModelForProvider(input.taskRecord.opencodeModel, openCode.providerId)
+    : openCode.model;
   const attachments = await prepareMessageAttachments({
     messageId: input.messageId,
     prepared: input.prepared,
@@ -156,9 +162,12 @@ const runOpenCodeMessage = async (input: {
     input.prepared.sandboxPath,
     buildOpenCodeEnvironment({
       apiKey: openCode.apiKey,
+      apiKeyEnvVar: openCode.apiKeyEnvVar,
+      baseUrl: openCode.baseUrl,
       defaultBranch: input.repo.defaultBranch,
       githubToken: input.githubAccessToken,
       model,
+      providerId: openCode.providerId,
       projectEnvVars: input.taskProjectEnvVars,
       repoFullName: input.repo.fullName,
       sandboxPath: input.prepared.sandboxPath,
@@ -248,6 +257,7 @@ export const runInitialMessage = async (taskId: string, messageId: string) => {
     taskId,
     taskProjectEnvVars: context.taskProjectEnvVars,
     taskRecord: context.taskRecord,
+    userProviderSettings: context.userProviderSettings,
     viewer: context.viewer,
   });
 };
@@ -305,6 +315,7 @@ export const runFollowUpMessage = async (taskId: string, messageId: string) => {
     taskId,
     taskProjectEnvVars: context.taskProjectEnvVars,
     taskRecord: context.taskRecord,
+    userProviderSettings: context.userProviderSettings,
     viewer: context.viewer,
   });
 };

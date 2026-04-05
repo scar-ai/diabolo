@@ -1,6 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link, Outlet, useRouter, useRouterState } from "@tanstack/react-router";
-import { BuildingIcon, HistoryIcon, HouseIcon, LogOutIcon } from "lucide-react";
+import { BuildingIcon, HistoryIcon, HouseIcon, LogOutIcon, SettingsIcon } from "lucide-react";
 
 import { AttachmentDropProvider } from "@/components/app/attachment-drop";
 import { HeaderPortalProvider, useHeaderSlots } from "@/components/app/header-portal";
@@ -10,6 +10,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import authClient from "@/lib/auth/auth-client";
@@ -122,6 +123,11 @@ function AppLayoutInner() {
               </Avatar>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => router.navigate({ to: "/app/settings" })}>
+                <SettingsIcon />
+                Settings
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
               <DropdownMenuItem
                 variant="destructive"
                 onClick={async () => {
