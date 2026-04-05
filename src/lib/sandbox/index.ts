@@ -4,7 +4,6 @@ import { ResultAsync } from "neverthrow";
 import { Github } from "@/lib/github";
 import { Log } from "@/lib/log";
 import type { OpenCodeConfig } from "@/lib/opencode/config";
-import { ensureOpenCodeConfig } from "@/lib/opencode/config";
 import { createSpawnTaskToken, getSpawnTaskEndpoint } from "@/lib/opencode/spawn-task";
 import { fromPromise, toError } from "@/lib/result";
 import { getSandboxProvider } from "@/lib/sandbox/daytona-provider";
@@ -114,7 +113,7 @@ export namespace Sandbox {
         );
 
         if (!input.openCodeConfig) {
-          ensureOpenCodeConfig();
+          throw new Error("OpenCode provider configuration is required.");
         }
 
         if (!repo) {

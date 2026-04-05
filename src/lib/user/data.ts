@@ -1,20 +1,37 @@
-import { asc, desc } from "drizzle-orm";
+import { and, asc, desc, eq, or } from "drizzle-orm";
 
 import { db } from "@/lib/db";
-import { userLlmProvider } from "@/lib/db/schema";
+import { organisationMember, userLlmProvider } from "@/lib/db/schema";
 
-export const findUserProviderSettings = (userId: string) =>
-  db.query.userProviderSettings.findFirst({
-    where: (table, { eq }) => eq(table.userId, userId),
+const getMembership = (userId: string) =>
+  db.query.organisationMember.findFirst({
+    where: eq(organisationMember.userId, userId),
   });
 
 export const listUserLlmProviders = (userId: string) =>
-  db.query.userLlmProvider.findMany({
-    orderBy: [desc(userLlmProvider.isDefault), asc(userLlmProvider.name), asc(userLlmProvider.id)],
-    where: (table, { eq }) => eq(table.userId, userId),
-  });
+  getMembership(userId).then((membership) =>
+    db.query.userLlmProvider.findMany({
+      orderBy: [
+        desc(userLlmProvider.isDefault),
+        asc(userLlmProvider.name),
+        asc(userLlmProvider.id),
+      ],
+      where: or(
+        eq(userLlmProvider.userId, userId),
+        membership ? eq(userLlmProvider.orgId, membership.orgId) : undefined,
+      ),
+    }),
+  );
 
 export const findUserLlmProvider = (userId: string, providerId: string) =>
-  db.query.userLlmProvider.findFirst({
-    where: (table, { and, eq }) => and(eq(table.userId, userId), eq(table.id, providerId)),
-  });
+  getMembership(userId).then((membership) =>
+    db.query.userLlmProvider.findFirst({
+      where: and(
+        eq(userLlmProvider.id, providerId),
+        or(
+          eq(userLlmProvider.userId, userId),
+          membership ? eq(userLlmProvider.orgId, membership.orgId) : undefined,
+        ),
+      ),
+    }),
+  );

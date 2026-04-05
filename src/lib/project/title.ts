@@ -1,7 +1,6 @@
 import "@tanstack/react-start/server-only";
 import {
   type OpenCodeConfig,
-  ensureOpenCodeConfig,
   getOpenCodeChatCompletionsEndpoint,
   getProviderScopedModelId,
 } from "@/lib/opencode/config";
@@ -25,11 +24,11 @@ const normalizeGeneratedTaskTitle = (value: string) => {
   return normalized.slice(0, TASK_TITLE_MAX_LENGTH).trim() || null;
 };
 
-export const generateTaskTitle = async (prompt: string, openCodeConfig?: OpenCodeConfig) => {
+export const generateTaskTitle = async (prompt: string, openCodeConfig: OpenCodeConfig) => {
   const fallbackTitle = buildTaskTitle(prompt);
 
   try {
-    const config = openCodeConfig ?? ensureOpenCodeConfig();
+    const config = openCodeConfig;
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), TASK_TITLE_TIMEOUT_MS);
 

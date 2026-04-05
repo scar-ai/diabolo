@@ -1,12 +1,6 @@
 import { queryOptions } from "@tanstack/react-query";
 
-import { $getUserProviderSettings, $listUserLlmProviders } from "./functions";
-
-export const userProviderSettingsQueryOptions = () =>
-  queryOptions({
-    queryKey: ["user-provider-settings"],
-    queryFn: () => $getUserProviderSettings(),
-  });
+import { $listUserLlmProviders } from "./functions";
 
 export const userLlmProvidersQueryOptions = () =>
   queryOptions({

@@ -37,6 +37,7 @@ function AppLayoutInner() {
   const initials = (user.name ?? user.email ?? "?").slice(0, 1).toUpperCase();
   const headerSlots = useHeaderSlots();
   const isMainNav = location === "/app/projects" || location === "/app/organisation";
+  const isSettingsPage = location === "/app/settings";
   const isSessionsActive = location === "/app/sessions" || location.startsWith("/app/tasks/");
   const projectIdForNav = headerSlots.projectId ?? undefined;
   const sharedSearch = projectIdForNav ? { projectId: projectIdForNav } : {};
@@ -56,7 +57,7 @@ function AppLayoutInner() {
           {headerSlots.left}
         </div>
 
-        {isMainNav ? (
+        {isSettingsPage ? null : isMainNav ? (
           <nav className="absolute left-1/2 flex -translate-x-1/2 items-center gap-x-0.5 rounded-lg bg-muted p-0.5">
             <Link
               to="/app/projects"
@@ -108,12 +109,14 @@ function AppLayoutInner() {
         )}
 
         <div className="flex items-center gap-2">
-          <ProjectSettingsDialog
-            currentUserId={user.id}
-            disabled={!headerSlots.projectId}
-            projectId={headerSlots.projectId}
-            projectName={headerSlots.projectName}
-          />
+          {headerSlots.projectId ? (
+            <ProjectSettingsDialog
+              currentUserId={user.id}
+              disabled={false}
+              projectId={headerSlots.projectId}
+              projectName={headerSlots.projectName}
+            />
+          ) : null}
           {headerSlots.right}
           <DropdownMenu>
             <DropdownMenuTrigger className="rounded-full">

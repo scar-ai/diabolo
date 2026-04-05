@@ -33,6 +33,8 @@ import {
 import { myInvitesQueryOptions, myOrgQueryOptions, orgKeys } from "@/lib/org/queries";
 import { $acceptProjectInvite, $declineProjectInvite } from "@/lib/project/functions";
 import { collaboratorKeys, myProjectInvitesQueryOptions } from "@/lib/project/queries";
+import { $saveUserLlmProviders } from "@/lib/user/functions";
+import { userLlmProvidersQueryOptions } from "@/lib/user/queries";
 
 export const Route = createFileRoute("/_auth/app/organisation")({
   loader: async ({ context }) => {
@@ -91,17 +93,25 @@ function OrganisationPage() {
 
   const acceptProjectInvite = useServerFn($acceptProjectInvite);
   const declineProjectInvite = useServerFn($declineProjectInvite);
+  const saveProviders = useServerFn($saveUserLlmProviders);
 
   const orgQuery = useQuery(myOrgQueryOptions(user.id));
   const invitesQuery = useQuery(myInvitesQueryOptions(user.id));
   const projectInvitesQuery = useQuery(myProjectInvitesQueryOptions(user.id));
+  const providersQuery = useQuery(userLlmProvidersQueryOptions());
 
   const org = orgQuery.data ?? null;
   const invites = invitesQuery.data ?? [];
   const projectInvites = projectInvitesQuery.data ?? [];
+  const organisationProviders = (providersQuery.data ?? []).filter(
+    (provider) => provider.scope === "organisation",
+  );
+  const isProvidersLoading = providersQuery.isPending && !providersQuery.isFetched;
 
   const [createOrgName, setCreateOrgName] = useState("");
   const [inviteUsername, setInviteUsername] = useState("");
+  const [draftProviders, setDraftProviders] = useState<typeof organisationProviders | null>(null);
+  const providerDrafts = draftProviders ?? organisationProviders;
 
   const createOrgMutation = useMutation({
     mutationFn: () => createOrg({ data: { name: createOrgName.trim() } }),
@@ -206,6 +216,64 @@ function OrganisationPage() {
       toast.error(error instanceof Error ? error.message : "Failed to promote member.");
     },
   });
+
+  const saveProvidersMutation = useMutation({
+    mutationFn: () =>
+      saveProviders({
+        data: {
+          providers: providerDrafts.map((provider) => ({
+            ...provider,
+            scope: "organisation" as const,
+          })),
+        },
+      }),
+    onSuccess: async () => {
+      setDraftProviders(null);
+      await queryClient.invalidateQueries(userLlmProvidersQueryOptions());
+      toast.success("Organisation providers saved.");
+    },
+    onError: (error) => {
+      toast.error(
+        error instanceof Error ? error.message : "Failed to save organisation providers.",
+      );
+    },
+  });
+
+  const updateProvider = (providerId: string, patch: Partial<(typeof providerDrafts)[number]>) => {
+    setDraftProviders((current) => {
+      const source = current ?? organisationProviders;
+      return source.map((provider) =>
+        provider.id === providerId ? { ...provider, ...patch } : provider,
+      );
+    });
+  };
+
+  const addProvider = () => {
+    setDraftProviders((current) => {
+      const source = current ?? organisationProviders;
+      return [
+        ...source,
+        {
+          canManage: true,
+          id: crypto.randomUUID(),
+          isDefault: false,
+          name: `Organisation provider ${source.length + 1}`,
+          providerApiKey: "",
+          providerBaseUrl: "https://api.openai.com/v1",
+          providerId: "openai",
+          providerModel: "",
+          scope: "organisation",
+        },
+      ];
+    });
+  };
+
+  const removeProvider = (providerId: string) => {
+    setDraftProviders((current) => {
+      const source = current ?? organisationProviders;
+      return source.filter((provider) => provider.id !== providerId);
+    });
+  };
 
   if (orgQuery.isPending || invitesQuery.isPending || projectInvitesQuery.isPending) {
     return (
@@ -324,6 +392,150 @@ function OrganisationPage() {
                       </Button>
                     </div>
                   ))}
+                </div>
+              </FramePanel>
+            </Frame>
+          )}
+
+          {isOwner && (
+            <Frame>
+              <FramePanel className="p-6">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <h2 className="text-sm font-semibold text-foreground">
+                      Organisation providers
+                    </h2>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      Providers added here are available to every member of {org.name}.
+                    </p>
+                  </div>
+                  <Button onClick={addProvider}>
+                    <PlusIcon aria-hidden="true" />
+                    Add provider
+                  </Button>
+                </div>
+
+                <div className="mt-6 space-y-4">
+                  {isProvidersLoading && providerDrafts.length === 0 ? (
+                    <div className="rounded-xl border border-border/60 bg-card px-4 py-5 text-sm text-muted-foreground">
+                      Loading organisation providers...
+                    </div>
+                  ) : null}
+
+                  {!isProvidersLoading && providerDrafts.length === 0 ? (
+                    <div className="rounded-xl border border-dashed border-border/70 bg-card/60 px-4 py-5 text-sm text-muted-foreground">
+                      No organisation providers yet.
+                    </div>
+                  ) : null}
+
+                  {providerDrafts.map((provider) => (
+                    <section
+                      key={provider.id}
+                      className="rounded-2xl border border-border/70 bg-card px-5 py-5 shadow-xs"
+                    >
+                      <div className="flex items-start justify-between gap-4">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <h3 className="text-base font-semibold">
+                              {provider.name || "Untitled provider"}
+                            </h3>
+                            <Badge variant="outline" className="text-xs">
+                              Organisation
+                            </Badge>
+                          </div>
+                          <p className="mt-1 text-sm text-muted-foreground">
+                            Every organisation member can select this provider from the composer.
+                          </p>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          onClick={() => removeProvider(provider.id)}
+                        >
+                          <XIcon className="size-4" />
+                          Remove
+                        </Button>
+                      </div>
+
+                      <div className="mt-5 grid gap-4 md:grid-cols-2">
+                        <div className="flex flex-col gap-1.5">
+                          <Label htmlFor={`org-provider-name-${provider.id}`}>Display name</Label>
+                          <Input
+                            id={`org-provider-name-${provider.id}`}
+                            value={provider.name}
+                            onChange={(event) =>
+                              updateProvider(provider.id, { name: event.target.value })
+                            }
+                            placeholder="OpenAI team"
+                          />
+                        </div>
+
+                        <div className="flex flex-col gap-1.5">
+                          <Label htmlFor={`org-provider-id-${provider.id}`}>Provider ID</Label>
+                          <Input
+                            id={`org-provider-id-${provider.id}`}
+                            value={provider.providerId}
+                            onChange={(event) =>
+                              updateProvider(provider.id, {
+                                providerId: event.target.value.trim().toLowerCase(),
+                              })
+                            }
+                            placeholder="openai"
+                          />
+                        </div>
+
+                        <div className="flex flex-col gap-1.5 md:col-span-2">
+                          <Label htmlFor={`org-provider-base-url-${provider.id}`}>
+                            API Base URL
+                          </Label>
+                          <Input
+                            id={`org-provider-base-url-${provider.id}`}
+                            value={provider.providerBaseUrl}
+                            onChange={(event) =>
+                              updateProvider(provider.id, {
+                                providerBaseUrl: event.target.value,
+                              })
+                            }
+                            placeholder="https://api.openai.com/v1"
+                          />
+                        </div>
+
+                        <div className="flex flex-col gap-1.5">
+                          <Label htmlFor={`org-provider-model-${provider.id}`}>Default model</Label>
+                          <Input
+                            id={`org-provider-model-${provider.id}`}
+                            value={provider.providerModel}
+                            onChange={(event) =>
+                              updateProvider(provider.id, { providerModel: event.target.value })
+                            }
+                            placeholder="gpt-4o"
+                          />
+                        </div>
+
+                        <div className="flex flex-col gap-1.5">
+                          <Label htmlFor={`org-provider-api-key-${provider.id}`}>API key</Label>
+                          <Input
+                            id={`org-provider-api-key-${provider.id}`}
+                            type="password"
+                            value={provider.providerApiKey}
+                            onChange={(event) =>
+                              updateProvider(provider.id, { providerApiKey: event.target.value })
+                            }
+                            placeholder="sk-..."
+                          />
+                        </div>
+                      </div>
+                    </section>
+                  ))}
+                </div>
+
+                <div className="mt-6 flex justify-end">
+                  <Button
+                    disabled={saveProvidersMutation.isPending || draftProviders === null}
+                    onClick={() => saveProvidersMutation.mutate()}
+                  >
+                    {saveProvidersMutation.isPending ? "Saving..." : "Save organisation providers"}
+                  </Button>
                 </div>
               </FramePanel>
             </Frame>

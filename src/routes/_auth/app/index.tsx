@@ -9,10 +9,7 @@ import { useSetHeaderSlots } from "@/components/app/header-portal";
 import { BranchSelector } from "@/components/app/home/branch-selector";
 import { CreateProjectDialog } from "@/components/app/home/create-project-dialog";
 import { ProjectSelector } from "@/components/app/home/project-selector";
-import {
-  ProviderSelector,
-  SERVER_DEFAULT_PROVIDER_VALUE,
-} from "@/components/app/home/provider-selector";
+import { ProviderSelector } from "@/components/app/home/provider-selector";
 import { RunningTasksPanel } from "@/components/app/home/running-tasks-panel";
 import { PromptComposer } from "@/components/app/prompt-composer";
 import { githubBranchesQueryOptions, githubReposQueryOptions } from "@/lib/github/queries";
@@ -123,8 +120,9 @@ function AppHome() {
   const repos = createProjectRepoQuery.data ?? [];
   const createProjectRepo = repos.find((repo) => repo.id === createProjectRepoId) ?? null;
   const providers = providerQuery.data ?? [];
+  const isProvidersLoading = providerQuery.isPending && !providerQuery.isFetched;
   const defaultProviderId =
-    providers.find((provider) => provider.isDefault)?.id ?? SERVER_DEFAULT_PROVIDER_VALUE;
+    providers.find((provider) => provider.isDefault)?.id ?? providers[0]?.id ?? null;
   const effectiveProviderId =
     selectedProviderId && providers.some((provider) => provider.id === selectedProviderId)
       ? selectedProviderId
@@ -168,7 +166,7 @@ function AppHome() {
     mutationFn: async (data: {
       attachments: File[];
       prompt: string;
-      providerId: string | null;
+      providerId: string;
       sourceBranch: string;
     }) => {
       if (!currentProject) {
@@ -178,10 +176,8 @@ function AppHome() {
       const formData = new FormData();
       formData.set("projectId", currentProject.id);
       formData.set("prompt", data.prompt);
+      formData.set("providerId", data.providerId);
       formData.set("sourceBranch", data.sourceBranch);
-      if (data.providerId) {
-        formData.set("providerId", data.providerId);
-      }
 
       for (const file of data.attachments) {
         formData.append("attachments", file);
@@ -202,8 +198,8 @@ function AppHome() {
 
       return payload;
     },
-    onSuccess: async (newTask) => {
-      await queryClient.invalidateQueries({ queryKey: taskKeys.all });
+    onSuccess: (newTask) => {
+      queryClient.invalidateQueries({ queryKey: taskKeys.all });
       toast.success("Background task started.");
       setInputValue("");
       setAttachments([]);
@@ -215,7 +211,10 @@ function AppHome() {
   });
 
   const canSubmit =
-    inputValue.trim().length >= 10 && Boolean(currentProjectId) && !taskMutation.isPending;
+    inputValue.trim().length >= 10 &&
+    Boolean(currentProjectId) &&
+    Boolean(effectiveProviderId) &&
+    !taskMutation.isPending;
 
   useEffect(() => {
     setHeaderSlots({
@@ -257,8 +256,7 @@ function AppHome() {
     taskMutation.mutate({
       attachments: attachments.map((attachment) => attachment.file),
       prompt: inputValue.trim(),
-      providerId:
-        effectiveProviderId === SERVER_DEFAULT_PROVIDER_VALUE ? null : effectiveProviderId,
+      providerId: effectiveProviderId,
       sourceBranch: currentBranch,
     });
   };
@@ -318,13 +316,18 @@ function AppHome() {
                 onSelectBranch={handleSelectBranch}
               />
               <ProviderSelector
-                currentProviderId={effectiveProviderId}
+                currentProviderId={effectiveProviderId ?? ""}
                 disabled={taskMutation.isPending}
-                isPending={providerQuery.isPending}
+                isPending={isProvidersLoading}
                 onSelectProvider={setSelectedProviderId}
                 providers={providers}
               />
             </>
+          }
+          note={
+            providers.length === 0
+              ? "Add a provider in Settings before starting a task."
+              : undefined
           }
         />
       </div>

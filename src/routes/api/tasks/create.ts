@@ -79,7 +79,7 @@ export const Route = createFileRoute("/api/tasks/create")({
             });
           }
 
-          await unwrap(Project.queueTaskMessageForTask(draft.task.id, draft.messageId, prompt));
+          void unwrap(Project.queueTaskMessageForTask(draft.task.id, draft.messageId, prompt));
 
           return Response.json(draft.task);
         } catch (error) {

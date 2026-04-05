@@ -2,6 +2,7 @@ import "@tanstack/react-start/server-only";
 import { CronExpressionParser } from "cron-parser";
 
 import { Log } from "@/lib/log";
+import { resolveOpenCodeConfig } from "@/lib/opencode/config";
 import {
   insertTask,
   listEnabledScheduledTasksWithProjects,
@@ -10,6 +11,7 @@ import {
 } from "@/lib/project/data";
 import { parseStoredProjectEnvEntries, serializeProjectEnvEntries } from "@/lib/project/env";
 import { Sandbox } from "@/lib/sandbox";
+import { listUserLlmProviders } from "@/lib/user/data";
 
 import { generateTaskTitle } from "./title";
 
@@ -93,9 +95,18 @@ const processDueScheduledTasks = async () => {
     const executionUserId = scheduledTask.createdByUserId ?? project.userId;
 
     try {
+      const providers = await listUserLlmProviders(executionUserId);
+      const openCodeProvider = providers.find((provider) => provider.isDefault) ?? providers[0];
+
+      if (!openCodeProvider) {
+        continue;
+      }
+
+      const openCodeConfig = resolveOpenCodeConfig({ provider: openCodeProvider });
       const draft = await Sandbox.startTask(
         {
           envVars: serializeProjectEnvEntries(parseStoredProjectEnvEntries(project.envVars)),
+          openCodeConfig,
           prompt: scheduledTask.instructions,
           repoId: project.repoId,
           sourceBranch: scheduledTask.branchName ?? "",
@@ -108,12 +119,14 @@ const processDueScheduledTasks = async () => {
         },
       );
 
-      const title = await generateTaskTitle(draft.prompt);
+      const title = await generateTaskTitle(draft.prompt, openCodeConfig);
       const createdTask = await insertTask({
         branchName: draft.sourceBranch,
         createdByUserId: executionUserId,
         envVars: draft.envVars ? JSON.stringify(draft.envVars) : null,
         id: draft.id,
+        opencodeModel: openCodeConfig.model,
+        opencodeProviderId: openCodeConfig.selectedProviderId,
         projectId: project.id,
         prompt: draft.prompt,
         repoId: draft.repoId,

@@ -1,6 +1,7 @@
 import { relations } from "drizzle-orm";
 import { pgTable, text, timestamp, boolean, index } from "drizzle-orm/pg-core";
 
+import { organisation } from "@/lib/org/org.sql";
 import { scheduledTask } from "@/lib/project/project.sql";
 
 export const user = pgTable("user", {
@@ -93,9 +94,8 @@ export const userLlmProvider = pgTable(
   "user_llm_provider",
   {
     id: text("id").primaryKey(),
-    userId: text("user_id")
-      .notNull()
-      .references(() => user.id, { onDelete: "cascade" }),
+    userId: text("user_id").references(() => user.id, { onDelete: "cascade" }),
+    orgId: text("org_id").references(() => organisation.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
     providerId: text("provider_id").notNull(),
     providerBaseUrl: text("provider_base_url").notNull(),
@@ -111,6 +111,7 @@ export const userLlmProvider = pgTable(
   (table) => [
     index("user_llm_provider_user_id_idx").on(table.userId),
     index("user_llm_provider_user_id_is_default_idx").on(table.userId, table.isDefault),
+    index("user_llm_provider_org_id_idx").on(table.orgId),
   ],
 );
 
@@ -144,6 +145,10 @@ export const userProviderSettingsRelations = relations(userProviderSettings, ({ 
 }));
 
 export const userLlmProviderRelations = relations(userLlmProvider, ({ one }) => ({
+  org: one(organisation, {
+    fields: [userLlmProvider.orgId],
+    references: [organisation.id],
+  }),
   user: one(user, {
     fields: [userLlmProvider.userId],
     references: [user.id],

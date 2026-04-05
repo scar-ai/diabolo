@@ -65,8 +65,11 @@ function SettingsPage() {
 
   const providersQuery = useQuery(userLlmProvidersQueryOptions());
   const [draftProviders, setDraftProviders] = useState<ProviderDraft[] | null>(null);
+  const isProvidersLoading = providersQuery.isPending && !providersQuery.isFetched;
 
-  const providers = draftProviders ?? providersQuery.data ?? [];
+  const allProviders = providersQuery.data ?? [];
+  const personalProviders = allProviders.filter((provider) => provider.scope === "personal");
+  const providers = draftProviders ?? personalProviders;
   const hasUnsavedChanges = draftProviders !== null;
 
   const saveFn = useServerFn($saveUserLlmProviders);
@@ -74,7 +77,10 @@ function SettingsPage() {
     mutationFn: () =>
       saveFn({
         data: {
-          providers,
+          providers: providers.map((provider) => ({
+            ...provider,
+            scope: "personal" as const,
+          })),
         },
       }),
     onSuccess: async () => {
@@ -97,7 +103,7 @@ function SettingsPage() {
 
   const updateProvider = (providerId: string, patch: Partial<ProviderDraft>) => {
     setDraftProviders((current) => {
-      const source = current ?? providersQuery.data ?? [];
+      const source = current ?? personalProviders;
       return source.map((provider) =>
         provider.id === providerId ? { ...provider, ...patch } : provider,
       );
@@ -106,7 +112,7 @@ function SettingsPage() {
 
   const setDefaultProvider = (providerId: string) => {
     setDraftProviders((current) => {
-      const source = current ?? providersQuery.data ?? [];
+      const source = current ?? personalProviders;
       return source.map((provider) => ({
         ...provider,
         isDefault: provider.id === providerId,
@@ -116,7 +122,7 @@ function SettingsPage() {
 
   const addProvider = () => {
     setDraftProviders((current) => {
-      const source = current ?? providersQuery.data ?? [];
+      const source = current ?? personalProviders;
       return [
         ...source,
         createProviderDraft({
@@ -129,11 +135,14 @@ function SettingsPage() {
 
   const removeProvider = (providerId: string) => {
     setDraftProviders((current) => {
-      const source = current ?? providersQuery.data ?? [];
+      const source = current ?? personalProviders;
       const next = source.filter((provider) => provider.id !== providerId);
 
       if (next.length > 0 && !next.some((provider) => provider.isDefault)) {
-        next[0] = { ...next[0], isDefault: true };
+        const nextDefaultProvider = next[0];
+        return next.map((provider) =>
+          provider.id === nextDefaultProvider.id ? { ...provider, isDefault: true } : provider,
+        );
       }
 
       return next;
@@ -160,16 +169,15 @@ function SettingsPage() {
         </div>
 
         <div className="mt-8 flex flex-col gap-4">
-          {providersQuery.isPending && providers.length === 0 ? (
+          {isProvidersLoading && providers.length === 0 ? (
             <div className="rounded-2xl border border-border/60 bg-card px-5 py-6 text-sm text-muted-foreground">
               Loading providers...
             </div>
           ) : null}
 
-          {!providersQuery.isPending && sortedProviders.length === 0 ? (
+          {!isProvidersLoading && sortedProviders.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-border/70 bg-card/60 px-5 py-6 text-sm text-muted-foreground">
-              No saved providers yet. Use “Add provider” to configure one, or leave this empty to
-              keep using the server default.
+              No saved providers yet. Use “Add provider” to configure one before starting tasks.
             </div>
           ) : null}
 

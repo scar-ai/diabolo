@@ -364,7 +364,7 @@ export const syncGitHandoffState = async (input: {
 export const buildOpenCodeEnvironment = (input: {
   apiKey: string;
   apiKeyEnvVar: string;
-  baseUrl: string | null;
+  baseUrl: string;
   defaultBranch: string;
   githubToken: string;
   model: string;
@@ -385,7 +385,7 @@ export const buildOpenCodeEnvironment = (input: {
       model: input.model,
       providerId: input.providerId,
       providerName: input.providerName,
-      selectedProviderId: null,
+      selectedProviderId: input.providerId,
     }),
     "utf8",
   ).toString("base64"),

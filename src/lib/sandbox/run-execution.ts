@@ -1,7 +1,7 @@
 import path from "node:path";
 
 import { Github } from "@/lib/github";
-import { resolveOpenCodeConfig } from "@/lib/opencode/config";
+import { normalizeOpenCodeModelForProvider, resolveOpenCodeConfig } from "@/lib/opencode/config";
 import { findTaskWithProject } from "@/lib/project/data";
 import { parseStoredProjectSkills } from "@/lib/project/skills";
 import { Sandbox } from "@/lib/sandbox";
@@ -19,7 +19,7 @@ import {
   resolveTaskAttachmentPath,
   TASK_ATTACHMENT_ARTIFACT_TYPE,
 } from "@/lib/task-attachments";
-import { findUserLlmProvider, findUserProviderSettings } from "@/lib/user/data";
+import { findUserLlmProvider, listUserLlmProviders } from "@/lib/user/data";
 
 import {
   assertTaskNotCancelled,
@@ -101,23 +101,19 @@ const loadTaskExecutionContext = async (taskId: string, messageId: string) => {
 
   const executionUserId = taskRecord.createdByUserId ?? taskWithProject.project.userId;
 
-  const [
-    repo,
-    githubAccessToken,
-    viewer,
-    authenticatedRemoteUrl,
-    userProviderSettings,
-    llmProvider,
-  ] = await Promise.all([
-    unwrapResult(Github.getRepoForUser(taskRecord.repoId ?? "", executionUserId)),
-    unwrapResult(Github.getAccessTokenForUser(executionUserId)),
-    unwrapResult(Github.getViewerForUser(executionUserId)),
-    unwrapResult(Github.getAuthenticatedRemoteUrlForUser(taskRecord.repoId ?? "", executionUserId)),
-    findUserProviderSettings(executionUserId),
-    taskRecord.opencodeProviderId
-      ? findUserLlmProvider(executionUserId, taskRecord.opencodeProviderId)
-      : Promise.resolve(null),
-  ]);
+  const [repo, githubAccessToken, viewer, authenticatedRemoteUrl, llmProvider, userLlmProviders] =
+    await Promise.all([
+      unwrapResult(Github.getRepoForUser(taskRecord.repoId ?? "", executionUserId)),
+      unwrapResult(Github.getAccessTokenForUser(executionUserId)),
+      unwrapResult(Github.getViewerForUser(executionUserId)),
+      unwrapResult(
+        Github.getAuthenticatedRemoteUrlForUser(taskRecord.repoId ?? "", executionUserId),
+      ),
+      taskRecord.opencodeProviderId
+        ? findUserLlmProvider(executionUserId, taskRecord.opencodeProviderId)
+        : Promise.resolve(null),
+      listUserLlmProviders(executionUserId),
+    ]);
 
   if (!repo) {
     throw new Error("Unknown repository selection.");
@@ -127,16 +123,29 @@ const loadTaskExecutionContext = async (taskId: string, messageId: string) => {
     throw new Error("The provider selected for this task no longer exists.");
   }
 
+  const matchedProvider =
+    llmProvider ??
+    (taskRecord.opencodeModel?.trim()
+      ? (userLlmProviders.find(
+          (provider) =>
+            normalizeOpenCodeModelForProvider(provider.providerModel, provider.providerId) ===
+            taskRecord.opencodeModel,
+        ) ?? null)
+      : null);
+
+  if (!matchedProvider) {
+    throw new Error("No saved provider is available for this task.");
+  }
+
   return {
     authenticatedRemoteUrl,
     githubAccessToken,
-    llmProvider,
+    llmProvider: matchedProvider,
     messageRecord,
     repo,
     taskProjectSkills: parseStoredProjectSkills(taskWithProject.project.agentSkills),
     taskProjectEnvVars: getTaskProjectEnvVars(taskRecord.envVars),
     taskRecord,
-    userProviderSettings,
     viewer,
   };
 };
@@ -152,14 +161,12 @@ const runOpenCodeMessage = async (input: {
   taskRecord: Awaited<ReturnType<typeof findTaskRecord>>;
   viewer: Viewer;
   githubAccessToken: string;
-  llmProvider: Awaited<ReturnType<typeof findUserLlmProvider>> | null;
+  llmProvider: NonNullable<Awaited<ReturnType<typeof findUserLlmProvider>>>;
   messagePrompt: string;
-  userProviderSettings: Awaited<ReturnType<typeof findUserProviderSettings>>;
 }) => {
   const openCode = resolveOpenCodeConfig({
-    legacySettings: input.userProviderSettings ?? undefined,
     model: input.taskRecord?.opencodeModel?.trim() || null,
-    provider: input.llmProvider ?? undefined,
+    provider: input.llmProvider,
   });
   const model = openCode.model;
   const attachments = await prepareMessageAttachments({
@@ -277,7 +284,6 @@ export const runInitialMessage = async (taskId: string, messageId: string) => {
     taskId,
     taskProjectEnvVars: context.taskProjectEnvVars,
     taskRecord: context.taskRecord,
-    userProviderSettings: context.userProviderSettings,
     viewer: context.viewer,
   });
 };
@@ -336,7 +342,6 @@ export const runFollowUpMessage = async (taskId: string, messageId: string) => {
     taskId,
     taskProjectEnvVars: context.taskProjectEnvVars,
     taskRecord: context.taskRecord,
-    userProviderSettings: context.userProviderSettings,
     viewer: context.viewer,
   });
 };

@@ -39,11 +39,8 @@ const formatAttachmentSize = (bytes: number) => {
 };
 
 export const Route = createFileRoute("/_auth/app/tasks/$taskId")({
-  loader: async ({ context, params }) => {
-    await context.queryClient.ensureQueryData({
-      ...taskDetailQueryOptions(params.taskId),
-      revalidateIfStale: true,
-    });
+  loader: ({ context, params }) => {
+    context.queryClient.prefetchQuery(taskDetailQueryOptions(params.taskId));
   },
   component: TaskDetailPage,
 });
