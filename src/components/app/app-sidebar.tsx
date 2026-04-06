@@ -3,8 +3,10 @@ import { Link, useNavigate, useRouter, useRouterState } from "@tanstack/react-ro
 import { useServerFn } from "@tanstack/react-start";
 import {
   BuildingIcon,
-  ChevronRightIcon,
+  CheckIcon,
+  ChevronsUpDownIcon,
   HistoryIcon,
+  LayoutDashboardIcon,
   LogOutIcon,
   PlusIcon,
   SettingsIcon,
@@ -14,7 +16,6 @@ import { useState } from "react";
 import { toast } from "sonner";
 
 import { CreateProjectDialog } from "@/components/app/home/create-project-dialog";
-import { ThemeToggle } from "@/components/theme-toggle";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   DropdownMenu,
@@ -22,6 +23,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Separator } from "@/components/ui/separator";
 import authClient from "@/lib/auth/auth-client";
 import { authQueryOptions } from "@/lib/auth/queries";
 import { githubReposQueryOptions } from "@/lib/github/queries";
@@ -41,13 +43,6 @@ type AppUser = {
   name?: string | null;
 };
 
-const SESSION_STATUS_DOT: Record<string, string> = {
-  queued: "bg-muted-foreground/30",
-  running: "animate-pulse bg-emerald-500",
-  succeeded: "bg-emerald-500/50",
-  failed: "bg-red-500/60",
-};
-
 export function AppSidebar({ user }: { user: AppUser }) {
   const queryClient = useQueryClient();
   const router = useRouter();
@@ -58,7 +53,7 @@ export function AppSidebar({ user }: { user: AppUser }) {
   const [createProjectSearch, setCreateProjectSearch] = useState("");
   const [createProjectRepoId, setCreateProjectRepoId] = useState("");
   const [createProjectName, setCreateProjectName] = useState("");
-  const [expandedProjectIds, setExpandedProjectIds] = useState<Set<string>>(new Set());
+  const [projectPickerOpen, setProjectPickerOpen] = useState(false);
 
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const searchStr = useRouterState({ select: (s) => s.location.searchStr });
@@ -90,24 +85,19 @@ export function AppSidebar({ user }: { user: AppUser }) {
   const createProjectRepo = repos.find((repo) => repo.id === createProjectRepoId) ?? null;
   const allTasks = tasksQuery.data ?? [];
 
-  // Group tasks by project (keep insertion order = most recent first from server)
-  const tasksByProject = new Map<string, TaskSummaryResult[]>();
-  for (const task of allTasks) {
-    const bucket = tasksByProject.get(task.projectId) ?? [];
-    bucket.push(task);
-    tasksByProject.set(task.projectId, bucket);
-  }
+  // Determine the active project: from URL or fall back to first project
+  const selectedProjectId = currentProjectId ?? projects[0]?.id;
+  const selectedProject = projects.find((p) => p.id === selectedProjectId) ?? projects[0] ?? null;
 
-  // Running task counts per project
-  const runningCountByProject = new Map<string, number>();
-  for (const task of allTasks) {
-    if (task.status === "queued" || task.status === "running" || task.hasActiveChildren) {
-      runningCountByProject.set(
-        task.projectId,
-        (runningCountByProject.get(task.projectId) ?? 0) + 1,
-      );
-    }
-  }
+  // Tasks for the selected project
+  const selectedProjectTasks = allTasks
+    .filter((t) => t.projectId === selectedProjectId)
+    .slice(0, 8);
+
+  // Running task count for selected project
+  const selectedRunningCount = selectedProjectTasks.filter(
+    (t) => t.status === "queued" || t.status === "running" || t.hasActiveChildren,
+  ).length;
 
   const createProjectMutation = useMutation({
     mutationFn: async () => {
@@ -126,7 +116,6 @@ export function AppSidebar({ user }: { user: AppUser }) {
       setCreateProjectSearch("");
       setCreateProjectRepoId("");
       setCreateProjectName("");
-      setExpandedProjectIds((prev) => new Set([...prev, project.id]));
       navigate({ to: "/app", search: { projectId: project.id } });
     },
     onError: (error) => {
@@ -144,15 +133,6 @@ export function AppSidebar({ user }: { user: AppUser }) {
     setCreateProjectRepoId("");
     setCreateProjectName("");
     setCreateProjectOpen(true);
-  };
-
-  const toggleProject = (projectId: string) => {
-    setExpandedProjectIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(projectId)) next.delete(projectId);
-      else next.add(projectId);
-      return next;
-    });
   };
 
   return (
@@ -173,154 +153,147 @@ export function AppSidebar({ user }: { user: AppUser }) {
 
         {/* Main scrollable nav */}
         <div className="flex flex-1 flex-col overflow-hidden">
-          {/* Projects heading */}
-          <div className="flex items-center justify-between px-4 pt-4 pb-2">
-            <span className="text-[11px] font-medium tracking-widest text-sidebar-foreground/40 uppercase">
-              Projects
-            </span>
+          {/* Project selector */}
+          <div className="flex items-center gap-1 px-2 pt-3 pb-2">
+            <DropdownMenu open={projectPickerOpen} onOpenChange={setProjectPickerOpen}>
+              <DropdownMenuTrigger
+                className={cn(
+                  "flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm transition-colors outline-none",
+                  "hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-sidebar-ring",
+                )}
+              >
+                {projectsQuery.isPending && !selectedProject ? (
+                  <span className="h-4 w-24 animate-pulse rounded bg-sidebar-accent/60" />
+                ) : (
+                  <>
+                    <span className="min-w-0 flex-1 truncate text-left font-medium text-sidebar-foreground">
+                      {selectedProject?.name ?? "Select project"}
+                    </span>
+                    {selectedRunningCount > 0 ? (
+                      <span className="flex shrink-0 items-center gap-1 rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-medium text-emerald-500">
+                        <ZapIcon className="size-2.5" aria-hidden="true" />
+                        {selectedRunningCount}
+                      </span>
+                    ) : null}
+                    <ChevronsUpDownIcon
+                      className="size-3.5 shrink-0 text-sidebar-foreground/40"
+                      aria-hidden="true"
+                    />
+                  </>
+                )}
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-52">
+                {projects.map((project) => (
+                  <DropdownMenuItem
+                    key={project.id}
+                    onClick={() => {
+                      navigate({ to: "/app", search: { projectId: project.id } });
+                      setProjectPickerOpen(false);
+                    }}
+                  >
+                    <CheckIcon
+                      className={cn(
+                        "size-3.5 shrink-0",
+                        project.id === selectedProject?.id ? "text-foreground" : "text-transparent",
+                      )}
+                    />
+                    <span className="truncate">{project.name}</span>
+                  </DropdownMenuItem>
+                ))}
+                {projects.length === 0 && (
+                  <DropdownMenuItem disabled>No projects yet</DropdownMenuItem>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+
             <button
               type="button"
               onClick={handleOpenCreateProject}
-              className="flex size-5 items-center justify-center rounded text-sidebar-foreground/40 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground"
+              className="flex size-7 shrink-0 items-center justify-center rounded-lg text-sidebar-foreground/40 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground"
               aria-label="New project"
             >
               <PlusIcon className="size-3.5" aria-hidden="true" />
             </button>
           </div>
 
-          {/* Project list */}
-          <nav className="flex-1 overflow-y-auto px-2 pb-2" aria-label="Projects">
+          {/* Dashboard link */}
+          {selectedProject ? (
+            <div className="px-2 pb-2">
+              <Link
+                to="/app"
+                search={{ projectId: selectedProject.id }}
+                className={cn(
+                  "flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm transition-colors outline-none",
+                  "focus-visible:ring-2 focus-visible:ring-sidebar-ring",
+                  pathname === "/app" && currentProjectId === selectedProject.id
+                    ? "bg-sidebar-accent font-medium text-sidebar-foreground"
+                    : "text-sidebar-foreground/60 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground",
+                )}
+              >
+                <LayoutDashboardIcon className="size-4 shrink-0" aria-hidden="true" />
+                Dashboard
+              </Link>
+            </div>
+          ) : null}
+
+          <Separator className="bg-sidebar-border" />
+
+          {/* Task list for selected project */}
+          <nav className="flex flex-1 flex-col overflow-y-auto px-2 py-2" aria-label="Sessions">
             {projectsQuery.isPending && projects.length === 0 ? (
-              <div className="space-y-1 px-1">
+              <div className="space-y-1 px-1 pt-1">
                 {[1, 2, 3].map((i) => (
                   <div
                     key={i}
-                    className="h-8 animate-pulse rounded-lg bg-sidebar-accent/60"
+                    className="h-7 animate-pulse rounded-lg bg-sidebar-accent/60"
                     aria-hidden="true"
                   />
                 ))}
               </div>
-            ) : projects.length === 0 ? (
+            ) : !selectedProject ? (
               <p className="px-2 py-2 text-xs text-sidebar-foreground/40">No projects yet.</p>
+            ) : selectedProjectTasks.length === 0 ? (
+              <p className="px-2 py-2 text-xs text-sidebar-foreground/40">No sessions yet.</p>
             ) : (
               <div className="space-y-0.5">
-                {projects.map((project) => {
-                  const runningCount = runningCountByProject.get(project.id) ?? 0;
-                  const isActive =
-                    project.id === currentProjectId &&
-                    (pathname === "/app" || pathname.startsWith("/app/tasks/"));
-                  const isExpanded =
-                    expandedProjectIds.has(project.id) ||
-                    (project.id === currentProjectId && pathname.startsWith("/app"));
-                  const projectTasks = (tasksByProject.get(project.id) ?? []).slice(0, 5);
+                {selectedProjectTasks.map((task) => {
+                  const isActiveTask = task.id === currentTaskId;
 
                   return (
-                    <div key={project.id}>
-                      {/* Project row */}
-                      <div
-                        className={cn(
-                          "group flex items-center gap-0.5 rounded-lg transition-colors",
-                          isActive ? "bg-sidebar-accent" : "hover:bg-sidebar-accent/60",
-                        )}
-                      >
-                        {/* Chevron toggle */}
-                        <button
-                          type="button"
-                          onClick={() => toggleProject(project.id)}
-                          className={cn(
-                            "flex shrink-0 items-center justify-center rounded p-1 transition-colors",
-                            "text-sidebar-foreground/30 outline-none hover:text-sidebar-foreground/70 focus-visible:ring-2 focus-visible:ring-sidebar-ring",
-                          )}
-                          aria-label={isExpanded ? "Collapse project" : "Expand project"}
-                        >
-                          <ChevronRightIcon
-                            className={cn(
-                              "size-3 transition-transform duration-150",
-                              isExpanded && "rotate-90",
-                            )}
-                            aria-hidden="true"
-                          />
-                        </button>
-
-                        {/* Project name link */}
-                        <Link
-                          to="/app"
-                          search={{ projectId: project.id }}
-                          onClick={() =>
-                            setExpandedProjectIds((prev) => new Set([...prev, project.id]))
-                          }
-                          className={cn(
-                            "flex min-w-0 flex-1 items-center gap-2 py-1.5 pr-2 text-sm outline-none",
-                            "focus-visible:ring-2 focus-visible:ring-sidebar-ring",
-                            isActive
-                              ? "font-medium text-sidebar-foreground"
-                              : "text-sidebar-foreground/60 group-hover:text-sidebar-foreground",
-                          )}
-                        >
-                          <span className="min-w-0 flex-1 truncate">{project.name}</span>
-                          {runningCount > 0 ? (
-                            <span className="flex shrink-0 items-center gap-1 rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-medium text-emerald-500">
-                              <ZapIcon className="size-2.5" aria-hidden="true" />
-                              {runningCount}
-                            </span>
-                          ) : null}
-                        </Link>
-                      </div>
-
-                      {/* Sessions sub-list */}
-                      {isExpanded ? (
-                        <div className="mt-0.5 mb-1 space-y-0.5 pl-4">
-                          {projectTasks.length === 0 ? (
-                            <p className="px-2 py-1 text-[11px] text-sidebar-foreground/30">
-                              No sessions yet
-                            </p>
-                          ) : (
-                            projectTasks.map((task) => {
-                              const isActiveTask = task.id === currentTaskId;
-                              const dotClass =
-                                SESSION_STATUS_DOT[task.status] ?? "bg-muted-foreground/30";
-
-                              return (
-                                <Link
-                                  key={task.id}
-                                  to="/app/tasks/$taskId"
-                                  params={{ taskId: task.id }}
-                                  className={cn(
-                                    "flex items-center gap-2 rounded px-2 py-1 text-xs transition-colors outline-none",
-                                    "focus-visible:ring-2 focus-visible:ring-sidebar-ring",
-                                    isActiveTask
-                                      ? "bg-sidebar-accent font-medium text-sidebar-foreground"
-                                      : "text-sidebar-foreground/50 hover:bg-sidebar-accent/40 hover:text-sidebar-foreground",
-                                  )}
-                                >
-                                  <span
-                                    className={cn("size-1.5 shrink-0 rounded-full", dotClass)}
-                                    aria-hidden="true"
-                                  />
-                                  <span className="min-w-0 flex-1 truncate">
-                                    {task.promptPreview || "Untitled task"}
-                                  </span>
-                                </Link>
-                              );
-                            })
-                          )}
-
-                          {/* View all link */}
-                          <Link
-                            to="/app/sessions"
-                            search={{ projectId: project.id }}
-                            className="flex items-center gap-1 rounded px-2 py-1 text-[11px] text-sidebar-foreground/30 transition-colors outline-none hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring"
-                          >
-                            <HistoryIcon className="size-3" aria-hidden="true" />
-                            All sessions
-                          </Link>
-                        </div>
-                      ) : null}
-                    </div>
+                    <Link
+                      key={task.id}
+                      to="/app/tasks/$taskId"
+                      params={{ taskId: task.id }}
+                      className={cn(
+                        "flex items-center gap-2 rounded-lg px-2.5 py-2 text-sm transition-colors outline-none",
+                        "focus-visible:ring-2 focus-visible:ring-sidebar-ring",
+                        isActiveTask
+                          ? "bg-sidebar-accent font-medium text-sidebar-foreground"
+                          : "text-sidebar-foreground/50 hover:bg-sidebar-accent/40 hover:text-sidebar-foreground",
+                      )}
+                    >
+                      <span className="min-w-0 flex-1 truncate">
+                        {task.promptPreview || "Untitled task"}
+                      </span>
+                    </Link>
                   );
                 })}
               </div>
             )}
+
+            {/* All sessions link pinned to bottom */}
+            {selectedProject ? (
+              <div className="mt-auto pt-2">
+                <Link
+                  to="/app/sessions"
+                  search={{ projectId: selectedProject.id }}
+                  className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs text-sidebar-foreground/40 transition-colors outline-none hover:bg-sidebar-accent/40 hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring"
+                >
+                  <HistoryIcon className="size-3.5" aria-hidden="true" />
+                  All sessions
+                </Link>
+              </div>
+            ) : null}
           </nav>
 
           {/* Bottom nav */}
@@ -387,7 +360,6 @@ export function AppSidebar({ user }: { user: AppUser }) {
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
-              <ThemeToggle />
             </div>
           </div>
         </div>

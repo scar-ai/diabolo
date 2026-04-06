@@ -16,7 +16,6 @@ import { toast } from "sonner";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Frame, FramePanel } from "@/components/ui/frame";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -287,416 +286,243 @@ function OrganisationPage() {
             </div>
 
             {/* Members */}
-            <Frame>
-              <FramePanel className="p-6">
-                <h2 className="mb-4 text-sm font-semibold text-foreground">Members</h2>
-                <div className="space-y-2">
-                  {org.members.map((member) => {
-                    const isSelf = member.userId === user.id;
-                    const isOwnerMember = member.role === "owner";
-                    const canAct = isOwner && !isSelf;
-                    return (
-                      <div key={member.userId} className="flex items-center gap-3">
-                        <Avatar className="size-8 border border-border">
-                          {member.user.image ? (
-                            <AvatarImage src={member.user.image} alt={member.user.name} />
-                          ) : null}
-                          <AvatarFallback>
-                            {member.user.name.slice(0, 1).toUpperCase()}
-                          </AvatarFallback>
-                        </Avatar>
-                        <span className="flex-1 text-sm text-foreground">{member.user.name}</span>
-                        {isOwnerMember && (
-                          <CrownIcon className="size-3.5 text-amber-500" aria-label="Owner" />
-                        )}
-                        {canAct && !isOwnerMember && (
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
-                            disabled={
-                              promoteMemberMutation.isPending &&
-                              promoteMemberMutation.variables === member.userId
-                            }
-                            onClick={() => promoteMemberMutation.mutate(member.userId)}
-                          >
-                            <ShieldIcon className="size-3.5" />
-                            Promote
-                          </Button>
-                        )}
-                        {canAct && (
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="h-7 px-2 text-xs text-destructive hover:text-destructive"
-                            disabled={
-                              kickMemberMutation.isPending &&
-                              kickMemberMutation.variables === member.userId
-                            }
-                            onClick={() => kickMemberMutation.mutate(member.userId)}
-                          >
-                            <XIcon className="size-3.5" />
-                            Kick
-                          </Button>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </FramePanel>
-            </Frame>
-
-            {/* Pending invites — owners only */}
-            {isOwner && org.pendingInvites.length > 0 && (
-              <Frame>
-                <FramePanel className="p-6">
-                  <h2 className="mb-4 text-sm font-semibold text-foreground">Pending invites</h2>
-                  <div className="space-y-2">
-                    {org.pendingInvites.map((invite) => (
-                      <div key={invite.id} className="flex items-center gap-3">
-                        <div className="flex size-8 items-center justify-center rounded-full bg-muted">
-                          <UserPlusIcon className="size-4 text-muted-foreground" />
-                        </div>
-                        <span className="flex-1 text-sm text-foreground">
-                          @{invite.githubUsername}
-                        </span>
-                        <Badge variant="outline" className="text-xs">
-                          Pending
-                        </Badge>
+            <section className="rounded-2xl border border-border/70 bg-card px-6 py-6 shadow-xs">
+              <h2 className="mb-4 text-sm font-semibold text-foreground">Members</h2>
+              <div className="space-y-2">
+                {org.members.map((member) => {
+                  const isSelf = member.userId === user.id;
+                  const isOwnerMember = member.role === "owner";
+                  const canAct = isOwner && !isSelf;
+                  return (
+                    <div key={member.userId} className="flex items-center gap-3">
+                      <Avatar className="size-8 border border-border">
+                        {member.user.image ? (
+                          <AvatarImage src={member.user.image} alt={member.user.name} />
+                        ) : null}
+                        <AvatarFallback>
+                          {member.user.name.slice(0, 1).toUpperCase()}
+                        </AvatarFallback>
+                      </Avatar>
+                      <span className="flex-1 text-sm text-foreground">{member.user.name}</span>
+                      {isOwnerMember && (
+                        <CrownIcon className="size-3.5 text-amber-500" aria-label="Owner" />
+                      )}
+                      {canAct && !isOwnerMember && (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
+                          disabled={
+                            promoteMemberMutation.isPending &&
+                            promoteMemberMutation.variables === member.userId
+                          }
+                          onClick={() => promoteMemberMutation.mutate(member.userId)}
+                        >
+                          <ShieldIcon className="size-3.5" />
+                          Promote
+                        </Button>
+                      )}
+                      {canAct && (
                         <Button
                           size="sm"
                           variant="ghost"
                           className="h-7 px-2 text-xs text-destructive hover:text-destructive"
                           disabled={
-                            cancelInviteMutation.isPending &&
-                            cancelInviteMutation.variables === invite.id
+                            kickMemberMutation.isPending &&
+                            kickMemberMutation.variables === member.userId
                           }
-                          onClick={() => cancelInviteMutation.mutate(invite.id)}
+                          onClick={() => kickMemberMutation.mutate(member.userId)}
                         >
                           <XIcon className="size-3.5" />
-                          Cancel
+                          Kick
                         </Button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+
+            {/* Pending invites — owners only */}
+            {isOwner && org.pendingInvites.length > 0 && (
+              <section className="rounded-2xl border border-border/70 bg-card px-6 py-6 shadow-xs">
+                <h2 className="mb-4 text-sm font-semibold text-foreground">Pending invites</h2>
+                <div className="space-y-2">
+                  {org.pendingInvites.map((invite) => (
+                    <div key={invite.id} className="flex items-center gap-3">
+                      <div className="flex size-8 items-center justify-center rounded-full bg-muted">
+                        <UserPlusIcon className="size-4 text-muted-foreground" />
                       </div>
-                    ))}
-                  </div>
-                </FramePanel>
-              </Frame>
+                      <span className="flex-1 text-sm text-foreground">
+                        @{invite.githubUsername}
+                      </span>
+                      <Badge variant="outline" className="text-xs">
+                        Pending
+                      </Badge>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 px-2 text-xs text-destructive hover:text-destructive"
+                        disabled={
+                          cancelInviteMutation.isPending &&
+                          cancelInviteMutation.variables === invite.id
+                        }
+                        onClick={() => cancelInviteMutation.mutate(invite.id)}
+                      >
+                        <XIcon className="size-3.5" />
+                        Cancel
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              </section>
             )}
 
             {isOwner && (
-              <Frame>
-                <FramePanel className="p-6">
-                  <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <h2 className="text-sm font-semibold text-foreground">
-                        Organisation providers
-                      </h2>
-                      <p className="mt-1 text-sm text-muted-foreground">
-                        Providers added here are available to every member of {org.name}.
-                      </p>
+              <section className="rounded-2xl border border-border/70 bg-card px-6 py-6 shadow-xs">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <h2 className="text-sm font-semibold text-foreground">
+                      Organisation providers
+                    </h2>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      Providers added here are available to every member of {org.name}.
+                    </p>
+                  </div>
+                  <Button onClick={addProvider}>
+                    <PlusIcon aria-hidden="true" />
+                    Add provider
+                  </Button>
+                </div>
+
+                <div className="mt-6 space-y-4">
+                  {isProvidersLoading && providerDrafts.length === 0 ? (
+                    <div className="rounded-xl border border-border/60 bg-card px-4 py-5 text-sm text-muted-foreground">
+                      Loading organisation providers...
                     </div>
-                    <Button onClick={addProvider}>
-                      <PlusIcon aria-hidden="true" />
-                      Add provider
-                    </Button>
-                  </div>
+                  ) : null}
 
-                  <div className="mt-6 space-y-4">
-                    {isProvidersLoading && providerDrafts.length === 0 ? (
-                      <div className="rounded-xl border border-border/60 bg-card px-4 py-5 text-sm text-muted-foreground">
-                        Loading organisation providers...
-                      </div>
-                    ) : null}
+                  {!isProvidersLoading && providerDrafts.length === 0 ? (
+                    <div className="rounded-xl border border-dashed border-border/70 bg-card/60 px-4 py-5 text-sm text-muted-foreground">
+                      No organisation providers yet.
+                    </div>
+                  ) : null}
 
-                    {!isProvidersLoading && providerDrafts.length === 0 ? (
-                      <div className="rounded-xl border border-dashed border-border/70 bg-card/60 px-4 py-5 text-sm text-muted-foreground">
-                        No organisation providers yet.
-                      </div>
-                    ) : null}
-
-                    {providerDrafts.map((provider) => (
-                      <section
-                        key={provider.id}
-                        className="rounded-2xl border border-border/70 bg-card px-5 py-5 shadow-xs"
-                      >
-                        <div className="flex items-start justify-between gap-4">
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <h3 className="text-base font-semibold">
-                                {provider.name || "Untitled provider"}
-                              </h3>
-                              <Badge variant="outline" className="text-xs">
-                                Organisation
-                              </Badge>
-                            </div>
-                            <p className="mt-1 text-sm text-muted-foreground">
-                              Every organisation member can select this provider from the composer.
-                            </p>
-                          </div>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            onClick={() => removeProvider(provider.id)}
-                          >
-                            <XIcon className="size-4" />
-                            Remove
-                          </Button>
-                        </div>
-
-                        <div className="mt-5 grid gap-4 md:grid-cols-2">
-                          <div className="flex flex-col gap-1.5">
-                            <Label htmlFor={`org-provider-name-${provider.id}`}>Display name</Label>
-                            <Input
-                              id={`org-provider-name-${provider.id}`}
-                              value={provider.name}
-                              onChange={(event) =>
-                                updateProvider(provider.id, { name: event.target.value })
-                              }
-                              placeholder="OpenAI team"
-                            />
-                          </div>
-
-                          <div className="flex flex-col gap-1.5">
-                            <Label htmlFor={`org-provider-id-${provider.id}`}>Provider ID</Label>
-                            <Input
-                              id={`org-provider-id-${provider.id}`}
-                              value={provider.providerId}
-                              onChange={(event) =>
-                                updateProvider(provider.id, {
-                                  providerId: event.target.value.trim().toLowerCase(),
-                                })
-                              }
-                              placeholder="openai"
-                            />
-                          </div>
-
-                          <div className="flex flex-col gap-1.5 md:col-span-2">
-                            <Label htmlFor={`org-provider-base-url-${provider.id}`}>
-                              API Base URL
-                            </Label>
-                            <Input
-                              id={`org-provider-base-url-${provider.id}`}
-                              value={provider.providerBaseUrl}
-                              onChange={(event) =>
-                                updateProvider(provider.id, {
-                                  providerBaseUrl: event.target.value,
-                                })
-                              }
-                              placeholder="https://api.openai.com/v1"
-                            />
-                          </div>
-
-                          <div className="flex flex-col gap-1.5">
-                            <Label htmlFor={`org-provider-model-${provider.id}`}>
-                              Default model
-                            </Label>
-                            <Input
-                              id={`org-provider-model-${provider.id}`}
-                              value={provider.providerModel}
-                              onChange={(event) =>
-                                updateProvider(provider.id, { providerModel: event.target.value })
-                              }
-                              placeholder="gpt-4o"
-                            />
-                          </div>
-
-                          <div className="flex flex-col gap-1.5">
-                            <Label htmlFor={`org-provider-api-key-${provider.id}`}>API key</Label>
-                            <Input
-                              id={`org-provider-api-key-${provider.id}`}
-                              type="password"
-                              value={provider.providerApiKey}
-                              onChange={(event) =>
-                                updateProvider(provider.id, { providerApiKey: event.target.value })
-                              }
-                              placeholder="sk-..."
-                            />
-                          </div>
-                        </div>
-                      </section>
-                    ))}
-                  </div>
-
-                  <div className="mt-6 flex justify-end">
-                    <Button
-                      disabled={saveProvidersMutation.isPending || draftProviders === null}
-                      onClick={() => saveProvidersMutation.mutate()}
+                  {providerDrafts.map((provider) => (
+                    <section
+                      key={provider.id}
+                      className="rounded-2xl border border-border/70 bg-card px-5 py-5 shadow-xs"
                     >
-                      {saveProvidersMutation.isPending
-                        ? "Saving..."
-                        : "Save organisation providers"}
-                    </Button>
-                  </div>
-                </FramePanel>
-              </Frame>
+                      <div className="flex items-start justify-between gap-4">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <h3 className="text-base font-semibold">
+                              {provider.name || "Untitled provider"}
+                            </h3>
+                            <Badge variant="outline" className="text-xs">
+                              Organisation
+                            </Badge>
+                          </div>
+                          <p className="mt-1 text-sm text-muted-foreground">
+                            Every organisation member can select this provider from the composer.
+                          </p>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          onClick={() => removeProvider(provider.id)}
+                        >
+                          <XIcon className="size-4" />
+                          Remove
+                        </Button>
+                      </div>
+
+                      <div className="mt-5 grid gap-4 md:grid-cols-2">
+                        <div className="flex flex-col gap-1.5">
+                          <Label htmlFor={`org-provider-name-${provider.id}`}>Display name</Label>
+                          <Input
+                            id={`org-provider-name-${provider.id}`}
+                            value={provider.name}
+                            onChange={(event) =>
+                              updateProvider(provider.id, { name: event.target.value })
+                            }
+                            placeholder="OpenAI team"
+                          />
+                        </div>
+
+                        <div className="flex flex-col gap-1.5">
+                          <Label htmlFor={`org-provider-id-${provider.id}`}>Provider ID</Label>
+                          <Input
+                            id={`org-provider-id-${provider.id}`}
+                            value={provider.providerId}
+                            onChange={(event) =>
+                              updateProvider(provider.id, {
+                                providerId: event.target.value.trim().toLowerCase(),
+                              })
+                            }
+                            placeholder="openai"
+                          />
+                        </div>
+
+                        <div className="flex flex-col gap-1.5 md:col-span-2">
+                          <Label htmlFor={`org-provider-base-url-${provider.id}`}>
+                            API Base URL
+                          </Label>
+                          <Input
+                            id={`org-provider-base-url-${provider.id}`}
+                            value={provider.providerBaseUrl}
+                            onChange={(event) =>
+                              updateProvider(provider.id, {
+                                providerBaseUrl: event.target.value,
+                              })
+                            }
+                            placeholder="https://api.openai.com/v1"
+                          />
+                        </div>
+
+                        <div className="flex flex-col gap-1.5">
+                          <Label htmlFor={`org-provider-model-${provider.id}`}>Default model</Label>
+                          <Input
+                            id={`org-provider-model-${provider.id}`}
+                            value={provider.providerModel}
+                            onChange={(event) =>
+                              updateProvider(provider.id, { providerModel: event.target.value })
+                            }
+                            placeholder="gpt-4o"
+                          />
+                        </div>
+
+                        <div className="flex flex-col gap-1.5">
+                          <Label htmlFor={`org-provider-api-key-${provider.id}`}>API key</Label>
+                          <Input
+                            id={`org-provider-api-key-${provider.id}`}
+                            type="password"
+                            value={provider.providerApiKey}
+                            onChange={(event) =>
+                              updateProvider(provider.id, { providerApiKey: event.target.value })
+                            }
+                            placeholder="sk-..."
+                          />
+                        </div>
+                      </div>
+                    </section>
+                  ))}
+                </div>
+
+                <div className="mt-6 flex justify-end">
+                  <Button
+                    disabled={saveProvidersMutation.isPending || draftProviders === null}
+                    onClick={() => saveProvidersMutation.mutate()}
+                  >
+                    {saveProvidersMutation.isPending ? "Saving..." : "Save organisation providers"}
+                  </Button>
+                </div>
+              </section>
             )}
 
             {/* Project invites */}
             {projectInvites.length > 0 && (
-              <Frame>
-                <FramePanel className="p-6">
-                  <h2 className="mb-4 text-sm font-semibold text-foreground">Project invites</h2>
-                  <div className="space-y-3">
-                    {projectInvites.map((invite) => (
-                      <div
-                        key={invite.id}
-                        className="flex items-center gap-3 rounded-lg border bg-muted/30 px-4 py-3"
-                      >
-                        <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted">
-                          <UserPlusIcon className="size-4 text-muted-foreground" />
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate text-sm font-medium text-foreground">
-                            {invite.project.name}
-                          </p>
-                          <p className="text-xs text-muted-foreground">Invited to collaborate</p>
-                        </div>
-                        <div className="flex gap-2">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            disabled={
-                              declineProjectInviteMutation.isPending &&
-                              declineProjectInviteMutation.variables === invite.id
-                            }
-                            onClick={() => declineProjectInviteMutation.mutate(invite.id)}
-                          >
-                            <XIcon aria-hidden="true" />
-                            Decline
-                          </Button>
-                          <Button
-                            size="sm"
-                            disabled={
-                              acceptProjectInviteMutation.isPending &&
-                              acceptProjectInviteMutation.variables === invite.id
-                            }
-                            onClick={() => acceptProjectInviteMutation.mutate(invite.id)}
-                          >
-                            <CheckIcon aria-hidden="true" />
-                            Accept
-                          </Button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </FramePanel>
-              </Frame>
-            )}
-
-            {/* Invite member — owners only */}
-            {isOwner && (
-              <Frame>
-                <FramePanel className="p-6">
-                  <h2 className="mb-4 text-sm font-semibold text-foreground">Invite member</h2>
-                  <div className="flex gap-2">
-                    <div className="relative flex-1">
-                      <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-muted-foreground">
-                        @
-                      </span>
-                      <Input
-                        className="pl-7"
-                        placeholder="GitHub username"
-                        value={inviteUsername}
-                        onChange={(e) => setInviteUsername(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" && inviteUsername.trim()) {
-                            inviteMemberMutation.mutate();
-                          }
-                        }}
-                      />
-                    </div>
-                    <Button
-                      disabled={!inviteUsername.trim() || inviteMemberMutation.isPending}
-                      onClick={() => inviteMemberMutation.mutate()}
-                    >
-                      {inviteMemberMutation.isPending ? (
-                        "Inviting..."
-                      ) : (
-                        <>
-                          <PlusIcon aria-hidden="true" />
-                          Invite
-                        </>
-                      )}
-                    </Button>
-                  </div>
-                </FramePanel>
-              </Frame>
-            )}
-          </div>
-        </main>
-      </>
-    );
-  }
-
-  // User is NOT in an org — show create or accept invites
-  return (
-    <>
-      {pageHeader}
-      <main className="flex flex-1 flex-col items-center overflow-y-auto px-4 py-10">
-        <div className="w-full max-w-2xl space-y-4">
-          <div className="mb-6">
-            <p className="text-sm tracking-[0.24em] text-muted-foreground/55 uppercase">
-              Organisation
-            </p>
-            <h1 className="mt-1 text-3xl font-semibold tracking-tight text-foreground">
-              Get started
-            </h1>
-          </div>
-
-          {/* Pending invites */}
-          {invites.length > 0 && (
-            <Frame>
-              <FramePanel className="p-6">
-                <h2 className="mb-4 text-sm font-semibold text-foreground">Pending invites</h2>
-                <div className="space-y-3">
-                  {invites.map((invite) => (
-                    <div
-                      key={invite.id}
-                      className="flex items-center gap-3 rounded-lg border bg-muted/30 px-4 py-3"
-                    >
-                      <BuildingIcon className="size-5 shrink-0 text-muted-foreground" />
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-medium text-foreground">
-                          {invite.org.name}
-                        </p>
-                        <p className="text-xs text-muted-foreground">You've been invited to join</p>
-                      </div>
-                      <div className="flex gap-2">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={
-                            declineInviteMutation.isPending &&
-                            declineInviteMutation.variables === invite.id
-                          }
-                          onClick={() => declineInviteMutation.mutate(invite.id)}
-                        >
-                          <XIcon aria-hidden="true" />
-                          Decline
-                        </Button>
-                        <Button
-                          size="sm"
-                          disabled={
-                            acceptInviteMutation.isPending &&
-                            acceptInviteMutation.variables === invite.id
-                          }
-                          onClick={() => acceptInviteMutation.mutate(invite.id)}
-                        >
-                          <CheckIcon aria-hidden="true" />
-                          Accept
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </FramePanel>
-            </Frame>
-          )}
-
-          {/* Project invites */}
-          {projectInvites.length > 0 && (
-            <Frame>
-              <FramePanel className="p-6">
+              <section className="rounded-2xl border border-border/70 bg-card px-6 py-6 shadow-xs">
                 <h2 className="mb-4 text-sm font-semibold text-foreground">Project invites</h2>
                 <div className="space-y-3">
                   {projectInvites.map((invite) => (
@@ -741,51 +567,204 @@ function OrganisationPage() {
                     </div>
                   ))}
                 </div>
-              </FramePanel>
-            </Frame>
+              </section>
+            )}
+
+            {/* Invite member — owners only */}
+            {isOwner && (
+              <section className="rounded-2xl border border-border/70 bg-card px-6 py-6 shadow-xs">
+                <h2 className="mb-4 text-sm font-semibold text-foreground">Invite member</h2>
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-muted-foreground">
+                      @
+                    </span>
+                    <Input
+                      className="pl-7"
+                      placeholder="GitHub username"
+                      value={inviteUsername}
+                      onChange={(e) => setInviteUsername(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && inviteUsername.trim()) {
+                          inviteMemberMutation.mutate();
+                        }
+                      }}
+                    />
+                  </div>
+                  <Button
+                    disabled={!inviteUsername.trim() || inviteMemberMutation.isPending}
+                    onClick={() => inviteMemberMutation.mutate()}
+                  >
+                    {inviteMemberMutation.isPending ? (
+                      "Inviting..."
+                    ) : (
+                      <>
+                        <PlusIcon aria-hidden="true" />
+                        Invite
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </section>
+            )}
+          </div>
+        </main>
+      </>
+    );
+  }
+
+  // User is NOT in an org — show create or accept invites
+  return (
+    <>
+      {pageHeader}
+      <main className="flex flex-1 flex-col items-center overflow-y-auto px-4 py-10">
+        <div className="w-full max-w-2xl space-y-4">
+          <div className="mb-6">
+            <p className="text-sm tracking-[0.24em] text-muted-foreground/55 uppercase">
+              Organisation
+            </p>
+            <h1 className="mt-1 text-3xl font-semibold tracking-tight text-foreground">
+              Get started
+            </h1>
+          </div>
+
+          {/* Pending invites */}
+          {invites.length > 0 && (
+            <section className="rounded-2xl border border-border/70 bg-card px-6 py-6 shadow-xs">
+              <h2 className="mb-4 text-sm font-semibold text-foreground">Pending invites</h2>
+              <div className="space-y-3">
+                {invites.map((invite) => (
+                  <div
+                    key={invite.id}
+                    className="flex items-center gap-3 rounded-lg border bg-muted/30 px-4 py-3"
+                  >
+                    <BuildingIcon className="size-5 shrink-0 text-muted-foreground" />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium text-foreground">
+                        {invite.org.name}
+                      </p>
+                      <p className="text-xs text-muted-foreground">You've been invited to join</p>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={
+                          declineInviteMutation.isPending &&
+                          declineInviteMutation.variables === invite.id
+                        }
+                        onClick={() => declineInviteMutation.mutate(invite.id)}
+                      >
+                        <XIcon aria-hidden="true" />
+                        Decline
+                      </Button>
+                      <Button
+                        size="sm"
+                        disabled={
+                          acceptInviteMutation.isPending &&
+                          acceptInviteMutation.variables === invite.id
+                        }
+                        onClick={() => acceptInviteMutation.mutate(invite.id)}
+                      >
+                        <CheckIcon aria-hidden="true" />
+                        Accept
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {/* Project invites */}
+          {projectInvites.length > 0 && (
+            <section className="rounded-2xl border border-border/70 bg-card px-6 py-6 shadow-xs">
+              <h2 className="mb-4 text-sm font-semibold text-foreground">Project invites</h2>
+              <div className="space-y-3">
+                {projectInvites.map((invite) => (
+                  <div
+                    key={invite.id}
+                    className="flex items-center gap-3 rounded-lg border bg-muted/30 px-4 py-3"
+                  >
+                    <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted">
+                      <UserPlusIcon className="size-4 text-muted-foreground" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium text-foreground">
+                        {invite.project.name}
+                      </p>
+                      <p className="text-xs text-muted-foreground">Invited to collaborate</p>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={
+                          declineProjectInviteMutation.isPending &&
+                          declineProjectInviteMutation.variables === invite.id
+                        }
+                        onClick={() => declineProjectInviteMutation.mutate(invite.id)}
+                      >
+                        <XIcon aria-hidden="true" />
+                        Decline
+                      </Button>
+                      <Button
+                        size="sm"
+                        disabled={
+                          acceptProjectInviteMutation.isPending &&
+                          acceptProjectInviteMutation.variables === invite.id
+                        }
+                        onClick={() => acceptProjectInviteMutation.mutate(invite.id)}
+                      >
+                        <CheckIcon aria-hidden="true" />
+                        Accept
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
           )}
 
           {/* Create org */}
-          <Frame>
-            <FramePanel className="p-6">
-              <div className="mb-4 space-y-1">
-                <h2 className="text-sm font-semibold text-foreground">Create an organisation</h2>
-                <p className="text-sm text-muted-foreground">
-                  Set up a shared workspace and invite your team.
-                </p>
+          <section className="rounded-2xl border border-border/70 bg-card px-6 py-6 shadow-xs">
+            <div className="mb-4 space-y-1">
+              <h2 className="text-sm font-semibold text-foreground">Create an organisation</h2>
+              <p className="text-sm text-muted-foreground">
+                Set up a shared workspace and invite your team.
+              </p>
+            </div>
+            <div className="space-y-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="org-name">Organisation name</Label>
+                <Input
+                  id="org-name"
+                  placeholder="My Organisation"
+                  value={createOrgName}
+                  onChange={(e) => setCreateOrgName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && createOrgName.trim()) {
+                      createOrgMutation.mutate();
+                    }
+                  }}
+                />
               </div>
-              <div className="space-y-3">
-                <div className="space-y-1.5">
-                  <Label htmlFor="org-name">Organisation name</Label>
-                  <Input
-                    id="org-name"
-                    placeholder="My Organisation"
-                    value={createOrgName}
-                    onChange={(e) => setCreateOrgName(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && createOrgName.trim()) {
-                        createOrgMutation.mutate();
-                      }
-                    }}
-                  />
-                </div>
-                <Button
-                  className="w-full"
-                  disabled={!createOrgName.trim() || createOrgMutation.isPending}
-                  onClick={() => createOrgMutation.mutate()}
-                >
-                  {createOrgMutation.isPending ? (
-                    "Creating..."
-                  ) : (
-                    <>
-                      <PlusIcon aria-hidden="true" />
-                      Create organisation
-                    </>
-                  )}
-                </Button>
-              </div>
-            </FramePanel>
-          </Frame>
+              <Button
+                className="w-full"
+                disabled={!createOrgName.trim() || createOrgMutation.isPending}
+                onClick={() => createOrgMutation.mutate()}
+              >
+                {createOrgMutation.isPending ? (
+                  "Creating..."
+                ) : (
+                  <>
+                    <PlusIcon aria-hidden="true" />
+                    Create organisation
+                  </>
+                )}
+              </Button>
+            </div>
+          </section>
         </div>
       </main>
     </>
