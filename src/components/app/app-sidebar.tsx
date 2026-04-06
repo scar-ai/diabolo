@@ -12,7 +12,7 @@ import {
   SettingsIcon,
   ZapIcon,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { CreateProjectDialog } from "@/components/app/home/create-project-dialog";
@@ -98,6 +98,45 @@ export function AppSidebar({ user }: { user: AppUser }) {
   const selectedRunningCount = selectedProjectTasks.filter(
     (t) => t.status === "queued" || t.status === "running" || t.hasActiveChildren,
   ).length;
+
+  // Browser notifications when a task finishes
+  const prevTaskStatusesRef = useRef<Map<string, string>>(new Map());
+  useEffect(() => {
+    if (typeof window === "undefined" || !("Notification" in window)) return;
+
+    const prev = prevTaskStatusesRef.current;
+    const completedTasks: typeof allTasks = [];
+
+    for (const task of allTasks) {
+      const prevStatus = prev.get(task.id);
+      const isNowDone = task.status === "succeeded" || task.status === "failed";
+      const wasActive = prevStatus === "running" || prevStatus === "queued";
+      if (wasActive && isNowDone) completedTasks.push(task);
+    }
+
+    const next = new Map<string, string>();
+    for (const task of allTasks) next.set(task.id, task.status);
+    prevTaskStatusesRef.current = next;
+
+    if (completedTasks.length === 0) return;
+
+    const notify = () => {
+      for (const task of completedTasks) {
+        const project = projects.find((p) => p.id === task.projectId);
+        const title = task.status === "succeeded" ? "Task completed" : "Task failed";
+        const body = [project?.name, task.promptPreview].filter(Boolean).join(" · ");
+        new Notification(title, { body });
+      }
+    };
+
+    if (Notification.permission === "granted") {
+      notify();
+    } else if (Notification.permission === "default") {
+      Notification.requestPermission().then((permission) => {
+        if (permission === "granted") notify();
+      });
+    }
+  }, [allTasks, projects]);
 
   const createProjectMutation = useMutation({
     mutationFn: async () => {
@@ -269,7 +308,7 @@ export function AppSidebar({ user }: { user: AppUser }) {
                         "focus-visible:ring-2 focus-visible:ring-sidebar-ring",
                         isActiveTask
                           ? "bg-sidebar-accent font-medium text-sidebar-foreground"
-                          : "text-sidebar-foreground/50 hover:bg-sidebar-accent/40 hover:text-sidebar-foreground",
+                          : "text-sidebar-foreground hover:bg-sidebar-accent/40",
                       )}
                     >
                       <span className="min-w-0 flex-1 truncate">

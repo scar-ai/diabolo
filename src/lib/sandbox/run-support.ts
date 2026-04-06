@@ -18,6 +18,7 @@ import {
   updateTaskRecord,
   type TaskRecord,
 } from "@/lib/sandbox/store";
+import { buildTaskScreenshotMetadata, TASK_SCREENSHOT_ARTIFACT_TYPE } from "@/lib/task-artifacts";
 
 const read = (value: string) => value.trim();
 
@@ -184,31 +185,82 @@ export const runSandboxCommand = async (
 };
 
 const detectArtifacts = async (taskId: string, messageId: string, payload: JsonObject) => {
-  const url =
-    (typeof payload.url === "string" && payload.url) ||
-    (typeof payload.prUrl === "string" && payload.prUrl) ||
-    (typeof payload.previewUrl === "string" && payload.previewUrl) ||
-    (typeof payload.screenshotUrl === "string" && payload.screenshotUrl);
+  const parseEmbeddedPayload = (value: unknown): JsonObject | null => {
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      return value as JsonObject;
+    }
 
-  if (!url) {
-    return;
+    if (typeof value !== "string") {
+      return null;
+    }
+
+    try {
+      const parsed = JSON.parse(value) as unknown;
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+        ? (parsed as JsonObject)
+        : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const state =
+    typeof payload.part === "object" && payload.part
+      ? ((payload.part as JsonObject).state as JsonObject | undefined)
+      : undefined;
+
+  const candidates = [
+    payload,
+    parseEmbeddedPayload(state?.output),
+    parseEmbeddedPayload(
+      typeof state?.metadata === "object" && state.metadata
+        ? (state.metadata as JsonObject).output
+        : null,
+    ),
+  ].filter((value): value is JsonObject => Boolean(value));
+
+  for (const candidate of candidates) {
+    const screenshotPath = typeof candidate.path === "string" ? candidate.path.trim() : "";
+    const url =
+      (typeof candidate.url === "string" && candidate.url) ||
+      (typeof candidate.prUrl === "string" && candidate.prUrl) ||
+      (typeof candidate.previewUrl === "string" && candidate.previewUrl) ||
+      (typeof candidate.screenshotUrl === "string" && candidate.screenshotUrl);
+
+    if (screenshotPath && /\.(png|jpe?g|webp)$/i.test(screenshotPath)) {
+      const artifactId = crypto.randomUUID();
+
+      await SandboxEvents.publishArtifact({
+        id: artifactId,
+        messageId,
+        metadata: buildTaskScreenshotMetadata(screenshotPath, candidate),
+        taskId,
+        type: TASK_SCREENSHOT_ARTIFACT_TYPE,
+        url: `/api/tasks/${taskId}/artifacts/${artifactId}`,
+      });
+      continue;
+    }
+
+    if (!url) {
+      continue;
+    }
+
+    const type =
+      (typeof candidate.type === "string" && candidate.type) ||
+      (url.includes("/pull/")
+        ? "pull_request"
+        : url.match(/\.(png|jpg|jpeg|webp)$/i)
+          ? TASK_SCREENSHOT_ARTIFACT_TYPE
+          : "link");
+
+    await SandboxEvents.publishArtifact({
+      messageId,
+      metadata: candidate,
+      taskId,
+      type,
+      url,
+    });
   }
-
-  const type =
-    (typeof payload.type === "string" && payload.type) ||
-    (url.includes("/pull/")
-      ? "pull_request"
-      : url.match(/\.(png|jpg|jpeg|webp)$/i)
-        ? "screenshot"
-        : "link");
-
-  await SandboxEvents.publishArtifact({
-    messageId,
-    metadata: payload,
-    taskId,
-    type,
-    url,
-  });
 };
 
 const normalizeEvent = (event: JsonObject) => {

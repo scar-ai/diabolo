@@ -7,50 +7,6 @@ const SANDBOX_TOOL_PATH_EXPORT =
 
 const escapeForSingleQuotedShell = (value: string) => value.replace(/'/g, `'\\''`);
 
-type ConversationHistoryEntry = {
-  error?: string | null;
-  kind: "follow_up" | "initial";
-  prompt: string;
-  responseMessages: Array<{ text: string }>;
-  sequence: number;
-  stage?: string;
-  status: string;
-};
-
-const buildConversationTranscript = (history: ConversationHistoryEntry[]) =>
-  history
-    .map((message) => {
-      const assistantResponse = message.responseMessages
-        .map((response) => response.text.trim())
-        .filter(Boolean)
-        .join("\n\n");
-      const turnLabel =
-        message.kind === "initial" ? "Initial request" : `Follow-up ${message.sequence}`;
-
-      return [
-        `<turn index="${message.sequence + 1}" kind="${message.kind}">`,
-        `<user_message>`,
-        message.prompt.trim(),
-        `</user_message>`,
-        ...(assistantResponse
-          ? [`<assistant_response>`, assistantResponse, `</assistant_response>`]
-          : []),
-        ...(message.error?.trim()
-          ? [`<assistant_error>`, message.error.trim(), `</assistant_error>`]
-          : []),
-        ...(message.status !== "completed" && message.stage?.trim()
-          ? [
-              `<execution_status label="${message.status}">`,
-              message.stage.trim(),
-              `</execution_status>`,
-            ]
-          : []),
-        `</turn>`,
-        `<!-- ${turnLabel} -->`,
-      ].join("\n");
-    })
-    .join("\n\n");
-
 const writeGeneratedConfigCommand = [
   "python3 - <<'PY'",
   "import base64",
@@ -61,6 +17,68 @@ const writeGeneratedConfigCommand = [
   "target.write_text(base64.b64decode(os.environ['OPENCODE_CONFIG_CONTENT_B64']).decode('utf-8'))",
   "PY",
 ].join("\n");
+
+const buildOpenCodeRunnerCommand = () =>
+  [
+    "python3 - <<'PY'",
+    "import base64",
+    "import json",
+    "import os",
+    "import pathlib",
+    "import subprocess",
+    "import sys",
+    "import time",
+    "",
+    "artifacts_dir = pathlib.Path(os.getcwd()) / '.opencode' / 'artifacts'",
+    "artifacts_dir.mkdir(parents=True, exist_ok=True)",
+    "log_path = artifacts_dir / 'opencode-run.log'",
+    "",
+    "model = os.environ['OPENCODE_RUN_MODEL']",
+    "prompt = base64.b64decode(os.environ['OPENCODE_RUN_PROMPT_B64']).decode('utf-8')",
+    "attachments = json.loads(base64.b64decode(os.environ['OPENCODE_RUN_ATTACHMENTS_B64']).decode('utf-8'))",
+    "",
+    "args = ['opencode', 'run', '--format', 'json', '--model', model, prompt]",
+    "for attachment in attachments:",
+    "    args.extend(['--file', attachment])",
+    "",
+    "with open(log_path, 'wb') as log_file:",
+    "    process = subprocess.Popen(",
+    "        args,",
+    "        cwd=os.getcwd(),",
+    "        env=os.environ.copy(),",
+    "        stdout=log_file,",
+    "        stderr=subprocess.STDOUT,",
+    "        stdin=subprocess.DEVNULL,",
+    "    )",
+    "",
+    "last_offset = 0",
+    "while True:",
+    "    if log_path.exists():",
+    "        with open(log_path, 'rb') as reader:",
+    "            reader.seek(last_offset)",
+    "            chunk = reader.read()",
+    "            if chunk:",
+    "                sys.stdout.buffer.write(chunk)",
+    "                sys.stdout.buffer.flush()",
+    "                last_offset = reader.tell()",
+    "",
+    "    return_code = process.poll()",
+    "    if return_code is not None:",
+    "        break",
+    "",
+    "    time.sleep(0.2)",
+    "",
+    "if log_path.exists():",
+    "    with open(log_path, 'rb') as reader:",
+    "        reader.seek(last_offset)",
+    "        tail = reader.read()",
+    "        if tail:",
+    "            sys.stdout.buffer.write(tail)",
+    "            sys.stdout.buffer.flush()",
+    "",
+    "sys.exit(return_code)",
+    "PY",
+  ].join("\n");
 
 export const opencodeInstallCommand = [
   SANDBOX_TOOL_PATH_EXPORT,
@@ -99,6 +117,13 @@ export const buildOpenCodePrompt = (
     "Bias strongly toward opening a PR for real implementation work so the result is handoff-ready without extra user steps.",
     "Do not create a branch, commit, push, or PR if you only inspected the repo, debugged, or ran tests without meaningful code changes.",
     "",
+    "Fresh scaffold and bootstrap rules:",
+    "If you create a new app, initialize a new package, or change package.json or a lockfile, install dependencies in that project before running build, test, dev, preview, or framework CLI commands that depend on local binaries.",
+    "Do not run install, build, test, and serve commands in parallel for a freshly scaffolded app. Run them sequentially and wait for each step to finish before starting the next one.",
+    "If a command fails because a project binary is missing, such as vite, next, react-scripts, astro, or tsc, treat that as a signal that dependencies for the current project are not installed yet. Install them in the current working directory, then retry.",
+    "For runtime verification artifacts such as logs, pid files, screenshots, and temporary output, use workspace-local paths like .opencode/artifacts or another hidden directory inside the repository. Do not use /tmp or other directories outside the workspace.",
+    "Do not rely on optional host utilities such as lsof for verification. Prefer curl, direct process output, or the browser tools available in this sandbox.",
+    "",
     "Browser validation instructions:",
     "Browser/computer-use tools are always available in this sandbox.",
     "Use the local browser tools for browser automation, screenshots, and interactive verification whenever the task touches frontend behavior or the user asks for computer use.",
@@ -133,17 +158,28 @@ export const buildOpenCodePrompt = (
       : []),
     ...(options?.conversationHistory?.length
       ? [
-          "Conversation continuity rules:",
-          "This follow-up belongs to the same ongoing task and repository workspace as the earlier messages below.",
-          "Use the full prior conversation as context, including previous user requests and your earlier responses.",
-          "Treat the latest user task in this prompt as the instruction to execute now.",
-          "If the latest user task changes or narrows an earlier request, follow the latest user task.",
-          "Do not repeat completed work unless it is necessary for the latest user task.",
-          "",
-          "<conversation_history>",
-          buildConversationTranscript(options.conversationHistory),
-          "</conversation_history>",
-          "",
+          "Conversation history from earlier task messages:",
+          "Use earlier user messages here as context for the current follow-up.",
+          "Do not treat earlier agent responses as the final answer for this follow-up.",
+          ...options.conversationHistory.flatMap((message) => {
+            return [
+              `Earlier ${message.kind === "initial" ? "initial task" : "follow-up"} ${message.sequence + 1} user message:`,
+              message.prompt.trim(),
+              ...(message.error?.trim()
+                ? [
+                    `Earlier ${message.kind === "initial" ? "initial task" : "follow-up"} ${message.sequence + 1} error:`,
+                    message.error.trim(),
+                  ]
+                : []),
+              ...(message.status !== "completed"
+                ? [
+                    `Earlier ${message.kind === "initial" ? "initial task" : "follow-up"} ${message.sequence + 1} status:`,
+                    message.status,
+                  ]
+                : []),
+              "",
+            ];
+          }),
         ]
       : []),
     "User task:",
@@ -154,14 +190,18 @@ export const buildOpenCodeRunCommand = (
   model: string,
   prompt: string,
   attachments?: Array<{ sandboxPath: string }>,
-) =>
-  [
+) => {
+  const attachmentPaths = (attachments ?? []).map((attachment) => attachment.sandboxPath);
+  const promptB64 = Buffer.from(prompt, "utf8").toString("base64");
+  const attachmentsB64 = Buffer.from(JSON.stringify(attachmentPaths), "utf8").toString("base64");
+
+  return [
     SANDBOX_TOOL_PATH_EXPORT,
     writeGeneratedConfigCommand,
     'export OPENCODE_CONFIG="$PWD/../.opencode.generated.json"',
-    `opencode run --format json --model '${escapeForSingleQuotedShell(model)}' "$(cat <<'EOF'\n${prompt}\nEOF\n)"${(
-      attachments ?? []
-    )
-      .map((attachment) => ` --file '${escapeForSingleQuotedShell(attachment.sandboxPath)}'`)
-      .join("")}`,
+    `export OPENCODE_RUN_MODEL='${escapeForSingleQuotedShell(model)}'`,
+    `export OPENCODE_RUN_PROMPT_B64='${escapeForSingleQuotedShell(promptB64)}'`,
+    `export OPENCODE_RUN_ATTACHMENTS_B64='${escapeForSingleQuotedShell(attachmentsB64)}'`,
+    buildOpenCodeRunnerCommand(),
   ].join("\n");
+};

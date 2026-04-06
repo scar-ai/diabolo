@@ -497,6 +497,7 @@ function OrganisationPage() {
                           <Input
                             id={`org-provider-api-key-${provider.id}`}
                             type="password"
+                            autoComplete="off"
                             value={provider.providerApiKey}
                             onChange={(event) =>
                               updateProvider(provider.id, { providerApiKey: event.target.value })

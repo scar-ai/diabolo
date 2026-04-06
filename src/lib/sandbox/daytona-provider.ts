@@ -40,6 +40,9 @@ const wrapSandbox = (sandbox: Awaited<ReturnType<Daytona["create"]>>): Sandbox.S
   async delete(timeoutSeconds = 120) {
     await sandbox.delete(timeoutSeconds);
   },
+  async downloadFile(remotePath: string, timeoutSeconds = 180) {
+    return sandbox.fs.downloadFile(remotePath, timeoutSeconds);
+  },
   async executeCommand(command: string, options?: Sandbox.CommandOptions) {
     const response = await sandbox.process.executeCommand(
       command,

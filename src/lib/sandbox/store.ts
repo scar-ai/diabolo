@@ -139,6 +139,13 @@ export const findTaskMessage = (messageId: string) =>
     .where(eq(taskMessage.id, messageId))
     .then((rows) => rows[0]);
 
+export const findTaskArtifact = (artifactId: string) =>
+  db
+    .select()
+    .from(taskArtifact)
+    .where(eq(taskArtifact.id, artifactId))
+    .then((rows) => rows[0]);
+
 export const findProcessingTaskMessage = (taskId: string) =>
   db
     .select()
@@ -249,6 +256,7 @@ export const createTaskEvent = async (input: {
   });
 
 export const createTaskArtifact = async (input: {
+  id?: string;
   messageId?: string | null;
   metadata?: JsonObject | null;
   taskId: string;
@@ -258,7 +266,7 @@ export const createTaskArtifact = async (input: {
   const inserted = await db
     .insert(taskArtifact)
     .values({
-      id: crypto.randomUUID(),
+      id: input.id ?? crypto.randomUUID(),
       messageId: input.messageId ?? null,
       metadata: input.metadata ? JSON.stringify(input.metadata) : null,
       taskId: input.taskId,

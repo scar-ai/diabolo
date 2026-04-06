@@ -69,6 +69,7 @@ export namespace Sandbox {
   export interface Session {
     cloneRepository(options: CloneRepositoryOptions): Promise<void>;
     delete(timeoutSeconds?: number): Promise<void>;
+    downloadFile(remotePath: string, timeoutSeconds?: number): Promise<Buffer>;
     executeCommand(command: string, options?: CommandOptions): Promise<CommandResult>;
     getWorkspaceRoot(): Promise<string>;
     id: string;

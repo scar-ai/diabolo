@@ -33,6 +33,12 @@ const getArtifactLabel = (artifact: TaskArtifact) => {
   return artifact.type.replaceAll("_", " ");
 };
 
+const isImageArtifact = (artifact: TaskArtifact) =>
+  artifact.type === "screenshot" ||
+  (artifact.type === "attachment" &&
+    typeof artifact.metadata?.mediaType === "string" &&
+    artifact.metadata.mediaType.startsWith("image/"));
+
 export function TaskArtifactList({
   artifacts,
   title = "Artifacts",
@@ -54,10 +60,7 @@ export function TaskArtifactList({
           const Icon =
             artifact.type === "branch"
               ? GitBranchIcon
-              : artifact.type === "screenshot" ||
-                  (artifact.type === "attachment" &&
-                    typeof artifact.metadata?.mediaType === "string" &&
-                    artifact.metadata.mediaType.startsWith("image/"))
+              : isImageArtifact(artifact)
                 ? ImageIcon
                 : artifact.type === "attachment"
                   ? FileIcon
@@ -70,24 +73,41 @@ export function TaskArtifactList({
           return (
             <div
               key={artifact.id}
-              className="flex items-center justify-between gap-3 rounded-lg border border-border/60 bg-background/70 px-3 py-2 text-sm"
+              className="flex flex-col gap-3 rounded-lg border border-border/60 bg-background/70 px-3 py-2 text-sm"
             >
-              <div className="flex min-w-0 items-center gap-2">
-                <Icon className="size-3.5 shrink-0 text-muted-foreground/70" />
-                <span className="truncate text-foreground">{getArtifactLabel(artifact)}</span>
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex min-w-0 items-center gap-2">
+                  <Icon className="size-3.5 shrink-0 text-muted-foreground/70" />
+                  <span className="truncate text-foreground">{getArtifactLabel(artifact)}</span>
+                </div>
+                {isLink ? (
+                  <a
+                    href={artifact.url}
+                    target={isExternal ? "_blank" : undefined}
+                    rel={isExternal ? "noreferrer" : undefined}
+                    className="shrink-0 text-xs text-muted-foreground/70 underline underline-offset-4"
+                  >
+                    {artifact.type === "attachment" ? "Download" : "Open"}
+                  </a>
+                ) : (
+                  <span className="shrink-0 text-xs text-muted-foreground/60">{artifact.url}</span>
+                )}
               </div>
-              {isLink ? (
+              {isImageArtifact(artifact) && isLink ? (
                 <a
                   href={artifact.url}
                   target={isExternal ? "_blank" : undefined}
                   rel={isExternal ? "noreferrer" : undefined}
-                  className="shrink-0 text-xs text-muted-foreground/70 underline underline-offset-4"
+                  className="block overflow-hidden rounded-lg border border-border/60 bg-muted/20"
                 >
-                  {artifact.type === "attachment" ? "Download" : "Open"}
+                  <img
+                    alt={getArtifactLabel(artifact)}
+                    className="max-h-96 w-full object-cover object-top"
+                    loading="lazy"
+                    src={artifact.url}
+                  />
                 </a>
-              ) : (
-                <span className="shrink-0 text-xs text-muted-foreground/60">{artifact.url}</span>
-              )}
+              ) : null}
             </div>
           );
         })}
