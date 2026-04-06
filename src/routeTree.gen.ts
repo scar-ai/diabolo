@@ -9,6 +9,7 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as BetaRouteImport } from './routes/beta'
 import { Route as AlphaRouteImport } from './routes/alpha'
 import { Route as GuestRouteRouteImport } from './routes/_guest/route'
 import { Route as AuthRouteRouteImport } from './routes/_auth/route'
@@ -31,6 +32,11 @@ import { Route as ApiTasksTaskIdAttachmentsRouteImport } from './routes/api/task
 import { Route as AuthAppTasksTaskIdRouteImport } from './routes/_auth/app/tasks/$taskId'
 import { Route as ApiTasksTaskIdArtifactsArtifactIdRouteImport } from './routes/api/tasks/$taskId/artifacts/$artifactId'
 
+const BetaRoute = BetaRouteImport.update({
+  id: '/beta',
+  path: '/beta',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AlphaRoute = AlphaRouteImport.update({
   id: '/alpha',
   path: '/alpha',
@@ -140,6 +146,7 @@ const ApiTasksTaskIdArtifactsArtifactIdRoute =
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/alpha': typeof AlphaRoute
+  '/beta': typeof BetaRoute
   '/app': typeof AuthAppRouteRouteWithChildren
   '/login': typeof GuestLoginRoute
   '/signup': typeof GuestSignupRoute
@@ -161,6 +168,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/alpha': typeof AlphaRoute
+  '/beta': typeof BetaRoute
   '/login': typeof GuestLoginRoute
   '/signup': typeof GuestSignupRoute
   '/app/organisation': typeof AuthAppOrganisationRoute
@@ -184,6 +192,7 @@ export interface FileRoutesById {
   '/_auth': typeof AuthRouteRouteWithChildren
   '/_guest': typeof GuestRouteRouteWithChildren
   '/alpha': typeof AlphaRoute
+  '/beta': typeof BetaRoute
   '/_auth/app': typeof AuthAppRouteRouteWithChildren
   '/_guest/login': typeof GuestLoginRoute
   '/_guest/signup': typeof GuestSignupRoute
@@ -207,6 +216,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/alpha'
+    | '/beta'
     | '/app'
     | '/login'
     | '/signup'
@@ -228,6 +238,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/alpha'
+    | '/beta'
     | '/login'
     | '/signup'
     | '/app/organisation'
@@ -250,6 +261,7 @@ export interface FileRouteTypes {
     | '/_auth'
     | '/_guest'
     | '/alpha'
+    | '/beta'
     | '/_auth/app'
     | '/_guest/login'
     | '/_guest/signup'
@@ -274,6 +286,7 @@ export interface RootRouteChildren {
   AuthRouteRoute: typeof AuthRouteRouteWithChildren
   GuestRouteRoute: typeof GuestRouteRouteWithChildren
   AlphaRoute: typeof AlphaRoute
+  BetaRoute: typeof BetaRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   ApiOpencodeSpawnTaskRoute: typeof ApiOpencodeSpawnTaskRoute
   ApiTasksCreateRoute: typeof ApiTasksCreateRoute
@@ -285,6 +298,13 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/beta': {
+      id: '/beta'
+      path: '/beta'
+      fullPath: '/beta'
+      preLoaderRoute: typeof BetaRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/alpha': {
       id: '/alpha'
       path: '/alpha'
@@ -490,6 +510,7 @@ const rootRouteChildren: RootRouteChildren = {
   AuthRouteRoute: AuthRouteRouteWithChildren,
   GuestRouteRoute: GuestRouteRouteWithChildren,
   AlphaRoute: AlphaRoute,
+  BetaRoute: BetaRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
   ApiOpencodeSpawnTaskRoute: ApiOpencodeSpawnTaskRoute,
   ApiTasksCreateRoute: ApiTasksCreateRoute,
