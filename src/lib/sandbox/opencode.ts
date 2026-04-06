@@ -48,6 +48,7 @@ export const buildOpenCodePrompt = (
     "Complete the user's task fully before you stop.",
     "Inspect the codebase first, make the required changes, and run the relevant verification commands.",
     "Fix any issues you find during verification before finishing.",
+    "Do not inspect or print secret files such as .env, .env.*, .diabolo/*, SSH keys, tokens, or credential stores unless the user explicitly asks for that.",
     "Custom git tools are available: git_status, git_create_branch, git_checkout_branch, git_stage, git_commit, git_push, git_pull, git_create_pr, and git_delete_branch.",
     "Completion rule: if you changed repository files in a meaningful way, do not finish with only local workspace changes. You must create a branch, stage the relevant files, commit the work, push the branch, and open a pull request before you stop unless the user explicitly asked you not to.",
     "Bias strongly toward opening a PR for real implementation work so the result is handoff-ready without extra user steps.",
@@ -67,7 +68,8 @@ export const buildOpenCodePrompt = (
       ? [
           "Project environment variables:",
           `The following environment variables have been injected into this sandbox by the user: ${options.envVarKeys.join(", ")}.`,
-          "They are available as process environment variables and are also written to a .env file at the repository root.",
+          "They are available as process environment variables for commands you run.",
+          "Do not open or print .env files to inspect secrets unless the user explicitly asks for that.",
           "Do not tell the user that no environment variables are defined — they are already present in this sandbox.",
           "",
         ]
@@ -87,12 +89,23 @@ export const buildOpenCodePrompt = (
     ...(options?.conversationHistory?.length
       ? [
           "Conversation history from earlier task messages:",
-          "Use earlier user messages here as context for the current follow-up.",
-          "Do not treat earlier agent responses as the final answer for this follow-up.",
+          "Use earlier user messages and assistant responses here as context for the current follow-up.",
+          "Do not treat earlier assistant responses as the final answer for this follow-up.",
           ...options.conversationHistory.flatMap((message) => {
+            const priorAssistantResponse = message.responseMessages
+              .map((response) => response.text.trim())
+              .filter(Boolean)
+              .join("\n\n");
+
             return [
               `Earlier ${message.kind === "initial" ? "initial task" : "follow-up"} ${message.sequence + 1} user message:`,
               message.prompt.trim(),
+              ...(priorAssistantResponse
+                ? [
+                    `Earlier ${message.kind === "initial" ? "initial task" : "follow-up"} ${message.sequence + 1} assistant response:`,
+                    priorAssistantResponse,
+                  ]
+                : []),
               ...(message.error?.trim()
                 ? [
                     `Earlier ${message.kind === "initial" ? "initial task" : "follow-up"} ${message.sequence + 1} error:`,

@@ -11,7 +11,7 @@ import {
 } from "@/lib/project/data";
 import { parseStoredProjectEnvEntries, serializeProjectEnvEntries } from "@/lib/project/env";
 import { Sandbox } from "@/lib/sandbox";
-import { listUserLlmProviders } from "@/lib/user/data";
+import { findUserLlmProvider, listUserLlmProviders } from "@/lib/user/data";
 
 import { generateTaskTitle } from "./title";
 
@@ -95,8 +95,24 @@ const processDueScheduledTasks = async () => {
     const executionUserId = scheduledTask.createdByUserId ?? project.userId;
 
     try {
-      const providers = await listUserLlmProviders(executionUserId);
-      const openCodeProvider = providers.find((provider) => provider.isDefault) ?? providers[0];
+      const [selectedProvider, providers] = await Promise.all([
+        scheduledTask.providerId
+          ? findUserLlmProvider(executionUserId, scheduledTask.providerId)
+          : Promise.resolve(null),
+        listUserLlmProviders(executionUserId),
+      ]);
+      const openCodeProvider =
+        selectedProvider ?? providers.find((provider) => provider.isDefault) ?? providers[0];
+
+      if (scheduledTask.providerId && !selectedProvider) {
+        log.warn("scheduled task provider missing", {
+          executionUserId,
+          projectId: project.id,
+          providerId: scheduledTask.providerId,
+          scheduledTaskId: scheduledTask.id,
+        });
+        continue;
+      }
 
       if (!openCodeProvider) {
         continue;

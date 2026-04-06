@@ -362,6 +362,7 @@ export namespace Project {
     instructions: string;
     name: string;
     projectId: string;
+    providerId?: string | null;
     runOnce?: boolean;
     scheduleCron: string;
     scheduleTimezone: string;
@@ -370,18 +371,21 @@ export namespace Project {
     ensureScheduledTaskScheduler();
 
     return requireUserProject(input.projectId, input.userId).andThen(() =>
-      fromPromise(
-        insertScheduledTask({
-          branchName: input.branchName ?? null,
-          createdByUserId: input.userId,
-          id: crypto.randomUUID(),
-          instructions: input.instructions,
-          name: input.name,
-          projectId: input.projectId,
-          runOnce: input.runOnce ? 1 : 0,
-          scheduleCron: input.scheduleCron,
-          scheduleTimezone: input.scheduleTimezone,
-        }),
+      resolveTaskOpenCodeConfig(input.userId, input.providerId ?? null).andThen(() =>
+        fromPromise(
+          insertScheduledTask({
+            branchName: input.branchName ?? null,
+            createdByUserId: input.userId,
+            id: crypto.randomUUID(),
+            instructions: input.instructions,
+            name: input.name,
+            projectId: input.projectId,
+            providerId: input.providerId ?? null,
+            runOnce: input.runOnce ? 1 : 0,
+            scheduleCron: input.scheduleCron,
+            scheduleTimezone: input.scheduleTimezone,
+          }),
+        ),
       ),
     );
   };
@@ -402,6 +406,7 @@ export namespace Project {
     instructions: string;
     name: string;
     projectId: string;
+    providerId?: string | null;
     runOnce: boolean;
     scheduleCron: string;
     scheduleTimezone: string;
@@ -410,12 +415,14 @@ export namespace Project {
   }): ResultAsync<ScheduledTaskRecord, Error> =>
     requireUserProject(input.projectId, input.userId)
       .andThen(() => requireScheduledTaskForProject(input.projectId, input.scheduledTaskId))
+      .andThen(() => resolveTaskOpenCodeConfig(input.userId, input.providerId ?? null))
       .andThen(() =>
         fromPromise(
           updateScheduledTask(input.scheduledTaskId, {
             branchName: input.branchName ?? null,
             instructions: input.instructions,
             name: input.name,
+            providerId: input.providerId ?? null,
             runOnce: input.runOnce ? 1 : 0,
             scheduleCron: input.scheduleCron,
             scheduleTimezone: input.scheduleTimezone,

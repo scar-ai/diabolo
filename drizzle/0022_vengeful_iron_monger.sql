@@ -1,0 +1,1 @@
+ALTER TABLE "scheduled_task" ADD COLUMN "provider_id" text;
