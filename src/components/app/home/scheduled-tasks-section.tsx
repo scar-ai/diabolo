@@ -259,6 +259,7 @@ export function ScheduledTasksSection({
                           <Link
                             to="/app/tasks/$taskId"
                             params={{ taskId: latestRun.id }}
+                            search={{ projectId }}
                             className="text-foreground underline-offset-4 hover:underline"
                           >
                             View session

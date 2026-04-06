@@ -17,6 +17,7 @@ export function RunningTaskItem({ task }: { task: RunningTaskItemData }) {
     <Link
       to="/app/tasks/$taskId"
       params={{ taskId: task.id }}
+      search={{ projectId: task.projectId }}
       className="flex items-center gap-3 rounded-xl border border-border bg-muted/40 px-4 py-3 transition-colors hover:bg-muted/60"
     >
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">

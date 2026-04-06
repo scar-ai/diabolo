@@ -34,6 +34,18 @@ export namespace Github {
     name: string;
   };
 
+  type GithubContentFile = {
+    content?: string;
+    encoding?: string;
+    type: "file";
+  };
+
+  type GithubContentDirectoryEntry = {
+    name: string;
+    path: string;
+    type: "dir" | "file" | "submodule" | "symlink";
+  };
+
   type GithubRepoApiItem = {
     clone_url: string;
     default_branch: string;
@@ -306,6 +318,104 @@ export namespace Github {
         return R.map(branches, (b) => ({ name: b.name }));
       })(),
     );
+
+  export const getRepoFileContentForUser = (input: {
+    path: string;
+    ref?: string;
+    repoId: string;
+    userId: string;
+  }): ResultAsync<string | null, Error> =>
+    ResultAsync.combine([
+      getRepoForUser(input.repoId, input.userId),
+      getAccessTokenForUser(input.userId),
+    ]).andThen(([repo, token]) => {
+      if (!repo) {
+        return errAsync(new Error("Unknown repository selection."));
+      }
+
+      return fromPromise(
+        (async () => {
+          const response = await fetch(
+            `https://api.github.com/repos/${repo.fullName}/contents/${input.path}${input.ref ? `?ref=${encodeURIComponent(input.ref)}` : ""}`,
+            {
+              headers: {
+                Accept: "application/vnd.github+json",
+                Authorization: `Bearer ${token}`,
+                "X-GitHub-Api-Version": "2022-11-28",
+              },
+            },
+          );
+
+          if (response.status === 404) {
+            return null;
+          }
+
+          if (!response.ok) {
+            throw new Error(`GitHub request failed with status ${response.status}.`);
+          }
+
+          const data = (await response.json()) as GithubContentFile | GithubContentDirectoryEntry[];
+
+          if (Array.isArray(data) || data.type !== "file" || !data.content) {
+            return null;
+          }
+
+          if (data.encoding !== "base64") {
+            throw new Error(`Unsupported GitHub file encoding: ${data.encoding ?? "unknown"}.`);
+          }
+
+          return Buffer.from(data.content, "base64").toString("utf8");
+        })(),
+      );
+    });
+
+  export const listRepoDirectoryNamesForUser = (input: {
+    path: string;
+    ref?: string;
+    repoId: string;
+    userId: string;
+  }): ResultAsync<string[] | null, Error> =>
+    ResultAsync.combine([
+      getRepoForUser(input.repoId, input.userId),
+      getAccessTokenForUser(input.userId),
+    ]).andThen(([repo, token]) => {
+      if (!repo) {
+        return errAsync(new Error("Unknown repository selection."));
+      }
+
+      return fromPromise(
+        (async () => {
+          const response = await fetch(
+            `https://api.github.com/repos/${repo.fullName}/contents/${input.path}${input.ref ? `?ref=${encodeURIComponent(input.ref)}` : ""}`,
+            {
+              headers: {
+                Accept: "application/vnd.github+json",
+                Authorization: `Bearer ${token}`,
+                "X-GitHub-Api-Version": "2022-11-28",
+              },
+            },
+          );
+
+          if (response.status === 404) {
+            return null;
+          }
+
+          if (!response.ok) {
+            throw new Error(`GitHub request failed with status ${response.status}.`);
+          }
+
+          const data = (await response.json()) as GithubContentDirectoryEntry[] | GithubContentFile;
+
+          if (!Array.isArray(data)) {
+            return null;
+          }
+
+          return data
+            .filter((entry) => entry.type === "dir" && !entry.name.startsWith("."))
+            .map((entry) => entry.name);
+        })(),
+      );
+    });
 
   export const lookupUserByUsername = (
     username: string,

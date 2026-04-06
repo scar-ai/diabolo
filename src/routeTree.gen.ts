@@ -23,6 +23,7 @@ import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 import { Route as AuthAppSettingsRouteImport } from './routes/_auth/app/settings'
 import { Route as AuthAppSessionsRouteImport } from './routes/_auth/app/sessions'
 import { Route as AuthAppProjectsRouteImport } from './routes/_auth/app/projects'
+import { Route as AuthAppProjectSettingsRouteImport } from './routes/_auth/app/project-settings'
 import { Route as AuthAppOrganisationRouteImport } from './routes/_auth/app/organisation'
 import { Route as ApiTasksTaskIdStreamRouteImport } from './routes/api/tasks/$taskId/stream'
 import { Route as ApiTasksTaskIdFollowUpRouteImport } from './routes/api/tasks/$taskId/follow-up'
@@ -98,6 +99,11 @@ const AuthAppProjectsRoute = AuthAppProjectsRouteImport.update({
   path: '/projects',
   getParentRoute: () => AuthAppRouteRoute,
 } as any)
+const AuthAppProjectSettingsRoute = AuthAppProjectSettingsRouteImport.update({
+  id: '/project-settings',
+  path: '/project-settings',
+  getParentRoute: () => AuthAppRouteRoute,
+} as any)
 const AuthAppOrganisationRoute = AuthAppOrganisationRouteImport.update({
   id: '/organisation',
   path: '/organisation',
@@ -138,6 +144,7 @@ export interface FileRoutesByFullPath {
   '/login': typeof GuestLoginRoute
   '/signup': typeof GuestSignupRoute
   '/app/organisation': typeof AuthAppOrganisationRoute
+  '/app/project-settings': typeof AuthAppProjectSettingsRoute
   '/app/projects': typeof AuthAppProjectsRoute
   '/app/sessions': typeof AuthAppSessionsRoute
   '/app/settings': typeof AuthAppSettingsRoute
@@ -157,6 +164,7 @@ export interface FileRoutesByTo {
   '/login': typeof GuestLoginRoute
   '/signup': typeof GuestSignupRoute
   '/app/organisation': typeof AuthAppOrganisationRoute
+  '/app/project-settings': typeof AuthAppProjectSettingsRoute
   '/app/projects': typeof AuthAppProjectsRoute
   '/app/sessions': typeof AuthAppSessionsRoute
   '/app/settings': typeof AuthAppSettingsRoute
@@ -180,6 +188,7 @@ export interface FileRoutesById {
   '/_guest/login': typeof GuestLoginRoute
   '/_guest/signup': typeof GuestSignupRoute
   '/_auth/app/organisation': typeof AuthAppOrganisationRoute
+  '/_auth/app/project-settings': typeof AuthAppProjectSettingsRoute
   '/_auth/app/projects': typeof AuthAppProjectsRoute
   '/_auth/app/sessions': typeof AuthAppSessionsRoute
   '/_auth/app/settings': typeof AuthAppSettingsRoute
@@ -202,6 +211,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/signup'
     | '/app/organisation'
+    | '/app/project-settings'
     | '/app/projects'
     | '/app/sessions'
     | '/app/settings'
@@ -221,6 +231,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/signup'
     | '/app/organisation'
+    | '/app/project-settings'
     | '/app/projects'
     | '/app/sessions'
     | '/app/settings'
@@ -243,6 +254,7 @@ export interface FileRouteTypes {
     | '/_guest/login'
     | '/_guest/signup'
     | '/_auth/app/organisation'
+    | '/_auth/app/project-settings'
     | '/_auth/app/projects'
     | '/_auth/app/sessions'
     | '/_auth/app/settings'
@@ -371,6 +383,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthAppProjectsRouteImport
       parentRoute: typeof AuthAppRouteRoute
     }
+    '/_auth/app/project-settings': {
+      id: '/_auth/app/project-settings'
+      path: '/project-settings'
+      fullPath: '/app/project-settings'
+      preLoaderRoute: typeof AuthAppProjectSettingsRouteImport
+      parentRoute: typeof AuthAppRouteRoute
+    }
     '/_auth/app/organisation': {
       id: '/_auth/app/organisation'
       path: '/organisation'
@@ -418,6 +437,7 @@ declare module '@tanstack/react-router' {
 
 interface AuthAppRouteRouteChildren {
   AuthAppOrganisationRoute: typeof AuthAppOrganisationRoute
+  AuthAppProjectSettingsRoute: typeof AuthAppProjectSettingsRoute
   AuthAppProjectsRoute: typeof AuthAppProjectsRoute
   AuthAppSessionsRoute: typeof AuthAppSessionsRoute
   AuthAppSettingsRoute: typeof AuthAppSettingsRoute
@@ -427,6 +447,7 @@ interface AuthAppRouteRouteChildren {
 
 const AuthAppRouteRouteChildren: AuthAppRouteRouteChildren = {
   AuthAppOrganisationRoute: AuthAppOrganisationRoute,
+  AuthAppProjectSettingsRoute: AuthAppProjectSettingsRoute,
   AuthAppProjectsRoute: AuthAppProjectsRoute,
   AuthAppSessionsRoute: AuthAppSessionsRoute,
   AuthAppSettingsRoute: AuthAppSettingsRoute,

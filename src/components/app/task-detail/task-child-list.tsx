@@ -11,7 +11,7 @@ type ChildTask = {
   updatedAt: Date | string;
 };
 
-export function TaskChildList({ tasks }: { tasks: ChildTask[] }) {
+export function TaskChildList({ projectId, tasks }: { projectId: string; tasks: ChildTask[] }) {
   if (tasks.length === 0) {
     return null;
   }
@@ -27,6 +27,7 @@ export function TaskChildList({ tasks }: { tasks: ChildTask[] }) {
             key={child.id}
             to="/app/tasks/$taskId"
             params={{ taskId: child.id }}
+            search={{ projectId }}
             className="flex items-center justify-between gap-3 rounded-lg border border-border/60 bg-background/70 px-3 py-2 transition-colors hover:bg-background"
           >
             <div className="min-w-0">

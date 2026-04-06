@@ -1,34 +1,19 @@
 import { Link } from "@tanstack/react-router";
-import { BookIcon, LoaderIcon, PlusIcon, Trash2Icon, ZapIcon } from "lucide-react";
+import { BookIcon, PlusIcon, ZapIcon } from "lucide-react";
 
 import { ProjectSettingsDialog } from "@/components/app/project-settings-dialog";
-import {
-  AlertDialog,
-  AlertDialogCancel,
-  AlertDialogClose,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import type { ProjectsResult, TaskSummaryResult } from "@/lib/project/queries";
 
 export function ProjectDashboard({
   currentUserId,
-  deletingProjectId,
   onCreateProject,
-  onDeleteProject,
   projects,
   repoNamesById,
   runningTasksByProject,
 }: {
   currentUserId: string;
-  deletingProjectId?: string | null;
   onCreateProject: () => void;
-  onDeleteProject: (projectId: string) => void;
   projects: ProjectsResult;
   repoNamesById: Map<string, string>;
   runningTasksByProject: Map<string, TaskSummaryResult[]>;
@@ -79,8 +64,6 @@ export function ProjectDashboard({
           {projects.map((project) => {
             const repoName = repoNamesById.get(project.repoId) ?? project.repoId;
             const runningTasks = runningTasksByProject.get(project.id) ?? [];
-            const isDeleting = deletingProjectId === project.id;
-            const isOwner = project.userId === currentUserId;
             const hasRunning = runningTasks.length > 0;
 
             return (
@@ -151,53 +134,6 @@ export function ProjectDashboard({
                       event.stopPropagation();
                     }}
                   />
-                  {isOwner ? (
-                    <AlertDialog>
-                      <AlertDialogTrigger
-                        render={
-                          <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            className="rounded-full text-destructive/60 hover:bg-destructive/10 hover:text-destructive"
-                            disabled={isDeleting}
-                            onClick={(event) => {
-                              event.preventDefault();
-                              event.stopPropagation();
-                            }}
-                          />
-                        }
-                      >
-                        {isDeleting ? (
-                          <LoaderIcon className="size-3.5 animate-spin" aria-hidden="true" />
-                        ) : (
-                          <Trash2Icon className="size-3.5" aria-hidden="true" />
-                        )}
-                        <span className="sr-only">Delete project</span>
-                      </AlertDialogTrigger>
-                      <AlertDialogContent>
-                        <AlertDialogHeader>
-                          <AlertDialogTitle>Delete project?</AlertDialogTitle>
-                          <AlertDialogDescription>
-                            This permanently removes {project.name} and its sessions.
-                          </AlertDialogDescription>
-                        </AlertDialogHeader>
-                        <AlertDialogFooter>
-                          <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
-                          <AlertDialogClose
-                            variant="destructive"
-                            disabled={isDeleting}
-                            onClick={() => onDeleteProject(project.id)}
-                          >
-                            {isDeleting ? (
-                              <LoaderIcon className="size-3.5 animate-spin" aria-hidden="true" />
-                            ) : (
-                              "Delete"
-                            )}
-                          </AlertDialogClose>
-                        </AlertDialogFooter>
-                      </AlertDialogContent>
-                    </AlertDialog>
-                  ) : null}
                 </div>
               </div>
             );

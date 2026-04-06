@@ -24,6 +24,7 @@ import {
 import { fromPromise } from "@/lib/result";
 import { Sandbox } from "@/lib/sandbox";
 import { findNextPendingTaskMessage, findProcessingTaskMessage } from "@/lib/sandbox/store";
+import { detectRepoSkills, type DetectedRepoSkillEntry } from "@/lib/skills/repository";
 import { findUserLlmProvider, listUserLlmProviders } from "@/lib/user/data";
 
 import {
@@ -98,6 +99,24 @@ export namespace Project {
     fromPromise(findOwnedProject(projectId, userId)).andThen((value) =>
       value ? okAsync(value) : errAsync(new Error("Project not found.")),
     );
+
+  /** Require delete permission: creator, or org owner for org-shared projects. */
+  const requireProjectDeleteAccess = (projectId: string, userId: string) =>
+    requireUserProject(projectId, userId).andThen((project) => {
+      if (project.userId === userId) {
+        return okAsync(project);
+      }
+
+      if (!project.sharedWithOrgId) {
+        return errAsync(new Error("You do not have permission to delete this project."));
+      }
+
+      return Org.getMembershipInOrgForUser(project.sharedWithOrgId, userId).andThen((membership) =>
+        membership?.role === "owner"
+          ? okAsync(project)
+          : errAsync(new Error("You do not have permission to delete this project.")),
+      );
+    });
 
   const requireTaskForProject = (projectId: string, taskId: string) =>
     fromPromise(findProjectTask(taskId, projectId)).andThen((value) =>
@@ -214,6 +233,7 @@ export namespace Project {
   ): ResultAsync<
     ProjectRecord & {
       envEntries: ProjectEnvEntry[];
+      repoSkills: DetectedRepoSkillEntry[];
       skills: ProjectSkillEntry[];
       repoDefaultBranch: string | null;
       repoDescription: string | null;
@@ -223,22 +243,38 @@ export namespace Project {
     Error
   > =>
     requireUserProject(projectId, userId).andThen((value) =>
-      Github.getRepo(value.repoId).map((repo) => ({
-        ...value,
-        envEntries: parseStoredProjectEnvEntries(value.envVars),
-        skills: parseStoredProjectSkills(value.agentSkills),
-        repoDefaultBranch: repo?.defaultBranch ?? null,
-        repoDescription: repo?.description ?? null,
-        repoFullName: repo?.fullName ?? null,
-        repoHtmlUrl: repo?.htmlUrl ?? null,
-      })),
+      Github.getRepoForUser(value.repoId, userId).andThen((repo) =>
+        detectRepoSkills({
+          defaultBranch: repo?.defaultBranch ?? null,
+          repoHtmlUrl: repo?.htmlUrl ?? null,
+          repoId: value.repoId,
+          userId,
+        }).map((repoSkills) => ({
+          ...value,
+          envEntries: parseStoredProjectEnvEntries(value.envVars),
+          repoSkills,
+          skills: parseStoredProjectSkills(value.agentSkills),
+          repoDefaultBranch: repo?.defaultBranch ?? null,
+          repoDescription: repo?.description ?? null,
+          repoFullName: repo?.fullName ?? null,
+          repoHtmlUrl: repo?.htmlUrl ?? null,
+        })),
+      ),
     );
 
   export const deleteProjectForUser = (
     projectId: string,
     userId: string,
+    projectName: string,
   ): ResultAsync<void, Error> =>
-    requireOwnedProject(projectId, userId)
+    requireProjectDeleteAccess(projectId, userId)
+      .andThen((project) => {
+        if (project.name !== projectName) {
+          return errAsync(new Error("Project name confirmation does not match."));
+        }
+
+        return okAsync(project);
+      })
       .andThen(() => fromPromise(deleteProject(projectId)))
       .map(() => {
         log.info("project deleted", { projectId });

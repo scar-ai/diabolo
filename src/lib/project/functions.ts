@@ -24,6 +24,10 @@ const projectIdInputSchema = z.object({
   projectId: z.string().min(1),
 });
 
+const deleteProjectInputSchema = projectIdInputSchema.extend({
+  projectName: z.string().min(1),
+});
+
 const projectEnvEntrySchema: z.ZodType<ProjectEnvEntry> = z.object({
   key: z.string(),
   value: z.string(),
@@ -166,9 +170,9 @@ export const $getTask = createServerFn({ method: "GET" })
 
 export const $deleteProject = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .inputValidator((data) => projectIdInputSchema.parse(data))
+  .inputValidator((data) => deleteProjectInputSchema.parse(data))
   .handler(async ({ context, data }) =>
-    unwrap(Project.deleteProjectForUser(data.projectId, context.user.id)),
+    unwrap(Project.deleteProjectForUser(data.projectId, context.user.id, data.projectName)),
   );
 
 export const $updateProjectSettings = createServerFn({ method: "POST" })

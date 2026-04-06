@@ -136,8 +136,8 @@ function SessionsPage() {
 
   return (
     <>
-      <div className="flex shrink-0 items-center border-b border-border/60 px-6 py-3">
-        <h1 className="text-sm font-medium text-foreground">
+      <div className="flex h-14 shrink-0 items-center border-b border-border/60 px-6">
+        <h1 className="text-base font-medium text-foreground">
           Sessions
           {currentProject ? (
             <span className="ml-1.5 text-muted-foreground/60">— {currentProject.name}</span>

@@ -56,7 +56,7 @@ export function TaskConversation({
         >
           <UserBubble text={task.prompt} timestamp={task.startedAt} user={taskCreator} />
           <AgentBubble task={task} isRunning={taskIsRunning} />
-          <TaskChildList tasks={task.children} />
+          <TaskChildList projectId={task.projectId} tasks={task.children} />
           {followUps.map((followUp) => {
             const followUpCreator = followUp.createdByUserId
               ? (collaborators?.get(followUp.createdByUserId) ?? null)

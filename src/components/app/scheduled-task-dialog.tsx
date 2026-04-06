@@ -199,7 +199,7 @@ export function ScheduledTaskDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="max-w-4xl">
         <DialogHeader>
           <DialogTitle>
             {mode === "edit" ? "Edit scheduled task" : "New scheduled task"}
@@ -211,371 +211,379 @@ export function ScheduledTaskDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div className="sm:col-span-2">
-            <label
-              htmlFor={nameInputId}
-              className="mb-1.5 block text-sm font-medium text-foreground"
-            >
-              Name
-            </label>
-            <Input
-              id={nameInputId}
-              maxLength={MAX_SCHEDULED_TASK_NAME_LENGTH}
-              placeholder="Daily dependency audit"
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-            />
-            <p className="mt-1 text-xs text-muted-foreground">
-              {name.length}/{MAX_SCHEDULED_TASK_NAME_LENGTH}
-            </p>
-          </div>
-
-          <div className="sm:col-span-2">
-            <div id={scheduleInputId} className="mb-1.5 text-sm font-medium text-foreground">
-              Schedule
-            </div>
-            <Select
-              aria-labelledby={scheduleInputId}
-              value={preset}
-              onValueChange={(value) => {
-                const nextPreset = value as SchedulePresetValue;
-                setPreset(nextPreset);
-                if (nextPreset !== "custom") {
-                  setCustomCron("");
-                }
-              }}
-            >
-              <SelectTrigger className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {SCHEDULE_PRESETS.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <p className="mt-1 text-xs text-muted-foreground">{selectedPreset.description}</p>
-
-            {preset === "hourly" ? (
-              <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                <div>
-                  <div className="mb-1.5 text-xs font-medium text-muted-foreground">Minute</div>
-                  <Select
-                    value={String(presetConfig.minute)}
-                    onValueChange={(value) =>
-                      setPresetConfig((current) => ({ ...current, minute: Number(value) }))
-                    }
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {minutes.map((minute) => (
-                        <SelectItem key={minute} value={String(minute)}>
-                          {formatTwoDigits(minute)}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-            ) : null}
-
-            {preset === "daily" ? (
-              <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                <div>
-                  <div className="mb-1.5 text-xs font-medium text-muted-foreground">Hour</div>
-                  <Select
-                    value={String(presetConfig.hour)}
-                    onValueChange={(value) =>
-                      setPresetConfig((current) => ({ ...current, hour: Number(value) }))
-                    }
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {hours.map((hour) => (
-                        <SelectItem key={hour} value={String(hour)}>
-                          {formatTwoDigits(hour)}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <div className="mb-1.5 text-xs font-medium text-muted-foreground">Minute</div>
-                  <Select
-                    value={String(presetConfig.minute)}
-                    onValueChange={(value) =>
-                      setPresetConfig((current) => ({ ...current, minute: Number(value) }))
-                    }
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {minutes.map((minute) => (
-                        <SelectItem key={minute} value={String(minute)}>
-                          {formatTwoDigits(minute)}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-            ) : null}
-
-            {preset === "weekly" ? (
-              <div className="mt-3 grid gap-3 sm:grid-cols-3">
-                <div>
-                  <div className="mb-1.5 text-xs font-medium text-muted-foreground">Weekday</div>
-                  <Select
-                    value={String(presetConfig.dayOfWeek)}
-                    onValueChange={(value) =>
-                      setPresetConfig((current) => ({ ...current, dayOfWeek: Number(value) }))
-                    }
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {weekdays.map((day) => (
-                        <SelectItem key={day.value} value={String(day.value)}>
-                          {day.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <div className="mb-1.5 text-xs font-medium text-muted-foreground">Hour</div>
-                  <Select
-                    value={String(presetConfig.hour)}
-                    onValueChange={(value) =>
-                      setPresetConfig((current) => ({ ...current, hour: Number(value) }))
-                    }
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {hours.map((hour) => (
-                        <SelectItem key={hour} value={String(hour)}>
-                          {formatTwoDigits(hour)}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <div className="mb-1.5 text-xs font-medium text-muted-foreground">Minute</div>
-                  <Select
-                    value={String(presetConfig.minute)}
-                    onValueChange={(value) =>
-                      setPresetConfig((current) => ({ ...current, minute: Number(value) }))
-                    }
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {minutes.map((minute) => (
-                        <SelectItem key={minute} value={String(minute)}>
-                          {formatTwoDigits(minute)}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-            ) : null}
-
-            {preset === "monthly" ? (
-              <div className="mt-3 grid gap-3 sm:grid-cols-3">
-                <div>
-                  <div className="mb-1.5 text-xs font-medium text-muted-foreground">
-                    Day of month
-                  </div>
-                  <Select
-                    value={String(presetConfig.dayOfMonth)}
-                    onValueChange={(value) =>
-                      setPresetConfig((current) => ({ ...current, dayOfMonth: Number(value) }))
-                    }
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {monthDays.map((day) => (
-                        <SelectItem key={day} value={String(day)}>
-                          {day}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <div className="mb-1.5 text-xs font-medium text-muted-foreground">Hour</div>
-                  <Select
-                    value={String(presetConfig.hour)}
-                    onValueChange={(value) =>
-                      setPresetConfig((current) => ({ ...current, hour: Number(value) }))
-                    }
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {hours.map((hour) => (
-                        <SelectItem key={hour} value={String(hour)}>
-                          {formatTwoDigits(hour)}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <div className="mb-1.5 text-xs font-medium text-muted-foreground">Minute</div>
-                  <Select
-                    value={String(presetConfig.minute)}
-                    onValueChange={(value) =>
-                      setPresetConfig((current) => ({ ...current, minute: Number(value) }))
-                    }
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {minutes.map((minute) => (
-                        <SelectItem key={minute} value={String(minute)}>
-                          {formatTwoDigits(minute)}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-            ) : null}
-
-            {preset !== "custom" ? (
-              <p className="mt-3 text-xs text-muted-foreground">
-                Cron: {scheduleCron} · Local time{" "}
-                {timeLabel(presetConfig.hour, presetConfig.minute)}
+        <div className="grid grid-cols-2 gap-x-6 gap-y-4">
+          {/* Left column */}
+          <div className="flex flex-col gap-4">
+            <div>
+              <label
+                htmlFor={nameInputId}
+                className="mb-1.5 block text-sm font-medium text-foreground"
+              >
+                Name
+              </label>
+              <Input
+                id={nameInputId}
+                maxLength={MAX_SCHEDULED_TASK_NAME_LENGTH}
+                placeholder="Daily dependency audit"
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+              />
+              <p className="mt-1 text-xs text-muted-foreground">
+                {name.length}/{MAX_SCHEDULED_TASK_NAME_LENGTH}
               </p>
-            ) : null}
+            </div>
 
-            {preset === "custom" ? (
-              <div className="mt-3">
-                <Input
-                  className="font-mono"
-                  placeholder="0 9 * * 1-5"
-                  value={customCron}
-                  onChange={(event) => setCustomCron(event.target.value)}
-                />
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Use a 5-field cron expression: minute hour day month weekday.
-                </p>
-                {customCron.trim().length > 0 && !cronIsValid ? (
-                  <p className="mt-1 text-xs text-destructive">Enter a valid cron expression.</p>
-                ) : null}
+            <div>
+              <div id={scheduleInputId} className="mb-1.5 text-sm font-medium text-foreground">
+                Schedule
               </div>
-            ) : null}
-          </div>
+              <Select
+                aria-labelledby={scheduleInputId}
+                value={preset}
+                onValueChange={(value) => {
+                  const nextPreset = value as SchedulePresetValue;
+                  setPreset(nextPreset);
+                  if (nextPreset !== "custom") {
+                    setCustomCron("");
+                  }
+                }}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {SCHEDULE_PRESETS.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="mt-1 text-xs text-muted-foreground">{selectedPreset.description}</p>
 
-          <div>
-            <label
-              htmlFor={timezoneInputId}
-              className="mb-1.5 block text-sm font-medium text-foreground"
-            >
-              Timezone
-            </label>
-            <Input
-              id={timezoneInputId}
-              list={timezoneListId}
-              placeholder="Europe/Paris"
-              value={scheduleTimezone}
-              onChange={(event) => setScheduleTimezone(event.target.value)}
-            />
-            <datalist id={timezoneListId}>
-              {supportedTimezones.map((timezone) => (
-                <option key={timezone} value={timezone} />
-              ))}
-            </datalist>
-            {!timezoneIsValid ? (
-              <p className="mt-1 text-xs text-destructive">Enter a valid IANA timezone.</p>
-            ) : null}
-          </div>
+              {preset === "hourly" ? (
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <div className="mb-1.5 text-xs font-medium text-muted-foreground">Minute</div>
+                    <Select
+                      value={String(presetConfig.minute)}
+                      onValueChange={(value) =>
+                        setPresetConfig((current) => ({ ...current, minute: Number(value) }))
+                      }
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {minutes.map((minute) => (
+                          <SelectItem key={minute} value={String(minute)}>
+                            {formatTwoDigits(minute)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              ) : null}
 
-          <div>
-            <div id={providerInputId} className="mb-1.5 text-sm font-medium text-foreground">
-              Provider
+              {preset === "daily" ? (
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <div className="mb-1.5 text-xs font-medium text-muted-foreground">Hour</div>
+                    <Select
+                      value={String(presetConfig.hour)}
+                      onValueChange={(value) =>
+                        setPresetConfig((current) => ({ ...current, hour: Number(value) }))
+                      }
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {hours.map((hour) => (
+                          <SelectItem key={hour} value={String(hour)}>
+                            {formatTwoDigits(hour)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <div className="mb-1.5 text-xs font-medium text-muted-foreground">Minute</div>
+                    <Select
+                      value={String(presetConfig.minute)}
+                      onValueChange={(value) =>
+                        setPresetConfig((current) => ({ ...current, minute: Number(value) }))
+                      }
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {minutes.map((minute) => (
+                          <SelectItem key={minute} value={String(minute)}>
+                            {formatTwoDigits(minute)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              ) : null}
+
+              {preset === "weekly" ? (
+                <div className="mt-3 grid gap-3 sm:grid-cols-3">
+                  <div>
+                    <div className="mb-1.5 text-xs font-medium text-muted-foreground">Weekday</div>
+                    <Select
+                      value={String(presetConfig.dayOfWeek)}
+                      onValueChange={(value) =>
+                        setPresetConfig((current) => ({ ...current, dayOfWeek: Number(value) }))
+                      }
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {weekdays.map((day) => (
+                          <SelectItem key={day.value} value={String(day.value)}>
+                            {day.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <div className="mb-1.5 text-xs font-medium text-muted-foreground">Hour</div>
+                    <Select
+                      value={String(presetConfig.hour)}
+                      onValueChange={(value) =>
+                        setPresetConfig((current) => ({ ...current, hour: Number(value) }))
+                      }
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {hours.map((hour) => (
+                          <SelectItem key={hour} value={String(hour)}>
+                            {formatTwoDigits(hour)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <div className="mb-1.5 text-xs font-medium text-muted-foreground">Minute</div>
+                    <Select
+                      value={String(presetConfig.minute)}
+                      onValueChange={(value) =>
+                        setPresetConfig((current) => ({ ...current, minute: Number(value) }))
+                      }
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {minutes.map((minute) => (
+                          <SelectItem key={minute} value={String(minute)}>
+                            {formatTwoDigits(minute)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              ) : null}
+
+              {preset === "monthly" ? (
+                <div className="mt-3 grid gap-3 sm:grid-cols-3">
+                  <div>
+                    <div className="mb-1.5 text-xs font-medium text-muted-foreground">
+                      Day of month
+                    </div>
+                    <Select
+                      value={String(presetConfig.dayOfMonth)}
+                      onValueChange={(value) =>
+                        setPresetConfig((current) => ({ ...current, dayOfMonth: Number(value) }))
+                      }
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {monthDays.map((day) => (
+                          <SelectItem key={day} value={String(day)}>
+                            {day}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <div className="mb-1.5 text-xs font-medium text-muted-foreground">Hour</div>
+                    <Select
+                      value={String(presetConfig.hour)}
+                      onValueChange={(value) =>
+                        setPresetConfig((current) => ({ ...current, hour: Number(value) }))
+                      }
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {hours.map((hour) => (
+                          <SelectItem key={hour} value={String(hour)}>
+                            {formatTwoDigits(hour)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <div className="mb-1.5 text-xs font-medium text-muted-foreground">Minute</div>
+                    <Select
+                      value={String(presetConfig.minute)}
+                      onValueChange={(value) =>
+                        setPresetConfig((current) => ({ ...current, minute: Number(value) }))
+                      }
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {minutes.map((minute) => (
+                          <SelectItem key={minute} value={String(minute)}>
+                            {formatTwoDigits(minute)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              ) : null}
+
+              {preset !== "custom" ? (
+                <p className="mt-3 text-xs text-muted-foreground">
+                  Cron: {scheduleCron} · Local time{" "}
+                  {timeLabel(presetConfig.hour, presetConfig.minute)}
+                </p>
+              ) : null}
+
+              {preset === "custom" ? (
+                <div className="mt-3">
+                  <Input
+                    className="font-mono"
+                    placeholder="0 9 * * 1-5"
+                    value={customCron}
+                    onChange={(event) => setCustomCron(event.target.value)}
+                  />
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Use a 5-field cron expression: minute hour day month weekday.
+                  </p>
+                  {customCron.trim().length > 0 && !cronIsValid ? (
+                    <p className="mt-1 text-xs text-destructive">Enter a valid cron expression.</p>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
-            <Select
-              aria-labelledby={providerInputId}
-              value={selectedProviderId ?? undefined}
-              onValueChange={setProviderId}
-              disabled={providers.length === 0}
-            >
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder="Select a provider">
-                  {selectedProvider
-                    ? `${selectedProvider.name}${selectedProvider.isDefault ? " · Default" : ""}`
-                    : "No providers"}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                {providers.map((provider) => (
-                  <SelectItem key={provider.id} value={provider.id}>
-                    {provider.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <p className="mt-1 text-xs text-muted-foreground">
-              {selectedProvider
-                ? `${selectedProvider.providerId}/${selectedProvider.providerModel}`
-                : "Add a provider in Settings before creating a scheduled task."}
-            </p>
           </div>
+          {/* end left column */}
 
-          <div>
-            <div id={branchInputId} className="mb-1.5 text-sm font-medium text-foreground">
-              Branch
-              <span className="ml-1 text-xs font-normal text-muted-foreground">Optional</span>
+          {/* Right column */}
+          <div className="flex flex-col gap-4">
+            <div>
+              <label
+                htmlFor={timezoneInputId}
+                className="mb-1.5 block text-sm font-medium text-foreground"
+              >
+                Timezone
+              </label>
+              <Input
+                id={timezoneInputId}
+                list={timezoneListId}
+                placeholder="Europe/Paris"
+                value={scheduleTimezone}
+                onChange={(event) => setScheduleTimezone(event.target.value)}
+              />
+              <datalist id={timezoneListId}>
+                {supportedTimezones.map((timezone) => (
+                  <option key={timezone} value={timezone} />
+                ))}
+              </datalist>
+              {!timezoneIsValid ? (
+                <p className="mt-1 text-xs text-destructive">Enter a valid IANA timezone.</p>
+              ) : null}
             </div>
-            <Select
-              aria-labelledby={branchInputId}
-              value={branchMode === "default" ? "__default__" : branchName}
-              onValueChange={(value) => {
-                if (value === "__default__") {
-                  setBranchMode("default");
-                  setBranchName(defaultBranch);
-                  return;
-                }
 
-                setBranchMode("custom");
-                setBranchName(typeof value === "string" ? value : defaultBranch);
-              }}
-            >
-              <SelectTrigger className="w-full">
-                <SelectValue>{selectedBranchLabel}</SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__default__">Project default ({defaultBranch})</SelectItem>
-                {branches.map((branch) => (
-                  <SelectItem key={branch} value={branch}>
-                    {branch}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <div>
+              <div id={providerInputId} className="mb-1.5 text-sm font-medium text-foreground">
+                Provider
+              </div>
+              <Select
+                aria-labelledby={providerInputId}
+                value={selectedProviderId ?? undefined}
+                onValueChange={setProviderId}
+                disabled={providers.length === 0}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Select a provider">
+                    {selectedProvider
+                      ? `${selectedProvider.name}${selectedProvider.isDefault ? " · Default" : ""}`
+                      : "No providers"}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {providers.map((provider) => (
+                    <SelectItem key={provider.id} value={provider.id}>
+                      {provider.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {selectedProvider
+                  ? `${selectedProvider.providerId}/${selectedProvider.providerModel}`
+                  : "Add a provider in Settings before creating a scheduled task."}
+              </p>
+            </div>
+
+            <div>
+              <div id={branchInputId} className="mb-1.5 text-sm font-medium text-foreground">
+                Branch
+                <span className="ml-1 text-xs font-normal text-muted-foreground">Optional</span>
+              </div>
+              <Select
+                aria-labelledby={branchInputId}
+                value={branchMode === "default" ? "__default__" : branchName}
+                onValueChange={(value) => {
+                  if (value === "__default__") {
+                    setBranchMode("default");
+                    setBranchName(defaultBranch);
+                    return;
+                  }
+
+                  setBranchMode("custom");
+                  setBranchName(typeof value === "string" ? value : defaultBranch);
+                }}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue>{selectedBranchLabel}</SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__default__">Project default ({defaultBranch})</SelectItem>
+                  {branches.map((branch) => (
+                    <SelectItem key={branch} value={branch}>
+                      {branch}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
+          {/* end right column */}
 
-          <div className="sm:col-span-2">
+          <div className="col-span-2">
             <label
               htmlFor={instructionsInputId}
               className="mb-1.5 block text-sm font-medium text-foreground"
@@ -595,7 +603,7 @@ export function ScheduledTaskDialog({
             </p>
           </div>
 
-          <div className="sm:col-span-2">
+          <div className="col-span-2">
             <div className="flex items-start gap-3 rounded-xl border border-border p-4">
               <Checkbox
                 id={runOnceInputId}

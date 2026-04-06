@@ -1,10 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import {
+  AlertTriangleIcon,
   FileIcon,
   LoaderIcon,
   SearchIcon,
   Settings2Icon,
+  Trash2Icon,
   UploadCloudIcon,
   UserPlusIcon,
   XIcon,
@@ -21,6 +23,17 @@ import {
 } from "react";
 import { toast } from "sonner";
 
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogMedia,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -39,6 +52,7 @@ import { myOrgQueryOptions } from "@/lib/org/queries";
 import { parseDotEnvText, type ProjectEnvEntry } from "@/lib/project/env";
 import {
   $cancelProjectInvite,
+  $deleteProject,
   $inviteProjectMember,
   $searchSkills,
   $kickProjectMember,
@@ -51,6 +65,7 @@ import {
   projectInvitesQueryOptions,
 } from "@/lib/project/queries";
 import type { ProjectSkillEntry } from "@/lib/project/skills";
+import type { DetectedRepoSkillEntry } from "@/lib/skills/repository";
 
 type ProjectEnvDraftEntry = ProjectEnvEntry & {
   id: string;
@@ -60,13 +75,20 @@ type SkillSearchResult = ProjectSkillEntry & {
   installsLabel: string;
 };
 
+const skillToProjectSkill = (skill: DetectedRepoSkillEntry): ProjectSkillEntry => ({
+  installSpec: skill.installSpec ?? "",
+  name: skill.name,
+  source: skill.source,
+  url: skill.url,
+});
+
 const createDraftEntry = (entry?: Partial<ProjectEnvEntry>): ProjectEnvDraftEntry => ({
   id: crypto.randomUUID(),
   key: entry?.key ?? "",
   value: entry?.value ?? "",
 });
 
-type Tab = "environment" | "skills" | "collaborators";
+type Tab = "environment" | "skills" | "collaborators" | "danger";
 
 export function ProjectSettingsDialog({
   currentUserId,
@@ -83,6 +105,7 @@ export function ProjectSettingsDialog({
 }) {
   const queryClient = useQueryClient();
   const updateProjectSettings = useServerFn($updateProjectSettings);
+  const deleteProject = useServerFn($deleteProject);
   const inviteMember = useServerFn($inviteProjectMember);
   const cancelInvite = useServerFn($cancelProjectInvite);
   const kickMember = useServerFn($kickProjectMember);
@@ -101,6 +124,11 @@ export function ProjectSettingsDialog({
   const [isDragging, setIsDragging] = useState(false);
   const [inviteUsername, setInviteUsername] = useState("");
   const [skillSearchResults, setSkillSearchResults] = useState<SkillSearchResult[]>([]);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleteConfirmationStep, setDeleteConfirmationStep] = useState<"confirm" | "type-name">(
+    "confirm",
+  );
+  const [deleteProjectNameConfirmation, setDeleteProjectNameConfirmation] = useState("");
 
   const title = projectName ? `${projectName}` : "Project Settings";
 
@@ -142,6 +170,7 @@ export function ProjectSettingsDialog({
   });
   const { isPending: isSearchingSkills, mutate: runSkillSearch } = searchSkillsMutation;
 
+  // oxlint-disable-next-line react-hooks-js/set-state-in-effect
   useEffect(() => {
     if (!open) return;
     const envEntries = projectQuery.data?.envEntries ?? [];
@@ -157,6 +186,9 @@ export function ProjectSettingsDialog({
     setSkillSearchResults([]);
     setShareWithOrganisation(Boolean(projectQuery.data?.sharedWithOrgId));
     setUploadPreview("");
+    setDeleteDialogOpen(false);
+    setDeleteConfirmationStep("confirm");
+    setDeleteProjectNameConfirmation("");
   }, [
     open,
     projectQuery.data?.envEntries,
@@ -258,6 +290,30 @@ export function ProjectSettingsDialog({
     },
   });
 
+  const deleteMutation = useMutation({
+    mutationFn: () => {
+      if (!projectId || !projectQuery.data?.name) throw new Error("Project not found.");
+
+      return deleteProject({
+        data: {
+          projectId,
+          projectName: deleteProjectNameConfirmation,
+        },
+      });
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: projectKeys.all });
+      toast.success("Project deleted.");
+      setDeleteDialogOpen(false);
+      setDeleteConfirmationStep("confirm");
+      setDeleteProjectNameConfirmation("");
+      setOpen(false);
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Failed to delete project.");
+    },
+  });
+
   const processEnvFile = async (file: File) => {
     try {
       const content = await file.text();
@@ -328,9 +384,17 @@ export function ProjectSettingsDialog({
     currentOrg && currentOrg.id === projectQuery.data?.sharedWithOrgId
       ? currentOrg.name
       : "your organisation";
+  const isOrgOwnerForSharedProject =
+    currentOrg?.id === projectQuery.data?.sharedWithOrgId &&
+    currentOrg?.currentUserRole === "owner";
+  const canDeleteProject = Boolean(projectQuery.data && (isOwner || isOrgOwnerForSharedProject));
   const selectedSkillSpecs = useMemo(
     () => new Set(selectedSkills.map((skill) => skill.installSpec)),
     [selectedSkills],
+  );
+  const detectedRepoSkills = useMemo(
+    () => projectQuery.data?.repoSkills ?? [],
+    [projectQuery.data?.repoSkills],
   );
 
   const updateEntry = (id: string, patch: Partial<ProjectEnvEntry>) => {
@@ -350,6 +414,7 @@ export function ProjectSettingsDialog({
     { id: "environment", label: "Environment" },
     { id: "skills", label: "Skills" },
     { id: "collaborators", label: "Collaborators" },
+    { id: "danger", label: "Danger" },
   ];
 
   return (
@@ -605,7 +670,7 @@ export function ProjectSettingsDialog({
                               variant={collaborator.role === "owner" ? "default" : "secondary"}
                               className="text-xs"
                             >
-                              {collaborator.role}
+                              {collaborator.role === "owner" ? "Owner" : collaborator.role}
                             </Badge>
                             {isOwner && collaborator.role !== "owner" ? (
                               <Button
@@ -624,6 +689,15 @@ export function ProjectSettingsDialog({
                       );
                     })}
                   </div>
+
+                  {isOwner && projectQuery.data?.sharedWithOrgId ? (
+                    <div className="flex items-center gap-2 rounded-xl border border-border bg-muted/30 px-3 py-2.5 text-sm text-muted-foreground">
+                      <Badge variant="secondary" className="text-xs">
+                        Organisation
+                      </Badge>
+                      Shared with organisation {sharedOrgLabel}
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
 
@@ -798,6 +872,71 @@ export function ProjectSettingsDialog({
 
               <div className="space-y-2">
                 <p className="px-0.5 text-xs font-medium tracking-wide text-muted-foreground uppercase">
+                  Detected in repository
+                </p>
+                <div className="overflow-hidden rounded-xl border border-border">
+                  {detectedRepoSkills.length === 0 ? (
+                    <div className="px-4 py-6 text-sm text-muted-foreground">
+                      No installed repo skills were detected.
+                    </div>
+                  ) : (
+                    detectedRepoSkills.map((skill, index) => {
+                      const installSpec = skill.installSpec;
+                      const isSelected = installSpec ? selectedSkillSpecs.has(installSpec) : false;
+
+                      return (
+                        <div
+                          key={`${skill.name}:${skill.source}:${skill.detectedFrom}`}
+                          className={`flex items-start justify-between gap-3 px-4 py-3 ${
+                            index !== 0 ? "border-t border-border" : ""
+                          }`}
+                        >
+                          <div className="min-w-0 space-y-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <p className="text-sm font-medium">{skill.name}</p>
+                              <Badge variant="secondary" className="text-[11px]">
+                                {skill.detectedFrom === "skills_lock"
+                                  ? "skills-lock.json"
+                                  : ".agents/skills"}
+                              </Badge>
+                            </div>
+                            <p className="text-xs text-muted-foreground">{skill.source}</p>
+                            {skill.url ? (
+                              <a
+                                href={skill.url}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-xs text-muted-foreground underline underline-offset-4"
+                              >
+                                View source
+                              </a>
+                            ) : null}
+                          </div>
+                          {isOwner ? (
+                            installSpec ? (
+                              <Button
+                                variant={isSelected ? "secondary" : "outline"}
+                                size="sm"
+                                disabled={isSelected}
+                                onClick={() => addSkill(skillToProjectSkill(skill))}
+                              >
+                                {isSelected ? "Added" : "Add"}
+                              </Button>
+                            ) : (
+                              <Badge variant="outline" className="shrink-0 text-[11px]">
+                                Repo only
+                              </Badge>
+                            )
+                          ) : null}
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <p className="px-0.5 text-xs font-medium tracking-wide text-muted-foreground uppercase">
                   Selected for this project
                 </p>
                 <div className="overflow-hidden rounded-xl border border-border">
@@ -841,6 +980,43 @@ export function ProjectSettingsDialog({
               ) : null}
             </div>
           ) : null}
+
+          {activeTab === "danger" ? (
+            <div className="space-y-5">
+              <p className="text-sm text-muted-foreground">
+                Destructive actions for this project live here.
+              </p>
+
+              {canDeleteProject && projectQuery.data ? (
+                <div className="space-y-3 rounded-xl border border-destructive/25 bg-destructive/5 p-4">
+                  <div className="space-y-1">
+                    <p className="text-sm font-medium text-foreground">Delete project</p>
+                    <p className="text-sm text-muted-foreground">
+                      Permanently removes this project and every session inside it.
+                    </p>
+                    {projectQuery.data.sharedWithOrgId && !isOwner ? (
+                      <p className="text-xs text-muted-foreground">
+                        Allowed because you are a promoted organisation member.
+                      </p>
+                    ) : null}
+                  </div>
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={() => setDeleteDialogOpen(true)}
+                    disabled={deleteMutation.isPending}
+                  >
+                    <Trash2Icon className="size-4" aria-hidden="true" />
+                    Delete project
+                  </Button>
+                </div>
+              ) : (
+                <div className="rounded-xl border border-border px-4 py-6 text-sm text-muted-foreground">
+                  You do not have permission to delete this project.
+                </div>
+              )}
+            </div>
+          ) : null}
         </div>
 
         {/* Footer */}
@@ -853,6 +1029,77 @@ export function ProjectSettingsDialog({
           </Button>
         </div>
       </DialogContent>
+
+      <AlertDialog
+        open={deleteDialogOpen}
+        onOpenChange={(nextOpen) => {
+          setDeleteDialogOpen(nextOpen);
+          if (!nextOpen) {
+            setDeleteConfirmationStep("confirm");
+            setDeleteProjectNameConfirmation("");
+          }
+        }}
+      >
+        <AlertDialogContent size="sm">
+          <AlertDialogHeader>
+            <AlertDialogMedia className="bg-destructive/10 text-destructive">
+              <AlertTriangleIcon aria-hidden="true" />
+            </AlertDialogMedia>
+            <AlertDialogTitle>
+              {deleteConfirmationStep === "confirm"
+                ? "Delete project?"
+                : `Type “${projectQuery.data?.name ?? "project"}” to confirm`}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteConfirmationStep === "confirm"
+                ? `This permanently removes ${projectQuery.data?.name ?? "this project"} and its sessions.`
+                : "This action cannot be undone."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+
+          {deleteConfirmationStep === "type-name" ? (
+            <div className="space-y-2">
+              <Label htmlFor="delete-project-name-confirmation-dialog" className="text-sm">
+                Project name
+              </Label>
+              <Input
+                id="delete-project-name-confirmation-dialog"
+                value={deleteProjectNameConfirmation}
+                onChange={(event) => setDeleteProjectNameConfirmation(event.target.value)}
+                placeholder={projectQuery.data?.name ?? ""}
+                autoComplete="off"
+              />
+            </div>
+          ) : null}
+
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteMutation.isPending}>Cancel</AlertDialogCancel>
+            {deleteConfirmationStep === "confirm" ? (
+              <AlertDialogAction
+                variant="destructive"
+                onClick={() => setDeleteConfirmationStep("type-name")}
+              >
+                Continue
+              </AlertDialogAction>
+            ) : (
+              <Button
+                variant="destructive"
+                disabled={
+                  deleteMutation.isPending ||
+                  deleteProjectNameConfirmation !== (projectQuery.data?.name ?? "")
+                }
+                onClick={() => deleteMutation.mutate()}
+              >
+                {deleteMutation.isPending ? (
+                  <LoaderIcon className="size-4 animate-spin" aria-hidden="true" />
+                ) : (
+                  "Delete project"
+                )}
+              </Button>
+            )}
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Dialog>
   );
 }

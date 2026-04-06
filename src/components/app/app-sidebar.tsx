@@ -32,6 +32,7 @@ import {
   allUserTaskSummariesQueryOptions,
   projectKeys,
   projectsQueryOptions,
+  type ProjectsResult,
   type TaskSummaryResult,
 } from "@/lib/project/queries";
 import { cn } from "@/lib/utils";
@@ -42,6 +43,9 @@ type AppUser = {
   image?: string | null;
   name?: string | null;
 };
+
+const EMPTY_PROJECTS: ProjectsResult = [];
+const EMPTY_TASKS: TaskSummaryResult[] = [];
 
 export function AppSidebar({ user }: { user: AppUser }) {
   const queryClient = useQueryClient();
@@ -80,13 +84,18 @@ export function AppSidebar({ user }: { user: AppUser }) {
     enabled: createProjectOpen,
   });
 
-  const projects = projectsQuery.data ?? [];
+  const projects = projectsQuery.data ?? EMPTY_PROJECTS;
+  const hasProjects = projects.length > 0;
   const repos = createProjectRepoQuery.data ?? [];
   const createProjectRepo = repos.find((repo) => repo.id === createProjectRepoId) ?? null;
-  const allTasks = tasksQuery.data ?? [];
+  const allTasks = tasksQuery.data ?? EMPTY_TASKS;
 
-  // Determine the active project: from URL or fall back to first project
-  const selectedProjectId = currentProjectId ?? projects[0]?.id;
+  const currentTask = currentTaskId
+    ? allTasks.find((task) => task.id === currentTaskId)
+    : undefined;
+
+  // Keep the selected project stable on task routes, even if projectId is missing from search.
+  const selectedProjectId = currentProjectId ?? currentTask?.projectId ?? projects[0]?.id;
   const selectedProject = projects.find((p) => p.id === selectedProjectId) ?? projects[0] ?? null;
 
   // Tasks for the selected project
@@ -206,7 +215,7 @@ export function AppSidebar({ user }: { user: AppUser }) {
                 ) : (
                   <>
                     <span className="min-w-0 flex-1 truncate text-left font-medium text-sidebar-foreground">
-                      {selectedProject?.name ?? "Select project"}
+                      {selectedProject?.name ?? (hasProjects ? "Select project" : "Create project")}
                     </span>
                     {selectedRunningCount > 0 ? (
                       <span className="flex shrink-0 items-center gap-1 rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-medium text-emerald-500">
@@ -257,7 +266,7 @@ export function AppSidebar({ user }: { user: AppUser }) {
 
           {/* Dashboard link */}
           {selectedProject ? (
-            <div className="px-2 pb-2">
+            <div className="space-y-0.5 px-2 pb-2">
               <Link
                 to="/app"
                 search={{ projectId: selectedProject.id }}
@@ -271,6 +280,20 @@ export function AppSidebar({ user }: { user: AppUser }) {
               >
                 <LayoutDashboardIcon className="size-4 shrink-0" aria-hidden="true" />
                 Dashboard
+              </Link>
+              <Link
+                to="/app/project-settings"
+                search={{ projectId: selectedProject.id }}
+                className={cn(
+                  "flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm transition-colors outline-none",
+                  "focus-visible:ring-2 focus-visible:ring-sidebar-ring",
+                  pathname === "/app/project-settings" && currentProjectId === selectedProject.id
+                    ? "bg-sidebar-accent font-medium text-sidebar-foreground"
+                    : "text-sidebar-foreground/60 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground",
+                )}
+              >
+                <SettingsIcon className="size-4 shrink-0" aria-hidden="true" />
+                Project settings
               </Link>
             </div>
           ) : null}
@@ -303,6 +326,7 @@ export function AppSidebar({ user }: { user: AppUser }) {
                       key={task.id}
                       to="/app/tasks/$taskId"
                       params={{ taskId: task.id }}
+                      search={{ projectId: selectedProject.id }}
                       className={cn(
                         "flex items-center gap-2 rounded-lg px-2.5 py-2 text-sm transition-colors outline-none",
                         "focus-visible:ring-2 focus-visible:ring-sidebar-ring",

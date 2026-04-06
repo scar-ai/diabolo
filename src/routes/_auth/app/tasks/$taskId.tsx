@@ -37,7 +37,14 @@ const formatAttachmentSize = (bytes: number) => {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 };
 
+type TaskDetailSearch = {
+  projectId?: string;
+};
+
 export const Route = createFileRoute("/_auth/app/tasks/$taskId")({
+  validateSearch: (search): TaskDetailSearch => ({
+    projectId: typeof search.projectId === "string" ? search.projectId : undefined,
+  }),
   loader: ({ context, params }) => {
     context.queryClient.prefetchQuery(taskDetailQueryOptions(params.taskId));
   },
@@ -210,9 +217,11 @@ function TaskDetailPage() {
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
       {/* Page header */}
-      <div className="flex shrink-0 items-center justify-between border-b border-border/60 px-6 py-3">
+      <div className="flex h-14 shrink-0 items-center justify-between border-b border-border/60 px-6">
         <div className="flex min-w-0 items-center gap-2">
-          <span className="max-w-xs truncate text-sm font-medium text-foreground">{taskTitle}</span>
+          <span className="max-w-xs truncate text-base font-medium text-foreground">
+            {taskTitle}
+          </span>
         </div>
         <TaskHeaderActions
           destroyPending={destroyMutation.isPending}

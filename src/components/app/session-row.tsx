@@ -63,6 +63,7 @@ export function SessionRow({
         <Link
           to="/app/tasks/$taskId"
           params={{ taskId: session.id }}
+          search={{ projectId: session.projectId }}
           className="flex flex-col gap-1"
         >
           <div className="flex items-center gap-1.5">
