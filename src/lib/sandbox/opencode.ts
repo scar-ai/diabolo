@@ -7,6 +7,50 @@ const SANDBOX_TOOL_PATH_EXPORT =
 
 const escapeForSingleQuotedShell = (value: string) => value.replace(/'/g, `'\\''`);
 
+type ConversationHistoryEntry = {
+  error?: string | null;
+  kind: "follow_up" | "initial";
+  prompt: string;
+  responseMessages: Array<{ text: string }>;
+  sequence: number;
+  stage?: string;
+  status: string;
+};
+
+const buildConversationTranscript = (history: ConversationHistoryEntry[]) =>
+  history
+    .map((message) => {
+      const assistantResponse = message.responseMessages
+        .map((response) => response.text.trim())
+        .filter(Boolean)
+        .join("\n\n");
+      const turnLabel =
+        message.kind === "initial" ? "Initial request" : `Follow-up ${message.sequence}`;
+
+      return [
+        `<turn index="${message.sequence + 1}" kind="${message.kind}">`,
+        `<user_message>`,
+        message.prompt.trim(),
+        `</user_message>`,
+        ...(assistantResponse
+          ? [`<assistant_response>`, assistantResponse, `</assistant_response>`]
+          : []),
+        ...(message.error?.trim()
+          ? [`<assistant_error>`, message.error.trim(), `</assistant_error>`]
+          : []),
+        ...(message.status !== "completed" && message.stage?.trim()
+          ? [
+              `<execution_status label="${message.status}">`,
+              message.stage.trim(),
+              `</execution_status>`,
+            ]
+          : []),
+        `</turn>`,
+        `<!-- ${turnLabel} -->`,
+      ].join("\n");
+    })
+    .join("\n\n");
+
 const writeGeneratedConfigCommand = [
   "python3 - <<'PY'",
   "import base64",
@@ -37,6 +81,7 @@ export const buildOpenCodePrompt = (
       prompt: string;
       responseMessages: Array<{ text: string }>;
       sequence: number;
+      stage?: string;
       status: string;
     }>;
     envVarKeys?: string[];
@@ -88,39 +133,17 @@ export const buildOpenCodePrompt = (
       : []),
     ...(options?.conversationHistory?.length
       ? [
-          "Conversation history from earlier task messages:",
-          "Use earlier user messages and assistant responses here as context for the current follow-up.",
-          "Do not treat earlier assistant responses as the final answer for this follow-up.",
-          ...options.conversationHistory.flatMap((message) => {
-            const priorAssistantResponse = message.responseMessages
-              .map((response) => response.text.trim())
-              .filter(Boolean)
-              .join("\n\n");
-
-            return [
-              `Earlier ${message.kind === "initial" ? "initial task" : "follow-up"} ${message.sequence + 1} user message:`,
-              message.prompt.trim(),
-              ...(priorAssistantResponse
-                ? [
-                    `Earlier ${message.kind === "initial" ? "initial task" : "follow-up"} ${message.sequence + 1} assistant response:`,
-                    priorAssistantResponse,
-                  ]
-                : []),
-              ...(message.error?.trim()
-                ? [
-                    `Earlier ${message.kind === "initial" ? "initial task" : "follow-up"} ${message.sequence + 1} error:`,
-                    message.error.trim(),
-                  ]
-                : []),
-              ...(message.status !== "completed"
-                ? [
-                    `Earlier ${message.kind === "initial" ? "initial task" : "follow-up"} ${message.sequence + 1} status:`,
-                    message.status,
-                  ]
-                : []),
-              "",
-            ];
-          }),
+          "Conversation continuity rules:",
+          "This follow-up belongs to the same ongoing task and repository workspace as the earlier messages below.",
+          "Use the full prior conversation as context, including previous user requests and your earlier responses.",
+          "Treat the latest user task in this prompt as the instruction to execute now.",
+          "If the latest user task changes or narrows an earlier request, follow the latest user task.",
+          "Do not repeat completed work unless it is necessary for the latest user task.",
+          "",
+          "<conversation_history>",
+          buildConversationTranscript(options.conversationHistory),
+          "</conversation_history>",
+          "",
         ]
       : []),
     "User task:",

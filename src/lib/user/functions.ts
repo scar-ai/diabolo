@@ -5,6 +5,7 @@ import * as z from "zod";
 import { authMiddleware } from "@/lib/auth/middleware";
 import { db } from "@/lib/db";
 import { userLlmProvider } from "@/lib/db/schema/schema";
+import { normalizeProviderApiKey } from "@/lib/opencode/config";
 import { Org } from "@/lib/org";
 import { unwrap } from "@/lib/result";
 import { listUserLlmProviders } from "@/lib/user/data";
@@ -67,7 +68,11 @@ const normalizeProviders = (
       isDefault: provider.scope === "personal" ? provider.isDefault : false,
       name: provider.name.trim(),
       orgId: provider.scope === "organisation" ? input.orgId : null,
-      providerApiKey: provider.providerApiKey.trim(),
+      providerApiKey:
+        normalizeProviderApiKey(provider.providerApiKey) ??
+        (() => {
+          throw new Error("Provider API key is required.");
+        })(),
       providerBaseUrl: provider.providerBaseUrl.trim(),
       providerId: provider.providerId.trim(),
       providerModel: provider.providerModel.trim(),

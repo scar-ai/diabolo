@@ -305,6 +305,7 @@ export const runFollowUpMessage = async (taskId: string, messageId: string) => {
       prompt: message.prompt,
       responseMessages: message.parsedResponseMessages,
       sequence: message.sequence,
+      stage: message.stage,
       status: message.status,
     }));
 

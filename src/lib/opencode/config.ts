@@ -2,6 +2,7 @@ import "@tanstack/react-start/server-only";
 
 const CUSTOM_OPENCODE_PROVIDER_PACKAGE = "@ai-sdk/openai-compatible";
 const CUSTOM_OPENCODE_API_KEY_ENV_VAR = "OPENCODE_PROVIDER_API_KEY";
+const OPENROUTER_BASE_URL_PATTERN = /^https?:\/\/(?:www\.)?openrouter\.ai\/api(?:\/v\d+)?\/?$/i;
 
 export type SavedOpenCodeProvider = {
   id?: string | null;
@@ -28,6 +29,26 @@ const trimToNull = (value?: string | null) => {
 };
 
 const normalizeBaseUrl = (value: string) => value.replace(/\/+$/, "");
+
+export const normalizeProviderApiKey = (value?: string | null) => {
+  const trimmed = trimToNull(value);
+
+  if (!trimmed) {
+    return null;
+  }
+
+  const withoutAssignment = trimmed.replace(/^(?:export\s+)?[A-Z][A-Z0-9_]*\s*=\s*/i, "");
+  const withoutBearer = withoutAssignment.replace(/^Bearer\s+/i, "");
+  const unquoted =
+    (withoutBearer.startsWith('"') && withoutBearer.endsWith('"')) ||
+    (withoutBearer.startsWith("'") && withoutBearer.endsWith("'"))
+      ? withoutBearer.slice(1, -1).trim()
+      : withoutBearer;
+
+  return unquoted || null;
+};
+
+const isOpenRouterBaseUrl = (value: string) => OPENROUTER_BASE_URL_PATTERN.test(value);
 
 export const getProviderScopedModelId = (model: string, providerId: string) => {
   const prefix = `${providerId}/`;
@@ -62,12 +83,18 @@ export const resolveOpenCodeConfig = (input: {
   const providerId = trimToNull(input.provider.providerId);
   const baseUrl = trimToNull(input.provider.providerBaseUrl);
   const model = trimToNull(input.model ?? input.provider.providerModel);
-  const apiKey = trimToNull(input.provider.providerApiKey);
+  const apiKey = normalizeProviderApiKey(input.provider.providerApiKey);
   const selectedProviderId = trimToNull(input.provider.id);
 
   if (!providerId || !baseUrl || !model || !apiKey || !selectedProviderId) {
     throw new Error(
       "Selected provider is incomplete. Set Provider ID, API Base URL, Model, and API Key before starting a task.",
+    );
+  }
+
+  if (isOpenRouterBaseUrl(baseUrl) && !apiKey.startsWith("sk-or-v1-")) {
+    throw new Error(
+      "Selected provider uses OpenRouter, but its API key does not look like a raw OpenRouter key. Paste the secret itself, not a header or env assignment.",
     );
   }
 
