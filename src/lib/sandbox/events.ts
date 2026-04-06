@@ -57,6 +57,7 @@ export namespace SandboxEvents {
   };
 
   export const publishArtifact = async (input: {
+    id?: string;
     messageId?: string | null;
     metadata?: JsonObject | null;
     taskId: string;

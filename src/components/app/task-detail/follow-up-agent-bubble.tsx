@@ -13,29 +13,16 @@ export function FollowUpAgentBubble({ followUp }: { followUp: ParsedFollowUp }) 
     .map((m) => m.text)
     .join("\n\n")
     .trim();
-  const isRunning = followUp.status === "queued" || followUp.status === "running";
+  const isRunning = followUp.status === "pending" || followUp.status === "processing";
 
   return (
     <div className="flex w-full flex-col gap-3">
       {combinedText ? (
-        <div className="flex flex-col gap-2">
-          {followUp.stage ? (
-            isRunning ? (
-              <ThinkingWave text={`${followUp.stage}...`} />
-            ) : (
-              <span className="text-xs font-medium tracking-[0.02em] text-muted-foreground">
-                {followUp.stage}
-              </span>
-            )
-          ) : null}
-          <div className="text-sm leading-relaxed text-foreground">
-            <Markdown content={combinedText} />
-          </div>
+        <div className="text-sm leading-relaxed text-foreground">
+          <Markdown content={combinedText} />
         </div>
       ) : isRunning ? (
         <ThinkingWave text={followUp.stage ? `${followUp.stage}...` : undefined} />
-      ) : followUp.stage ? (
-        <div className="text-sm text-muted-foreground">{followUp.stage}</div>
       ) : (
         <div className="text-sm text-muted-foreground">No response captured.</div>
       )}

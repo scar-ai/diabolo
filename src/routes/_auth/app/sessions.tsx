@@ -1,27 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import {
-  CalendarClockIcon,
-  ChevronRightIcon,
-  Clock3Icon,
-  HouseIcon,
-  LoaderIcon,
-  PencilIcon,
-  PlusIcon,
-  Trash2Icon,
-} from "lucide-react";
-import { useEffect, useState } from "react";
+import { LoaderIcon, Trash2Icon } from "lucide-react";
+import { useState } from "react";
 import { toast } from "sonner";
 
-import { useSetHeaderSlots } from "@/components/app/header-portal";
-import {
-  ScheduledTaskDialog,
-  type ScheduledTaskDialogInput,
-} from "@/components/app/scheduled-task-dialog";
 import { SessionRow } from "@/components/app/session-row";
 import type { CollaboratorMap } from "@/components/app/task-detail/types";
-import { TaskStatusBadge } from "@/components/app/task-status-badge";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -32,7 +17,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Empty,
@@ -44,24 +28,13 @@ import {
 } from "@/components/ui/empty";
 import { Frame } from "@/components/ui/frame";
 import { Table, TableBody, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { githubBranchesQueryOptions } from "@/lib/github/queries";
-import {
-  $createScheduledTask,
-  $deleteScheduledTask,
-  $deleteTask,
-  $updateScheduledTask,
-} from "@/lib/project/functions";
+import { $deleteTask } from "@/lib/project/functions";
 import {
   allUserTaskSummariesQueryOptions,
   projectCollaboratorsQueryOptions,
-  projectDetailQueryOptions,
   projectsQueryOptions,
-  projectScheduledTasksQueryOptions,
-  scheduledTaskKeys,
-  serverTimeQueryOptions,
   taskKeys,
 } from "@/lib/project/queries";
-import { describeSchedule } from "@/lib/project/scheduled-tasks";
 
 type SessionsSearch = {
   projectId?: string;
@@ -91,15 +64,8 @@ function SessionsPage() {
   const search = Route.useSearch();
   const queryClient = useQueryClient();
   const deleteTask = useServerFn($deleteTask);
-  const createScheduledTask = useServerFn($createScheduledTask);
-  const updateScheduledTask = useServerFn($updateScheduledTask);
-  const deleteScheduledTask = useServerFn($deleteScheduledTask);
-  const setHeaderSlots = useSetHeaderSlots();
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
-  const [scheduledTaskDialogOpen, setScheduledTaskDialogOpen] = useState(false);
-  const [editingScheduledTaskId, setEditingScheduledTaskId] = useState<string | null>(null);
-  const [deletingScheduledTaskId, setDeletingScheduledTaskId] = useState<string | null>(null);
 
   const tasksQuery = useQuery({
     ...allUserTaskSummariesQueryOptions(user.id),
@@ -108,24 +74,6 @@ function SessionsPage() {
   const projectsQuery = useQuery(projectsQueryOptions(user.id));
   const currentProject =
     (projectsQuery.data ?? []).find((project) => project.id === search.projectId) ?? null;
-  const currentProjectDetailQuery = useQuery({
-    ...projectDetailQueryOptions(currentProject?.id ?? ""),
-    enabled: Boolean(currentProject?.id),
-  });
-  const currentProjectDetail = currentProjectDetailQuery.data ?? null;
-  const branchesQuery = useQuery({
-    ...githubBranchesQueryOptions(user.id, currentProjectDetail?.repoFullName ?? ""),
-    enabled: Boolean(currentProjectDetail?.repoFullName),
-  });
-  const scheduledTasksQuery = useQuery({
-    ...projectScheduledTasksQueryOptions(currentProject?.id ?? ""),
-    enabled: Boolean(currentProject?.id),
-  });
-  const serverTimeQuery = useQuery({
-    ...serverTimeQueryOptions(),
-    enabled: Boolean(currentProject?.id),
-    refetchInterval: 30_000,
-  });
 
   const collaboratorsQuery = useQuery({
     ...projectCollaboratorsQueryOptions(search.projectId ?? ""),
@@ -134,40 +82,6 @@ function SessionsPage() {
   const collaboratorMap: CollaboratorMap = new Map(
     (collaboratorsQuery.data ?? []).map((c) => [c.userId, c.user]),
   );
-
-  useEffect(() => {
-    setHeaderSlots({
-      left: (
-        <nav className="flex items-center gap-2 rounded-lg border border-border/50 bg-muted/70 px-4 py-2 text-base">
-          <Link
-            to="/app/projects"
-            className="flex items-center gap-1.5 text-muted-foreground transition-colors hover:text-foreground"
-          >
-            <HouseIcon className="size-4" />
-            Home
-          </Link>
-          {currentProject ? (
-            <>
-              <ChevronRightIcon className="size-3.5 text-muted-foreground/40" aria-hidden="true" />
-              <Link
-                to="/app"
-                search={{ projectId: currentProject.id }}
-                className="text-muted-foreground transition-colors hover:text-foreground"
-              >
-                {currentProject.name}
-              </Link>
-            </>
-          ) : null}
-          <ChevronRightIcon className="size-3.5 text-muted-foreground/40" aria-hidden="true" />
-          <span className="font-medium text-foreground">Sessions</span>
-        </nav>
-      ),
-      projectId: currentProject?.id ?? null,
-      projectName: currentProject?.name ?? null,
-      right: null,
-    });
-    return () => setHeaderSlots({ left: null, projectId: null, projectName: null, right: null });
-  }, [currentProject, setHeaderSlots]);
 
   const deleteMutation = useMutation({
     mutationFn: ({ projectId, taskId }: { projectId: string; taskId: string }) =>
@@ -195,123 +109,9 @@ function SessionsPage() {
     },
   });
 
-  const createScheduledTaskMutation = useMutation({
-    mutationFn: async (input: ScheduledTaskDialogInput) => {
-      if (!currentProject?.id) {
-        throw new Error("Project not found.");
-      }
-
-      return createScheduledTask({
-        data: {
-          ...input,
-          projectId: currentProject.id,
-        },
-      });
-    },
-    onSuccess: async () => {
-      if (currentProject?.id) {
-        await queryClient.invalidateQueries({
-          queryKey: scheduledTaskKeys.list(currentProject.id),
-        });
-      }
-
-      setScheduledTaskDialogOpen(false);
-      toast.success("Scheduled task created.");
-    },
-    onError: (error) => {
-      toast.error(error instanceof Error ? error.message : "Failed to create scheduled task.");
-    },
-  });
-
-  const updateScheduledTaskMutation = useMutation({
-    mutationFn: async (input: ScheduledTaskDialogInput & { scheduledTaskId: string }) => {
-      if (!currentProject?.id) {
-        throw new Error("Project not found.");
-      }
-
-      return updateScheduledTask({
-        data: {
-          ...input,
-          projectId: currentProject.id,
-        },
-      });
-    },
-    onSuccess: async () => {
-      if (currentProject?.id) {
-        await queryClient.invalidateQueries({
-          queryKey: scheduledTaskKeys.list(currentProject.id),
-        });
-      }
-
-      setEditingScheduledTaskId(null);
-      setScheduledTaskDialogOpen(false);
-      toast.success("Scheduled task updated.");
-    },
-    onError: (error) => {
-      toast.error(error instanceof Error ? error.message : "Failed to update scheduled task.");
-    },
-  });
-
-  const deleteScheduledTaskMutation = useMutation({
-    mutationFn: async (scheduledTaskId: string) => {
-      if (!currentProject?.id) {
-        throw new Error("Project not found.");
-      }
-
-      return deleteScheduledTask({
-        data: {
-          projectId: currentProject.id,
-          scheduledTaskId,
-        },
-      });
-    },
-    onSuccess: async () => {
-      if (currentProject?.id) {
-        await queryClient.invalidateQueries({
-          queryKey: scheduledTaskKeys.list(currentProject.id),
-        });
-      }
-
-      setDeletingScheduledTaskId(null);
-      toast.success("Scheduled task deleted.");
-    },
-    onError: (error) => {
-      toast.error(error instanceof Error ? error.message : "Failed to delete scheduled task.");
-    },
-  });
-
-  const scheduledTasks = scheduledTasksQuery.data ?? [];
-  const editingScheduledTask =
-    editingScheduledTaskId === null
-      ? null
-      : (scheduledTasks.find((scheduledTask) => scheduledTask.id === editingScheduledTaskId) ??
-        null);
-  const scheduledTaskDialogMode = editingScheduledTask ? "edit" : "create";
-  const scheduledTaskDialogPending =
-    createScheduledTaskMutation.isPending || updateScheduledTaskMutation.isPending;
-  const serverTimeLabel = serverTimeQuery.data?.iso
-    ? new Date(serverTimeQuery.data.iso).toLocaleString("en-US", {
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit",
-        year: "numeric",
-        month: "short",
-        day: "numeric",
-        hour12: false,
-      })
-    : null;
-
   const sessions = search.projectId
     ? (tasksQuery.data ?? []).filter((session) => session.projectId === search.projectId)
     : (tasksQuery.data ?? []);
-  const latestScheduledRuns = new Map<string, (typeof sessions)[number]>();
-  for (const session of sessions) {
-    if (!session.scheduledTaskId || latestScheduledRuns.has(session.scheduledTaskId)) {
-      continue;
-    }
-
-    latestScheduledRuns.set(session.scheduledTaskId, session);
-  }
   const runningSessions = sessions.filter((s) => s.status === "queued" || s.status === "running");
   const completedSessions = sessions.filter(
     (s) => s.status === "succeeded" || s.status === "failed",
@@ -335,370 +135,184 @@ function SessionsPage() {
   }
 
   return (
-    <main className="flex flex-1 flex-col items-center px-4 pt-8 pb-16">
-      <div className="w-full max-w-3xl">
-        {currentProject ? (
-          <div className="mb-8">
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <div>
-                <div className="flex items-center gap-2">
-                  <CalendarClockIcon className="size-4 text-muted-foreground" aria-hidden="true" />
-                  <span className="text-sm font-semibold text-foreground">Scheduled tasks</span>
-                </div>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  Save repeatable automations that open new sessions for this project.
-                </p>
-              </div>
-              <Button
-                size="sm"
-                className="gap-1.5"
-                onClick={() => {
-                  setEditingScheduledTaskId(null);
-                  setScheduledTaskDialogOpen(true);
-                }}
-              >
-                <PlusIcon className="size-3.5" aria-hidden="true" />
-                Start scheduled task
-              </Button>
-            </div>
-
-            <Frame className="w-full min-w-0">
-              <div className="divide-y divide-border/60">
-                {scheduledTasks.length > 0 ? (
-                  scheduledTasks.map((scheduledTask) => {
-                    const latestRun = latestScheduledRuns.get(scheduledTask.id);
-
-                    return (
-                      <div
-                        key={scheduledTask.id}
-                        className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-start sm:justify-between"
-                      >
-                        <div className="min-w-0">
-                          <div className="truncate text-sm font-medium text-foreground">
-                            {scheduledTask.name}
-                          </div>
-                          <div className="mt-1 flex flex-wrap items-center gap-2">
-                            {scheduledTask.runOnce ? (
-                              <Badge variant="secondary" size="sm">
-                                Run once
-                              </Badge>
-                            ) : (
-                              <Badge variant="outline" size="sm">
-                                Recurring
-                              </Badge>
-                            )}
-                            {!scheduledTask.enabled ? (
-                              <Badge variant="warning" size="sm">
-                                Disabled
-                              </Badge>
-                            ) : null}
-                          </div>
-                          <div className="mt-1 text-sm text-muted-foreground">
-                            {describeSchedule(scheduledTask.scheduleCron)}
-                          </div>
-                          <div className="mt-1 text-xs text-muted-foreground">
-                            {scheduledTask.scheduleTimezone}
-                            {" · "}
-                            {scheduledTask.branchName ??
-                              `Project default (${currentProjectDetail?.repoDefaultBranch ?? "main"})`}
-                          </div>
-                          <div className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground/80">
-                            <Clock3Icon className="size-3" aria-hidden="true" />
-                            <span>Server time: {serverTimeLabel ?? "loading..."}</span>
-                          </div>
-                          <div className="mt-2">
-                            {latestRun ? (
-                              <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                                <span>Latest run</span>
-                                <TaskStatusBadge status={latestRun.status} />
-                                <Link
-                                  to="/app/tasks/$taskId"
-                                  params={{ taskId: latestRun.id }}
-                                  className="text-foreground underline-offset-4 hover:underline"
-                                >
-                                  View session
-                                </Link>
-                              </div>
-                            ) : (
-                              <div className="text-xs text-muted-foreground">
-                                No session started from this schedule yet.
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                        <div className="flex max-w-md items-start gap-3">
-                          <div className="min-w-0 text-sm text-muted-foreground">
-                            {scheduledTask.instructions}
-                          </div>
-                          <div className="flex shrink-0 items-center gap-1">
-                            <Button
-                              variant="ghost"
-                              size="icon-xs"
-                              onClick={() => {
-                                setEditingScheduledTaskId(scheduledTask.id);
-                                setScheduledTaskDialogOpen(true);
-                              }}
-                              aria-label="Edit scheduled task"
-                            >
-                              <PencilIcon className="size-3" aria-hidden="true" />
-                            </Button>
-                            <AlertDialog
-                              open={deletingScheduledTaskId === scheduledTask.id}
-                              onOpenChange={(open) =>
-                                setDeletingScheduledTaskId(open ? scheduledTask.id : null)
-                              }
-                            >
-                              <Button
-                                variant="ghost"
-                                size="icon-xs"
-                                className="text-destructive/70 hover:bg-destructive/10 hover:text-destructive"
-                                disabled={deleteScheduledTaskMutation.isPending}
-                                onClick={() => setDeletingScheduledTaskId(scheduledTask.id)}
-                                aria-label="Delete scheduled task"
-                              >
-                                {deleteScheduledTaskMutation.isPending &&
-                                deleteScheduledTaskMutation.variables === scheduledTask.id ? (
-                                  <LoaderIcon className="size-3 animate-spin" aria-hidden="true" />
-                                ) : (
-                                  <Trash2Icon className="size-3" aria-hidden="true" />
-                                )}
-                              </Button>
-                              <AlertDialogContent size="sm">
-                                <AlertDialogHeader>
-                                  <AlertDialogTitle>Delete scheduled task?</AlertDialogTitle>
-                                  <AlertDialogDescription>
-                                    This will permanently remove "{scheduledTask.name}".
-                                  </AlertDialogDescription>
-                                </AlertDialogHeader>
-                                <AlertDialogFooter>
-                                  <AlertDialogCancel
-                                    disabled={deleteScheduledTaskMutation.isPending}
-                                  >
-                                    Cancel
-                                  </AlertDialogCancel>
-                                  <AlertDialogAction
-                                    variant="destructive"
-                                    disabled={deleteScheduledTaskMutation.isPending}
-                                    onClick={() =>
-                                      deleteScheduledTaskMutation.mutate(scheduledTask.id)
-                                    }
-                                  >
-                                    Delete
-                                  </AlertDialogAction>
-                                </AlertDialogFooter>
-                              </AlertDialogContent>
-                            </AlertDialog>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })
-                ) : (
-                  <div className="px-4 py-6 text-sm text-muted-foreground">
-                    No scheduled tasks yet.
-                  </div>
-                )}
-              </div>
-            </Frame>
-          </div>
-        ) : null}
-
-        {sessions.length === 0 && !tasksQuery.isPending ? (
-          <Empty className="min-h-[48vh] border-0 bg-transparent py-16">
-            <EmptyContent>
-              <EmptyHeader>
-                <EmptyMedia variant="icon" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                    <path
-                      d="M7 9.5A4.5 4.5 0 0 1 11.5 5h2.75A2.75 2.75 0 0 1 17 7.75V10"
-                      className="stroke-current"
-                      strokeWidth="1.6"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                    <path
-                      d="M6.5 19.5H4.75A1.75 1.75 0 0 1 3 17.75V9.25A1.75 1.75 0 0 1 4.75 7.5h9.5A1.75 1.75 0 0 1 16 9.25V11"
-                      className="stroke-current"
-                      strokeWidth="1.6"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                    <path
-                      d="M14.5 14.25 20 10.75v6.5l-5.5-3Z"
-                      className="stroke-current"
-                      strokeWidth="1.6"
-                      strokeLinejoin="round"
-                    />
-                    <path
-                      d="M8 12h4"
-                      className="stroke-current"
-                      strokeWidth="1.6"
-                      strokeLinecap="round"
-                    />
-                    <path
-                      d="M8 14.5h2.5"
-                      className="stroke-current"
-                      strokeWidth="1.6"
-                      strokeLinecap="round"
-                    />
-                  </svg>
-                </EmptyMedia>
-                <EmptyTitle>Nothing to see here.</EmptyTitle>
-              </EmptyHeader>
-              <EmptyDescription>
-                Get back to work. The session graveyard is empty for now.
-              </EmptyDescription>
-            </EmptyContent>
-          </Empty>
-        ) : null}
-
-        {/* Running tasks section */}
-        {runningSessions.length > 0 ? (
-          <div className="mb-8">
-            <div className="mb-3 flex items-center gap-2">
-              <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-500" />
-              <span className="text-sm font-semibold text-foreground">
-                Running ({runningSessions.length})
-              </span>
-            </div>
-            <Frame className="w-full min-w-0">
-              <Table>
-                <TableHeader>
-                  <TableRow className="hover:bg-transparent">
-                    <TableHead>Session</TableHead>
-                    <TableHead className="w-28">Status</TableHead>
-                    <TableHead className="w-28">Started</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {runningSessions.map((session) => (
-                    <SessionRow
-                      key={session.id}
-                      collaborators={collaboratorMap}
-                      session={session}
-                    />
-                  ))}
-                </TableBody>
-              </Table>
-            </Frame>
-          </div>
-        ) : null}
-
-        {/* Completed tasks section */}
-        {completedSessions.length > 0 ? (
-          <div>
-            <div className="mb-3 flex items-center justify-between">
-              <span className="text-sm font-semibold text-foreground">
-                History ({completedSessions.length})
-              </span>
-              {selectedIds.size > 0 ? (
-                <AlertDialog open={confirmBulkDelete} onOpenChange={setConfirmBulkDelete}>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="gap-1.5 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                    disabled={bulkDeleteMutation.isPending}
-                    onClick={() => setConfirmBulkDelete(true)}
-                  >
-                    {bulkDeleteMutation.isPending ? (
-                      <LoaderIcon className="size-3.5 animate-spin" aria-hidden="true" />
-                    ) : (
-                      <Trash2Icon className="size-3.5" aria-hidden="true" />
-                    )}
-                    Delete {selectedIds.size} selected
-                  </Button>
-                  <AlertDialogContent size="sm">
-                    <AlertDialogHeader>
-                      <AlertDialogTitle>
-                        Delete {selectedIds.size} {selectedIds.size === 1 ? "session" : "sessions"}?
-                      </AlertDialogTitle>
-                      <AlertDialogDescription>
-                        You are about to permanently delete {selectedIds.size}{" "}
-                        {selectedIds.size === 1 ? "session" : "sessions"}. This cannot be undone.
-                      </AlertDialogDescription>
-                    </AlertDialogHeader>
-                    <AlertDialogFooter>
-                      <AlertDialogCancel>Cancel</AlertDialogCancel>
-                      <AlertDialogAction
-                        variant="destructive"
-                        disabled={bulkDeleteMutation.isPending}
-                        onClick={handleBulkDelete}
-                      >
-                        Delete
-                      </AlertDialogAction>
-                    </AlertDialogFooter>
-                  </AlertDialogContent>
-                </AlertDialog>
-              ) : null}
-            </div>
-            <Frame className="w-full min-w-0">
-              <Table>
-                <TableHeader>
-                  <TableRow className="hover:bg-transparent">
-                    <TableHead className="w-10" />
-                    <TableHead>Session</TableHead>
-                    <TableHead className="w-28">Status</TableHead>
-                    <TableHead className="w-28">Date</TableHead>
-                    <TableHead className="w-12" />
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {completedSessions.map((session) => (
-                    <SessionRow
-                      key={session.id}
-                      collaborators={collaboratorMap}
-                      session={session}
-                      selected={selectedIds.has(session.id)}
-                      onToggleSelect={() => toggleSelected(session.id)}
-                      onDelete={() =>
-                        deleteMutation.mutate({ projectId: session.projectId, taskId: session.id })
-                      }
-                      isDeleting={
-                        deleteMutation.isPending && deleteMutation.variables?.taskId === session.id
-                      }
-                    />
-                  ))}
-                </TableBody>
-              </Table>
-            </Frame>
-          </div>
-        ) : null}
+    <>
+      <div className="flex shrink-0 items-center border-b border-border/60 px-6 py-3">
+        <h1 className="text-sm font-medium text-foreground">
+          Sessions
+          {currentProject ? (
+            <span className="ml-1.5 text-muted-foreground/60">— {currentProject.name}</span>
+          ) : null}
+        </h1>
       </div>
+      <main className="flex flex-1 flex-col items-center overflow-y-auto px-4 pt-8 pb-16">
+        <div className="w-full max-w-3xl">
+          {sessions.length === 0 && !tasksQuery.isPending ? (
+            <Empty className="min-h-[48vh] border-0 bg-transparent py-16">
+              <EmptyContent>
+                <EmptyHeader>
+                  <EmptyMedia variant="icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                      <path
+                        d="M7 9.5A4.5 4.5 0 0 1 11.5 5h2.75A2.75 2.75 0 0 1 17 7.75V10"
+                        className="stroke-current"
+                        strokeWidth="1.6"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                      <path
+                        d="M6.5 19.5H4.75A1.75 1.75 0 0 1 3 17.75V9.25A1.75 1.75 0 0 1 4.75 7.5h9.5A1.75 1.75 0 0 1 16 9.25V11"
+                        className="stroke-current"
+                        strokeWidth="1.6"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                      <path
+                        d="M14.5 14.25 20 10.75v6.5l-5.5-3Z"
+                        className="stroke-current"
+                        strokeWidth="1.6"
+                        strokeLinejoin="round"
+                      />
+                      <path
+                        d="M8 12h4"
+                        className="stroke-current"
+                        strokeWidth="1.6"
+                        strokeLinecap="round"
+                      />
+                      <path
+                        d="M8 14.5h2.5"
+                        className="stroke-current"
+                        strokeWidth="1.6"
+                        strokeLinecap="round"
+                      />
+                    </svg>
+                  </EmptyMedia>
+                  <EmptyTitle>Nothing to see here.</EmptyTitle>
+                </EmptyHeader>
+                <EmptyDescription>
+                  Get back to work. The session graveyard is empty for now.
+                </EmptyDescription>
+              </EmptyContent>
+            </Empty>
+          ) : null}
 
-      <ScheduledTaskDialog
-        key={`${scheduledTaskDialogMode}:${editingScheduledTask?.id ?? "new"}:${scheduledTaskDialogOpen ? "open" : "closed"}`}
-        branches={(branchesQuery.data ?? []).map((branch) => branch.name)}
-        defaultBranch={currentProjectDetail?.repoDefaultBranch ?? "main"}
-        initialValue={
-          editingScheduledTask
-            ? {
-                ...editingScheduledTask,
-                branchName: editingScheduledTask.branchName ?? null,
-                runOnce: Boolean(editingScheduledTask.runOnce),
-              }
-            : null
-        }
-        isPending={scheduledTaskDialogPending}
-        mode={scheduledTaskDialogMode}
-        onOpenChange={(open) => {
-          setScheduledTaskDialogOpen(open);
-          if (!open) {
-            setEditingScheduledTaskId(null);
-          }
-        }}
-        onSubmit={(input) => {
-          if (editingScheduledTask) {
-            updateScheduledTaskMutation.mutate({
-              ...input,
-              scheduledTaskId: editingScheduledTask.id,
-            });
-            return;
-          }
+          {/* Running tasks section */}
+          {runningSessions.length > 0 ? (
+            <div className="mb-8">
+              <div className="mb-3 flex items-center gap-2">
+                <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-500" />
+                <span className="text-sm font-semibold text-foreground">
+                  Running ({runningSessions.length})
+                </span>
+              </div>
+              <Frame className="w-full min-w-0">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="hover:bg-transparent">
+                      <TableHead>Session</TableHead>
+                      <TableHead className="w-28">Status</TableHead>
+                      <TableHead className="w-28">Started</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {runningSessions.map((session) => (
+                      <SessionRow
+                        key={session.id}
+                        collaborators={collaboratorMap}
+                        session={session}
+                      />
+                    ))}
+                  </TableBody>
+                </Table>
+              </Frame>
+            </div>
+          ) : null}
 
-          createScheduledTaskMutation.mutate(input);
-        }}
-        open={scheduledTaskDialogOpen}
-      />
-    </main>
+          {/* Completed tasks section */}
+          {completedSessions.length > 0 ? (
+            <div>
+              <div className="mb-3 flex items-center justify-between">
+                <span className="text-sm font-semibold text-foreground">
+                  History ({completedSessions.length})
+                </span>
+                {selectedIds.size > 0 ? (
+                  <AlertDialog open={confirmBulkDelete} onOpenChange={setConfirmBulkDelete}>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="gap-1.5 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                      disabled={bulkDeleteMutation.isPending}
+                      onClick={() => setConfirmBulkDelete(true)}
+                    >
+                      {bulkDeleteMutation.isPending ? (
+                        <LoaderIcon className="size-3.5 animate-spin" aria-hidden="true" />
+                      ) : (
+                        <Trash2Icon className="size-3.5" aria-hidden="true" />
+                      )}
+                      Delete {selectedIds.size} selected
+                    </Button>
+                    <AlertDialogContent size="sm">
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>
+                          Delete {selectedIds.size}{" "}
+                          {selectedIds.size === 1 ? "session" : "sessions"}?
+                        </AlertDialogTitle>
+                        <AlertDialogDescription>
+                          You are about to permanently delete {selectedIds.size}{" "}
+                          {selectedIds.size === 1 ? "session" : "sessions"}. This cannot be undone.
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogAction
+                          variant="destructive"
+                          disabled={bulkDeleteMutation.isPending}
+                          onClick={handleBulkDelete}
+                        >
+                          Delete
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
+                ) : null}
+              </div>
+              <Frame className="w-full min-w-0">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="hover:bg-transparent">
+                      <TableHead className="w-10" />
+                      <TableHead>Session</TableHead>
+                      <TableHead className="w-28">Status</TableHead>
+                      <TableHead className="w-28">Date</TableHead>
+                      <TableHead className="w-12" />
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {completedSessions.map((session) => (
+                      <SessionRow
+                        key={session.id}
+                        collaborators={collaboratorMap}
+                        session={session}
+                        selected={selectedIds.has(session.id)}
+                        onToggleSelect={() => toggleSelected(session.id)}
+                        onDelete={() =>
+                          deleteMutation.mutate({
+                            projectId: session.projectId,
+                            taskId: session.id,
+                          })
+                        }
+                        isDeleting={
+                          deleteMutation.isPending &&
+                          deleteMutation.variables?.taskId === session.id
+                        }
+                      />
+                    ))}
+                  </TableBody>
+                </Table>
+              </Frame>
+            </div>
+          ) : null}
+        </div>
+      </main>
+    </>
   );
 }

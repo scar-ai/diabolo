@@ -1,24 +1,21 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import {
   BuildingIcon,
   CheckIcon,
   CrownIcon,
-  HouseIcon,
   PlusIcon,
   ShieldIcon,
   UserPlusIcon,
   XIcon,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { toast } from "sonner";
 
-import { useSetHeaderSlots } from "@/components/app/header-portal";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Frame, FramePanel } from "@/components/ui/frame";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -60,29 +57,6 @@ export const Route = createFileRoute("/_auth/app/organisation")({
 function OrganisationPage() {
   const { user } = Route.useRouteContext();
   const queryClient = useQueryClient();
-  const setHeaderSlots = useSetHeaderSlots();
-
-  useEffect(() => {
-    setHeaderSlots({
-      left: (
-        <nav className="flex items-center gap-1.5 text-sm">
-          <Link
-            to="/app/projects"
-            className="flex items-center gap-1.5 text-muted-foreground transition-colors hover:text-foreground"
-          >
-            <HouseIcon className="size-4" />
-            Home
-          </Link>
-          <span className="text-muted-foreground/40">/</span>
-          <span className="font-medium text-foreground">Organisation</span>
-        </nav>
-      ),
-      projectId: null,
-      projectName: null,
-      right: null,
-    });
-    return () => setHeaderSlots({ left: null, projectId: null, projectName: null, right: null });
-  }, [setHeaderSlots]);
   const createOrg = useServerFn($createOrg);
   const inviteMember = useServerFn($inviteMember);
   const acceptInvite = useServerFn($acceptInvite);
@@ -275,11 +249,20 @@ function OrganisationPage() {
     });
   };
 
+  const pageHeader = (
+    <div className="flex shrink-0 items-center border-b border-border/60 px-6 py-3">
+      <h1 className="text-sm font-medium text-foreground">Organisation</h1>
+    </div>
+  );
+
   if (orgQuery.isPending || invitesQuery.isPending || projectInvitesQuery.isPending) {
     return (
-      <main className="flex flex-1 items-center justify-center">
-        <p className="text-sm text-muted-foreground">Loading...</p>
-      </main>
+      <>
+        {pageHeader}
+        <main className="flex flex-1 items-center justify-center">
+          <p className="text-sm text-muted-foreground">Loading...</p>
+        </main>
+      </>
     );
   }
 
@@ -288,21 +271,22 @@ function OrganisationPage() {
     const isOwner = org.currentUserRole === "owner";
 
     return (
-      <main className="flex flex-1 flex-col items-center overflow-y-auto px-4 py-10">
-        <div className="w-full max-w-2xl space-y-4">
-          {/* Header */}
-          <div className="mb-6">
-            <p className="text-sm tracking-[0.24em] text-muted-foreground/55 uppercase">
-              Organisation
-            </p>
-            <h1 className="mt-1 text-3xl font-semibold tracking-tight text-foreground">
-              {org.name}
-            </h1>
-          </div>
+      <>
+        {pageHeader}
+        <main className="flex flex-1 flex-col items-center overflow-y-auto px-4 py-10">
+          <div className="w-full max-w-2xl space-y-4">
+            {/* Header */}
+            <div className="mb-6">
+              <p className="text-sm tracking-[0.24em] text-muted-foreground/55 uppercase">
+                Organisation
+              </p>
+              <h1 className="mt-1 text-3xl font-semibold tracking-tight text-foreground">
+                {org.name}
+              </h1>
+            </div>
 
-          {/* Members */}
-          <Frame>
-            <FramePanel className="p-6">
+            {/* Members */}
+            <section className="rounded-2xl border border-border/70 bg-card px-6 py-6 shadow-xs">
               <h2 className="mb-4 text-sm font-semibold text-foreground">Members</h2>
               <div className="space-y-2">
                 {org.members.map((member) => {
@@ -357,13 +341,11 @@ function OrganisationPage() {
                   );
                 })}
               </div>
-            </FramePanel>
-          </Frame>
+            </section>
 
-          {/* Pending invites — owners only */}
-          {isOwner && org.pendingInvites.length > 0 && (
-            <Frame>
-              <FramePanel className="p-6">
+            {/* Pending invites — owners only */}
+            {isOwner && org.pendingInvites.length > 0 && (
+              <section className="rounded-2xl border border-border/70 bg-card px-6 py-6 shadow-xs">
                 <h2 className="mb-4 text-sm font-semibold text-foreground">Pending invites</h2>
                 <div className="space-y-2">
                   {org.pendingInvites.map((invite) => (
@@ -393,13 +375,11 @@ function OrganisationPage() {
                     </div>
                   ))}
                 </div>
-              </FramePanel>
-            </Frame>
-          )}
+              </section>
+            )}
 
-          {isOwner && (
-            <Frame>
-              <FramePanel className="p-6">
+            {isOwner && (
+              <section className="rounded-2xl border border-border/70 bg-card px-6 py-6 shadow-xs">
                 <div className="flex items-start justify-between gap-4">
                   <div>
                     <h2 className="text-sm font-semibold text-foreground">
@@ -517,6 +497,7 @@ function OrganisationPage() {
                           <Input
                             id={`org-provider-api-key-${provider.id}`}
                             type="password"
+                            autoComplete="off"
                             value={provider.providerApiKey}
                             onChange={(event) =>
                               updateProvider(provider.id, { providerApiKey: event.target.value })
@@ -537,14 +518,12 @@ function OrganisationPage() {
                     {saveProvidersMutation.isPending ? "Saving..." : "Save organisation providers"}
                   </Button>
                 </div>
-              </FramePanel>
-            </Frame>
-          )}
+              </section>
+            )}
 
-          {/* Project invites */}
-          {projectInvites.length > 0 && (
-            <Frame>
-              <FramePanel className="p-6">
+            {/* Project invites */}
+            {projectInvites.length > 0 && (
+              <section className="rounded-2xl border border-border/70 bg-card px-6 py-6 shadow-xs">
                 <h2 className="mb-4 text-sm font-semibold text-foreground">Project invites</h2>
                 <div className="space-y-3">
                   {projectInvites.map((invite) => (
@@ -589,14 +568,12 @@ function OrganisationPage() {
                     </div>
                   ))}
                 </div>
-              </FramePanel>
-            </Frame>
-          )}
+              </section>
+            )}
 
-          {/* Invite member — owners only */}
-          {isOwner && (
-            <Frame>
-              <FramePanel className="p-6">
+            {/* Invite member — owners only */}
+            {isOwner && (
+              <section className="rounded-2xl border border-border/70 bg-card px-6 py-6 shadow-xs">
                 <h2 className="mb-4 text-sm font-semibold text-foreground">Invite member</h2>
                 <div className="flex gap-2">
                   <div className="relative flex-1">
@@ -629,31 +606,32 @@ function OrganisationPage() {
                     )}
                   </Button>
                 </div>
-              </FramePanel>
-            </Frame>
-          )}
-        </div>
-      </main>
+              </section>
+            )}
+          </div>
+        </main>
+      </>
     );
   }
 
   // User is NOT in an org — show create or accept invites
   return (
-    <main className="flex flex-1 flex-col items-center overflow-y-auto px-4 py-10">
-      <div className="w-full max-w-2xl space-y-4">
-        <div className="mb-6">
-          <p className="text-sm tracking-[0.24em] text-muted-foreground/55 uppercase">
-            Organisation
-          </p>
-          <h1 className="mt-1 text-3xl font-semibold tracking-tight text-foreground">
-            Get started
-          </h1>
-        </div>
+    <>
+      {pageHeader}
+      <main className="flex flex-1 flex-col items-center overflow-y-auto px-4 py-10">
+        <div className="w-full max-w-2xl space-y-4">
+          <div className="mb-6">
+            <p className="text-sm tracking-[0.24em] text-muted-foreground/55 uppercase">
+              Organisation
+            </p>
+            <h1 className="mt-1 text-3xl font-semibold tracking-tight text-foreground">
+              Get started
+            </h1>
+          </div>
 
-        {/* Pending invites */}
-        {invites.length > 0 && (
-          <Frame>
-            <FramePanel className="p-6">
+          {/* Pending invites */}
+          {invites.length > 0 && (
+            <section className="rounded-2xl border border-border/70 bg-card px-6 py-6 shadow-xs">
               <h2 className="mb-4 text-sm font-semibold text-foreground">Pending invites</h2>
               <div className="space-y-3">
                 {invites.map((invite) => (
@@ -696,14 +674,12 @@ function OrganisationPage() {
                   </div>
                 ))}
               </div>
-            </FramePanel>
-          </Frame>
-        )}
+            </section>
+          )}
 
-        {/* Project invites */}
-        {projectInvites.length > 0 && (
-          <Frame>
-            <FramePanel className="p-6">
+          {/* Project invites */}
+          {projectInvites.length > 0 && (
+            <section className="rounded-2xl border border-border/70 bg-card px-6 py-6 shadow-xs">
               <h2 className="mb-4 text-sm font-semibold text-foreground">Project invites</h2>
               <div className="space-y-3">
                 {projectInvites.map((invite) => (
@@ -748,13 +724,11 @@ function OrganisationPage() {
                   </div>
                 ))}
               </div>
-            </FramePanel>
-          </Frame>
-        )}
+            </section>
+          )}
 
-        {/* Create org */}
-        <Frame>
-          <FramePanel className="p-6">
+          {/* Create org */}
+          <section className="rounded-2xl border border-border/70 bg-card px-6 py-6 shadow-xs">
             <div className="mb-4 space-y-1">
               <h2 className="text-sm font-semibold text-foreground">Create an organisation</h2>
               <p className="text-sm text-muted-foreground">
@@ -791,9 +765,9 @@ function OrganisationPage() {
                 )}
               </Button>
             </div>
-          </FramePanel>
-        </Frame>
-      </div>
-    </main>
+          </section>
+        </div>
+      </main>
+    </>
   );
 }

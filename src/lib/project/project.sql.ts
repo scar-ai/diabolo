@@ -136,6 +136,7 @@ export const scheduledTask = pgTable(
     scheduleCron: text("schedule_cron").notNull(),
     scheduleTimezone: text("schedule_timezone").notNull(),
     instructions: text().notNull(),
+    providerId: text("provider_id"),
     branchName: text("branch_name"),
     enabled: integer().notNull().default(1),
     runOnce: integer("run_once").notNull().default(0),

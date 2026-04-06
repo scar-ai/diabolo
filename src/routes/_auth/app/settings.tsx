@@ -1,11 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import { ChevronRightIcon, HouseIcon, PlusIcon, StarIcon, Trash2Icon } from "lucide-react";
-import { useEffect, useState } from "react";
+import { PlusIcon, StarIcon, Trash2Icon } from "lucide-react";
+import { useState } from "react";
 import { toast } from "sonner";
 
-import { useSetHeaderSlots } from "@/components/app/header-portal";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -38,30 +37,7 @@ const createProviderDraft = (overrides?: Partial<ProviderDraft>): ProviderDraft 
 });
 
 function SettingsPage() {
-  const setHeaderSlots = useSetHeaderSlots();
   const queryClient = useQueryClient();
-
-  useEffect(() => {
-    setHeaderSlots({
-      left: (
-        <nav className="flex items-center gap-2 rounded-lg border border-border/50 bg-muted/70 px-4 py-2 text-base">
-          <Link
-            to="/app/projects"
-            className="flex items-center gap-1.5 text-muted-foreground transition-colors hover:text-foreground"
-          >
-            <HouseIcon className="size-4" />
-            Home
-          </Link>
-          <ChevronRightIcon className="size-3.5 text-muted-foreground/40" aria-hidden="true" />
-          <span className="font-medium text-foreground">Settings</span>
-        </nav>
-      ),
-      projectId: null,
-      projectName: null,
-      right: null,
-    });
-    return () => setHeaderSlots({ left: null, projectId: null, projectName: null, right: null });
-  }, [setHeaderSlots]);
 
   const providersQuery = useQuery(userLlmProvidersQueryOptions());
   const [draftProviders, setDraftProviders] = useState<ProviderDraft[] | null>(null);
@@ -274,6 +250,7 @@ function SettingsPage() {
                   <Input
                     id={`provider-api-key-${provider.id}`}
                     type="password"
+                    autoComplete="off"
                     value={provider.providerApiKey}
                     onChange={(event) =>
                       updateProvider(provider.id, { providerApiKey: event.target.value })

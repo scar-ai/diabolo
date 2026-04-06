@@ -256,6 +256,7 @@ export const insertScheduledTask = (input: {
   instructions: string;
   name: string;
   projectId: string;
+  providerId?: string | null;
   runOnce?: number;
   scheduleCron: string;
   scheduleTimezone: string;

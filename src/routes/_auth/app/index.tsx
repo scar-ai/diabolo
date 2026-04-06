@@ -1,23 +1,19 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute, Link, redirect, useNavigate } from "@tanstack/react-router";
-import { useServerFn } from "@tanstack/react-start";
-import { ChevronRightIcon, HouseIcon } from "lucide-react";
-import { useEffect, useState } from "react";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { GitBranchIcon } from "lucide-react";
+import { useState } from "react";
 import { toast } from "sonner";
 
-import { useSetHeaderSlots } from "@/components/app/header-portal";
 import { BranchSelector } from "@/components/app/home/branch-selector";
-import { CreateProjectDialog } from "@/components/app/home/create-project-dialog";
-import { ProjectSelector } from "@/components/app/home/project-selector";
 import { ProviderSelector } from "@/components/app/home/provider-selector";
 import { RunningTasksPanel } from "@/components/app/home/running-tasks-panel";
+import { ScheduledTasksSection } from "@/components/app/home/scheduled-tasks-section";
+import { ProjectSettingsDialog } from "@/components/app/project-settings-dialog";
 import { PromptComposer } from "@/components/app/prompt-composer";
-import { githubBranchesQueryOptions, githubReposQueryOptions } from "@/lib/github/queries";
-import { $createProject } from "@/lib/project/functions";
+import { githubBranchesQueryOptions } from "@/lib/github/queries";
 import {
   allUserTaskSummariesQueryOptions,
   projectDetailQueryOptions,
-  projectKeys,
   type TaskSummaryResult,
   taskKeys,
 } from "@/lib/project/queries";
@@ -46,11 +42,6 @@ export const Route = createFileRoute("/_auth/app/")({
     branch: typeof search.branch === "string" ? search.branch : undefined,
     projectId: typeof search.projectId === "string" ? search.projectId : undefined,
   }),
-  beforeLoad: ({ search }) => {
-    if (!search.projectId) {
-      throw redirect({ to: "/app/projects" });
-    }
-  },
   loader: async ({ context }) => {
     await context.queryClient.ensureQueryData({
       ...allUserTaskSummariesQueryOptions(context.user.id),
@@ -65,26 +56,13 @@ function AppHome() {
   const search = Route.useSearch();
   const navigate = useNavigate({ from: Route.fullPath });
   const queryClient = useQueryClient();
-  const createProject = useServerFn($createProject);
-  const setHeaderSlots = useSetHeaderSlots();
-
-  const greeting = getGreeting();
-  const firstName = user.name?.split(" ")[0] ?? user.name ?? "there";
-  const dateString = new Date().toLocaleDateString("en-US", {
-    weekday: "long",
-    month: "long",
-    day: "numeric",
-  });
 
   const [inputValue, setInputValue] = useState("");
-  const [createProjectOpen, setCreateProjectOpen] = useState(false);
-  const [createProjectSearch, setCreateProjectSearch] = useState("");
-  const [createProjectRepoId, setCreateProjectRepoId] = useState("");
-  const [createProjectName, setCreateProjectName] = useState("");
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
   const [selectedProviderId, setSelectedProviderId] = useState<string | null>(null);
 
   const currentProjectId = search.projectId ?? "";
+
   const recentTasksQuery = useQuery({
     ...allUserTaskSummariesQueryOptions(user.id),
     refetchInterval: (query) => {
@@ -102,7 +80,6 @@ function AppHome() {
     enabled: Boolean(currentProjectId),
   });
   const currentProject = currentProjectDetailQuery.data ?? null;
-  const projectLabel = currentProject?.name ?? "Select project";
   const currentProjectRepoFullName = currentProject?.repoFullName ?? null;
   const currentProjectDefaultBranch = currentProject?.repoDefaultBranch ?? "main";
   const currentBranch = search.branch || currentProjectDefaultBranch;
@@ -112,13 +89,7 @@ function AppHome() {
     enabled: Boolean(currentProjectRepoFullName),
   });
 
-  const createProjectRepoQuery = useQuery({
-    ...githubReposQueryOptions(user.id),
-    enabled: createProjectOpen,
-  });
   const providerQuery = useQuery(userLlmProvidersQueryOptions());
-  const repos = createProjectRepoQuery.data ?? [];
-  const createProjectRepo = repos.find((repo) => repo.id === createProjectRepoId) ?? null;
   const providers = providerQuery.data ?? [];
   const isProvidersLoading = providerQuery.isPending && !providerQuery.isFetched;
   const defaultProviderId =
@@ -128,39 +99,11 @@ function AppHome() {
       ? selectedProviderId
       : defaultProviderId;
 
-  const runningTasks = (recentTasksQuery.data ?? []).filter(
-    (task) => task.status === "queued" || task.status === "running" || task.hasActiveChildren,
+  const currentProjectRunningTasks = (recentTasksQuery.data ?? []).filter(
+    (task) =>
+      task.projectId === currentProjectId &&
+      (task.status === "queued" || task.status === "running" || task.hasActiveChildren),
   );
-  const currentProjectRunningTasks = runningTasks.filter(
-    (task) => task.projectId === currentProjectId,
-  );
-
-  const createProjectMutation = useMutation({
-    mutationFn: async () => {
-      if (!createProjectRepo) {
-        throw new Error("Select a repository first.");
-      }
-
-      return createProject({
-        data: {
-          name: createProjectName.trim() || createProjectRepo.fullName,
-          repoId: createProjectRepo.id,
-        },
-      });
-    },
-    onSuccess: async (project) => {
-      await queryClient.invalidateQueries({ queryKey: projectKeys.all });
-      toast.success("Project created.");
-      setCreateProjectOpen(false);
-      setCreateProjectSearch("");
-      setCreateProjectRepoId("");
-      setCreateProjectName("");
-      navigate({ search: { branch: undefined, projectId: project.id } });
-    },
-    onError: (error) => {
-      toast.error(error instanceof Error ? error.message : "Failed to create project.");
-    },
-  });
 
   const taskMutation = useMutation({
     mutationFn: async (data: {
@@ -169,9 +112,7 @@ function AppHome() {
       providerId: string;
       sourceBranch: string;
     }) => {
-      if (!currentProject) {
-        throw new Error("Select a project first.");
-      }
+      if (!currentProject) throw new Error("Select a project first.");
 
       const formData = new FormData();
       formData.set("projectId", currentProject.id);
@@ -183,11 +124,7 @@ function AppHome() {
         formData.append("attachments", file);
       }
 
-      const response = await fetch("/api/tasks/create", {
-        body: formData,
-        method: "POST",
-      });
-
+      const response = await fetch("/api/tasks/create", { body: formData, method: "POST" });
       const payload = await response.json();
 
       if (!response.ok) {
@@ -200,7 +137,7 @@ function AppHome() {
     },
     onSuccess: (newTask) => {
       queryClient.invalidateQueries({ queryKey: taskKeys.all });
-      toast.success("Background task started.");
+      toast.success("Task started.");
       setInputValue("");
       setAttachments([]);
       navigate({ to: "/app/tasks/$taskId", params: { taskId: newTask.id } });
@@ -216,169 +153,192 @@ function AppHome() {
     Boolean(effectiveProviderId) &&
     !taskMutation.isPending;
 
-  useEffect(() => {
-    setHeaderSlots({
-      left: (
-        <nav className="flex items-center gap-2 rounded-lg border border-border/50 bg-muted/70 px-4 py-2 text-base">
-          <Link
-            to="/app/projects"
-            className="flex items-center gap-1.5 text-muted-foreground transition-colors hover:text-foreground"
-          >
-            <HouseIcon className="size-4" />
-            Home
-          </Link>
-          {currentProject?.name ? (
-            <>
-              <ChevronRightIcon className="size-3.5 text-muted-foreground/40" aria-hidden="true" />
-              <span className="font-medium text-foreground">{currentProject.name}</span>
-            </>
-          ) : null}
-        </nav>
-      ),
-      projectId: currentProjectId,
-      projectName: currentProject?.name ?? null,
-      right: null,
-    });
-    return () => setHeaderSlots({ left: null, projectId: null, projectName: null, right: null });
-  }, [currentProject?.name, currentProjectId, setHeaderSlots]);
-
   const handleSelectBranch = (branch: string) => {
-    navigate({
-      search: (prev) => ({ ...prev, branch }),
-    });
+    navigate({ search: (prev) => ({ ...prev, branch }) });
   };
 
   const handleSubmit = () => {
-    if (!canSubmit || !currentProject) {
-      return;
-    }
+    if (!canSubmit || !currentProject || !effectiveProviderId) return;
 
     taskMutation.mutate({
-      attachments: attachments.map((attachment) => attachment.file),
+      attachments: attachments.map((a) => a.file),
       prompt: inputValue.trim(),
       providerId: effectiveProviderId,
       sourceBranch: currentBranch,
     });
   };
 
+  // No project selected — show a welcome state
+  if (!currentProjectId) {
+    return (
+      <main className="flex flex-1 flex-col items-center justify-center px-6">
+        <div className="flex max-w-sm flex-col items-center gap-4 text-center">
+          <div className="flex size-12 items-center justify-center rounded-2xl bg-muted">
+            <svg
+              className="size-6 text-muted-foreground/50"
+              viewBox="0 0 24 24"
+              fill="currentColor"
+              aria-hidden="true"
+            >
+              <path d="M12 2L14.5 9.5L22 12L14.5 14.5L12 22L9.5 14.5L2 12L9.5 9.5L12 2Z" />
+            </svg>
+          </div>
+          <div className="space-y-1.5">
+            <h1 className="text-base font-semibold text-foreground">Select a project</h1>
+            <p className="text-sm text-muted-foreground">
+              Choose a project from the sidebar to start a task.
+            </p>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
   return (
     <>
-      <main className="flex flex-1 flex-col items-center justify-center px-4 pb-48">
-        <div className="flex w-full max-w-3xl flex-col items-center text-center">
-          <p className="mb-3 text-sm text-muted-foreground/60">{dateString}</p>
-          <h1 className="mb-10 font-serif text-[2.75rem] leading-tight tracking-tight text-muted-foreground/70">
-            {greeting}, <span className="text-foreground">{firstName}</span>
-          </h1>
+      {/* Page header */}
+      {currentProject ? (
+        <div className="flex shrink-0 items-center justify-between border-b border-border/60 px-6 py-3">
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="truncate text-sm font-medium text-foreground">
+              {currentProject.name}
+            </span>
+            <div className="flex items-center gap-1 text-xs text-muted-foreground/60">
+              <GitBranchIcon className="size-3" aria-hidden="true" />
+              <span>{currentBranch}</span>
+            </div>
+          </div>
+          <ProjectSettingsDialog
+            currentUserId={user.id}
+            disabled={false}
+            projectId={currentProject.id}
+            projectName={currentProject.name}
+          />
+        </div>
+      ) : null}
+
+      {/* Main content */}
+      <main className="flex flex-1 flex-col items-center overflow-y-auto px-6 pt-8 pb-48">
+        <div className="w-full max-w-3xl space-y-8">
+          <Greeting name={user.name ?? user.email ?? "friend"} />
           <RunningTasksPanel tasks={currentProjectRunningTasks} />
+          {currentProject ? (
+            <ScheduledTasksSection
+              projectDefaultBranch={currentProjectDefaultBranch}
+              projectId={currentProject.id}
+              providers={providers}
+              repoFullName={currentProjectRepoFullName}
+              userId={user.id}
+            />
+          ) : null}
         </div>
       </main>
 
-      <div className="fixed inset-x-0 bottom-6 flex justify-center px-4">
-        <PromptComposer
-          attachments={attachments.map((attachment) => ({
-            id: attachment.id,
-            name: attachment.file.name,
-            sizeLabel: formatAttachmentSize(attachment.file.size),
-          }))}
-          value={inputValue}
-          onAddAttachments={(files) => {
-            setAttachments((current) => [
-              ...current,
-              ...Array.from(files).map((file) => ({
-                file,
-                id: crypto.randomUUID(),
-              })),
-            ]);
-          }}
-          onChange={setInputValue}
-          onRemoveAttachment={(id) =>
-            setAttachments((current) => current.filter((attachment) => attachment.id !== id))
-          }
-          onSubmit={handleSubmit}
-          placeholder="Ask anything..."
-          canSubmit={canSubmit}
-          submitAriaLabel={taskMutation.isPending ? "Starting..." : "Send"}
-          footerLeft={
-            <>
-              <ProjectSelector
-                onCreateProject={() => setCreateProjectOpen(true)}
-                onSelectProject={(projectId) =>
-                  navigate({ search: { branch: undefined, projectId } })
-                }
-                projectLabel={projectLabel}
-                projects={currentProject ? [currentProject] : []}
-              />
-              <BranchSelector
-                branches={branchesQuery.data ?? []}
-                currentBranch={currentBranch}
-                disabled={!currentProject}
-                isPending={branchesQuery.isPending}
-                onSelectBranch={handleSelectBranch}
-              />
-              <ProviderSelector
-                currentProviderId={effectiveProviderId ?? ""}
-                disabled={taskMutation.isPending}
-                isPending={isProvidersLoading}
-                onSelectProvider={setSelectedProviderId}
-                providers={providers}
-              />
-            </>
-          }
-          note={
-            providers.length === 0
-              ? "Add a provider in Settings before starting a task."
-              : undefined
-          }
-        />
+      {/* Fixed prompt composer */}
+      <div className="pointer-events-none fixed inset-x-0 bottom-6 flex justify-center px-4 pl-[14rem]">
+        <div className="pointer-events-auto w-full max-w-3xl">
+          <PromptComposer
+            attachments={attachments.map((a) => ({
+              id: a.id,
+              name: a.file.name,
+              sizeLabel: formatAttachmentSize(a.file.size),
+            }))}
+            value={inputValue}
+            onAddAttachments={(files) => {
+              setAttachments((current) => [
+                ...current,
+                ...Array.from(files).map((file) => ({
+                  file,
+                  id: crypto.randomUUID(),
+                })),
+              ]);
+            }}
+            onChange={setInputValue}
+            onRemoveAttachment={(id) =>
+              setAttachments((current) => current.filter((a) => a.id !== id))
+            }
+            onSubmit={handleSubmit}
+            placeholder="Ask anything..."
+            canSubmit={canSubmit}
+            submitAriaLabel={taskMutation.isPending ? "Starting..." : "Send"}
+            footerLeft={
+              <>
+                <BranchSelector
+                  branches={branchesQuery.data ?? []}
+                  currentBranch={currentBranch}
+                  disabled={!currentProject}
+                  isPending={branchesQuery.isPending}
+                  onSelectBranch={handleSelectBranch}
+                />
+                <ProviderSelector
+                  currentProviderId={effectiveProviderId ?? ""}
+                  disabled={taskMutation.isPending}
+                  isPending={isProvidersLoading}
+                  onSelectProvider={setSelectedProviderId}
+                  providers={providers}
+                />
+              </>
+            }
+            note={
+              providers.length === 0
+                ? "Add a provider in Settings before starting a task."
+                : undefined
+            }
+          />
+        </div>
       </div>
-
-      <CreateProjectDialog
-        isCreating={createProjectMutation.isPending}
-        isPending={createProjectRepoQuery.isPending}
-        onCreate={() => createProjectMutation.mutate()}
-        onOpenChange={setCreateProjectOpen}
-        onProjectNameChange={setCreateProjectName}
-        onRepoSearchChange={setCreateProjectSearch}
-        onSelectRepo={(repoId, repoFullName) => {
-          setCreateProjectRepoId(repoId);
-          setCreateProjectName(repoFullName);
-        }}
-        open={createProjectOpen}
-        projectName={createProjectName}
-        repoSearch={createProjectSearch}
-        repos={repos}
-        selectedRepoId={createProjectRepoId}
-        selectedRepoName={createProjectRepo?.fullName ?? null}
-      />
     </>
   );
 }
 
-function getGreeting() {
+function getGreeting(name: string): string {
   const hour = new Date().getHours();
+  const firstName = name.split(" ")[0];
 
-  const morning = [
-    "Good morning",
-    "Morning",
-    "Rise and shine",
-    "Hope your morning's going well",
-    "Ready to get things done?",
-  ];
-  const afternoon = [
-    "Good afternoon",
-    "Afternoon",
-    "Hope the day's treating you well",
-    "How's the afternoon going?",
-    "Making the most of the day?",
-  ];
-  const evening = [
-    "Good evening",
-    "Evening",
-    "Winding down?",
-    "Hope you had a good day",
-    "Burning the midnight oil?",
-  ];
+  if (hour >= 5 && hour < 12) {
+    const lines = [
+      `Rise and shine, ${firstName}.`,
+      `Good morning, ${firstName}. Coffee's hot, backlog's not.`,
+      `Morning, ${firstName}. Your future self thanks you for starting early.`,
+      `Up with the sun, ${firstName}? Respect. Let's ship something.`,
+    ];
+    return lines[new Date().getDate() % lines.length];
+  }
 
-  const pool = hour < 12 ? morning : hour < 17 ? afternoon : evening;
-  return pool[Math.floor(Math.random() * pool.length)];
+  if (hour >= 12 && hour < 17) {
+    const lines = [
+      `Afternoon, ${firstName}. Lunch was a myth, but this task is real.`,
+      `Good afternoon, ${firstName}. The standup is over, the work begins.`,
+      `Hey ${firstName}, it's that post-lunch window where great code gets written. Probably.`,
+      `${firstName}, it's afternoon. Time to pretend the morning was just warmup.`,
+    ];
+    return lines[new Date().getDate() % lines.length];
+  }
+
+  if (hour >= 17 && hour < 21) {
+    const lines = [
+      `Evening, ${firstName}. One more thing before you close the laptop… right?`,
+      `Hey ${firstName}, the day shift is done. You're the last one standing.`,
+      `Good evening, ${firstName}. Dinner can wait. Deployments cannot.`,
+      `${firstName}, it's evening. The best engineers ship after 5pm. (Citation needed.)`,
+    ];
+    return lines[new Date().getDate() % lines.length];
+  }
+
+  const lines = [
+    `${firstName}, it's late. The bugs are asleep. You should be too.`,
+    `Burning the midnight oil, ${firstName}?`,
+    `Night mode activated, ${firstName}. No one's watching. Ship it.`,
+    `${firstName}, it's the middle of the night. Either you're very dedicated or very stuck.`,
+  ];
+  return lines[new Date().getDate() % lines.length];
+}
+
+function Greeting({ name }: { name: string }) {
+  return (
+    <div className="text-center">
+      <h2 className="text-2xl font-semibold text-foreground">{getGreeting(name)}</h2>
+      <p className="mt-1.5 text-sm text-muted-foreground">Here&apos;s what&apos;s going on.</p>
+    </div>
+  );
 }

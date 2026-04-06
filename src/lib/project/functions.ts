@@ -59,6 +59,7 @@ const createScheduledTaskInputSchema = z.object({
   instructions: z.string().min(1).max(MAX_SCHEDULED_TASK_INSTRUCTIONS_LENGTH),
   name: z.string().min(1).max(MAX_SCHEDULED_TASK_NAME_LENGTH),
   projectId: z.string().min(1),
+  providerId: z.string().min(1).nullable().optional(),
   runOnce: z.boolean().optional().default(false),
   scheduleCron: z.string().refine(isValidCronExpression, "Invalid cron expression."),
   scheduleTimezone: z.string().refine(isValidTimezone, "Invalid timezone."),

@@ -28,6 +28,7 @@ import { Route as ApiTasksTaskIdStreamRouteImport } from './routes/api/tasks/$ta
 import { Route as ApiTasksTaskIdFollowUpRouteImport } from './routes/api/tasks/$taskId/follow-up'
 import { Route as ApiTasksTaskIdAttachmentsRouteImport } from './routes/api/tasks/$taskId/attachments'
 import { Route as AuthAppTasksTaskIdRouteImport } from './routes/_auth/app/tasks/$taskId'
+import { Route as ApiTasksTaskIdArtifactsArtifactIdRouteImport } from './routes/api/tasks/$taskId/artifacts/$artifactId'
 
 const AlphaRoute = AlphaRouteImport.update({
   id: '/alpha',
@@ -123,6 +124,12 @@ const AuthAppTasksTaskIdRoute = AuthAppTasksTaskIdRouteImport.update({
   path: '/tasks/$taskId',
   getParentRoute: () => AuthAppRouteRoute,
 } as any)
+const ApiTasksTaskIdArtifactsArtifactIdRoute =
+  ApiTasksTaskIdArtifactsArtifactIdRouteImport.update({
+    id: '/api/tasks/$taskId/artifacts/$artifactId',
+    path: '/api/tasks/$taskId/artifacts/$artifactId',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -142,6 +149,7 @@ export interface FileRoutesByFullPath {
   '/api/tasks/$taskId/attachments': typeof ApiTasksTaskIdAttachmentsRoute
   '/api/tasks/$taskId/follow-up': typeof ApiTasksTaskIdFollowUpRoute
   '/api/tasks/$taskId/stream': typeof ApiTasksTaskIdStreamRoute
+  '/api/tasks/$taskId/artifacts/$artifactId': typeof ApiTasksTaskIdArtifactsArtifactIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -160,6 +168,7 @@ export interface FileRoutesByTo {
   '/api/tasks/$taskId/attachments': typeof ApiTasksTaskIdAttachmentsRoute
   '/api/tasks/$taskId/follow-up': typeof ApiTasksTaskIdFollowUpRoute
   '/api/tasks/$taskId/stream': typeof ApiTasksTaskIdStreamRoute
+  '/api/tasks/$taskId/artifacts/$artifactId': typeof ApiTasksTaskIdArtifactsArtifactIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -182,6 +191,7 @@ export interface FileRoutesById {
   '/api/tasks/$taskId/attachments': typeof ApiTasksTaskIdAttachmentsRoute
   '/api/tasks/$taskId/follow-up': typeof ApiTasksTaskIdFollowUpRoute
   '/api/tasks/$taskId/stream': typeof ApiTasksTaskIdStreamRoute
+  '/api/tasks/$taskId/artifacts/$artifactId': typeof ApiTasksTaskIdArtifactsArtifactIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -203,6 +213,7 @@ export interface FileRouteTypes {
     | '/api/tasks/$taskId/attachments'
     | '/api/tasks/$taskId/follow-up'
     | '/api/tasks/$taskId/stream'
+    | '/api/tasks/$taskId/artifacts/$artifactId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -221,6 +232,7 @@ export interface FileRouteTypes {
     | '/api/tasks/$taskId/attachments'
     | '/api/tasks/$taskId/follow-up'
     | '/api/tasks/$taskId/stream'
+    | '/api/tasks/$taskId/artifacts/$artifactId'
   id:
     | '__root__'
     | '/'
@@ -242,6 +254,7 @@ export interface FileRouteTypes {
     | '/api/tasks/$taskId/attachments'
     | '/api/tasks/$taskId/follow-up'
     | '/api/tasks/$taskId/stream'
+    | '/api/tasks/$taskId/artifacts/$artifactId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -255,6 +268,7 @@ export interface RootRouteChildren {
   ApiTasksTaskIdAttachmentsRoute: typeof ApiTasksTaskIdAttachmentsRoute
   ApiTasksTaskIdFollowUpRoute: typeof ApiTasksTaskIdFollowUpRoute
   ApiTasksTaskIdStreamRoute: typeof ApiTasksTaskIdStreamRoute
+  ApiTasksTaskIdArtifactsArtifactIdRoute: typeof ApiTasksTaskIdArtifactsArtifactIdRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -392,6 +406,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthAppTasksTaskIdRouteImport
       parentRoute: typeof AuthAppRouteRoute
     }
+    '/api/tasks/$taskId/artifacts/$artifactId': {
+      id: '/api/tasks/$taskId/artifacts/$artifactId'
+      path: '/api/tasks/$taskId/artifacts/$artifactId'
+      fullPath: '/api/tasks/$taskId/artifacts/$artifactId'
+      preLoaderRoute: typeof ApiTasksTaskIdArtifactsArtifactIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -454,6 +475,8 @@ const rootRouteChildren: RootRouteChildren = {
   ApiTasksTaskIdAttachmentsRoute: ApiTasksTaskIdAttachmentsRoute,
   ApiTasksTaskIdFollowUpRoute: ApiTasksTaskIdFollowUpRoute,
   ApiTasksTaskIdStreamRoute: ApiTasksTaskIdStreamRoute,
+  ApiTasksTaskIdArtifactsArtifactIdRoute:
+    ApiTasksTaskIdArtifactsArtifactIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

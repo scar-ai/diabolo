@@ -18,6 +18,68 @@ const writeGeneratedConfigCommand = [
   "PY",
 ].join("\n");
 
+const buildOpenCodeRunnerCommand = () =>
+  [
+    "python3 - <<'PY'",
+    "import base64",
+    "import json",
+    "import os",
+    "import pathlib",
+    "import subprocess",
+    "import sys",
+    "import time",
+    "",
+    "artifacts_dir = pathlib.Path(os.getcwd()) / '.opencode' / 'artifacts'",
+    "artifacts_dir.mkdir(parents=True, exist_ok=True)",
+    "log_path = artifacts_dir / 'opencode-run.log'",
+    "",
+    "model = os.environ['OPENCODE_RUN_MODEL']",
+    "prompt = base64.b64decode(os.environ['OPENCODE_RUN_PROMPT_B64']).decode('utf-8')",
+    "attachments = json.loads(base64.b64decode(os.environ['OPENCODE_RUN_ATTACHMENTS_B64']).decode('utf-8'))",
+    "",
+    "args = ['opencode', 'run', '--format', 'json', '--model', model, prompt]",
+    "for attachment in attachments:",
+    "    args.extend(['--file', attachment])",
+    "",
+    "with open(log_path, 'wb') as log_file:",
+    "    process = subprocess.Popen(",
+    "        args,",
+    "        cwd=os.getcwd(),",
+    "        env=os.environ.copy(),",
+    "        stdout=log_file,",
+    "        stderr=subprocess.STDOUT,",
+    "        stdin=subprocess.DEVNULL,",
+    "    )",
+    "",
+    "last_offset = 0",
+    "while True:",
+    "    if log_path.exists():",
+    "        with open(log_path, 'rb') as reader:",
+    "            reader.seek(last_offset)",
+    "            chunk = reader.read()",
+    "            if chunk:",
+    "                sys.stdout.buffer.write(chunk)",
+    "                sys.stdout.buffer.flush()",
+    "                last_offset = reader.tell()",
+    "",
+    "    return_code = process.poll()",
+    "    if return_code is not None:",
+    "        break",
+    "",
+    "    time.sleep(0.2)",
+    "",
+    "if log_path.exists():",
+    "    with open(log_path, 'rb') as reader:",
+    "        reader.seek(last_offset)",
+    "        tail = reader.read()",
+    "        if tail:",
+    "            sys.stdout.buffer.write(tail)",
+    "            sys.stdout.buffer.flush()",
+    "",
+    "sys.exit(return_code)",
+    "PY",
+  ].join("\n");
+
 export const opencodeInstallCommand = [
   SANDBOX_TOOL_PATH_EXPORT,
   'if ! command -v opencode >/dev/null 2>&1; then echo "OpenCode is missing from the Daytona browser snapshot." >&2; exit 1; fi',
@@ -37,6 +99,7 @@ export const buildOpenCodePrompt = (
       prompt: string;
       responseMessages: Array<{ text: string }>;
       sequence: number;
+      stage?: string;
       status: string;
     }>;
     envVarKeys?: string[];
@@ -48,10 +111,18 @@ export const buildOpenCodePrompt = (
     "Complete the user's task fully before you stop.",
     "Inspect the codebase first, make the required changes, and run the relevant verification commands.",
     "Fix any issues you find during verification before finishing.",
+    "Do not inspect or print secret files such as .env, .env.*, .diabolo/*, SSH keys, tokens, or credential stores unless the user explicitly asks for that.",
     "Custom git tools are available: git_status, git_create_branch, git_checkout_branch, git_stage, git_commit, git_push, git_pull, git_create_pr, and git_delete_branch.",
     "Completion rule: if you changed repository files in a meaningful way, do not finish with only local workspace changes. You must create a branch, stage the relevant files, commit the work, push the branch, and open a pull request before you stop unless the user explicitly asked you not to.",
     "Bias strongly toward opening a PR for real implementation work so the result is handoff-ready without extra user steps.",
     "Do not create a branch, commit, push, or PR if you only inspected the repo, debugged, or ran tests without meaningful code changes.",
+    "",
+    "Fresh scaffold and bootstrap rules:",
+    "If you create a new app, initialize a new package, or change package.json or a lockfile, install dependencies in that project before running build, test, dev, preview, or framework CLI commands that depend on local binaries.",
+    "Do not run install, build, test, and serve commands in parallel for a freshly scaffolded app. Run them sequentially and wait for each step to finish before starting the next one.",
+    "If a command fails because a project binary is missing, such as vite, next, react-scripts, astro, or tsc, treat that as a signal that dependencies for the current project are not installed yet. Install them in the current working directory, then retry.",
+    "For runtime verification artifacts such as logs, pid files, screenshots, and temporary output, use workspace-local paths like .opencode/artifacts or another hidden directory inside the repository. Do not use /tmp or other directories outside the workspace.",
+    "Do not rely on optional host utilities such as lsof for verification. Prefer curl, direct process output, or the browser tools available in this sandbox.",
     "",
     "Browser validation instructions:",
     "Browser/computer-use tools are always available in this sandbox.",
@@ -67,7 +138,8 @@ export const buildOpenCodePrompt = (
       ? [
           "Project environment variables:",
           `The following environment variables have been injected into this sandbox by the user: ${options.envVarKeys.join(", ")}.`,
-          "They are available as process environment variables and are also written to a .env file at the repository root.",
+          "They are available as process environment variables for commands you run.",
+          "Do not open or print .env files to inspect secrets unless the user explicitly asks for that.",
           "Do not tell the user that no environment variables are defined — they are already present in this sandbox.",
           "",
         ]
@@ -118,14 +190,18 @@ export const buildOpenCodeRunCommand = (
   model: string,
   prompt: string,
   attachments?: Array<{ sandboxPath: string }>,
-) =>
-  [
+) => {
+  const attachmentPaths = (attachments ?? []).map((attachment) => attachment.sandboxPath);
+  const promptB64 = Buffer.from(prompt, "utf8").toString("base64");
+  const attachmentsB64 = Buffer.from(JSON.stringify(attachmentPaths), "utf8").toString("base64");
+
+  return [
     SANDBOX_TOOL_PATH_EXPORT,
     writeGeneratedConfigCommand,
     'export OPENCODE_CONFIG="$PWD/../.opencode.generated.json"',
-    `opencode run --format json --model '${escapeForSingleQuotedShell(model)}' "$(cat <<'EOF'\n${prompt}\nEOF\n)"${(
-      attachments ?? []
-    )
-      .map((attachment) => ` --file '${escapeForSingleQuotedShell(attachment.sandboxPath)}'`)
-      .join("")}`,
+    `export OPENCODE_RUN_MODEL='${escapeForSingleQuotedShell(model)}'`,
+    `export OPENCODE_RUN_PROMPT_B64='${escapeForSingleQuotedShell(promptB64)}'`,
+    `export OPENCODE_RUN_ATTACHMENTS_B64='${escapeForSingleQuotedShell(attachmentsB64)}'`,
+    buildOpenCodeRunnerCommand(),
   ].join("\n");
+};

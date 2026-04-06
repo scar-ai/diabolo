@@ -63,6 +63,7 @@ export type ScheduledTaskDialogInput = {
   branchName: string | null;
   instructions: string;
   name: string;
+  providerId: string | null;
   runOnce: boolean;
   scheduleCron: string;
   scheduleTimezone: string;
@@ -72,8 +73,18 @@ type ScheduledTaskDialogValue = ScheduledTaskDialogInput & {
   id?: string;
 };
 
+type ScheduledTaskProviderOption = {
+  id: string;
+  isDefault: boolean;
+  name: string;
+  providerId: string;
+  providerModel: string;
+  scope?: string;
+};
+
 function buildInitialDialogState(
   defaultBranch: string,
+  defaultProviderId: string | null,
   initialValue?: ScheduledTaskDialogValue | null,
 ) {
   const detectedSchedule = initialValue
@@ -93,6 +104,7 @@ function buildInitialDialogState(
     name: initialValue?.name ?? "",
     preset: detectedSchedule.preset,
     presetConfig: detectedSchedule.presetConfig,
+    providerId: initialValue?.providerId ?? defaultProviderId,
     runOnce: initialValue?.runOnce ?? false,
     scheduleTimezone: initialValue?.scheduleTimezone ?? localTimezone,
   };
@@ -111,27 +123,32 @@ function getSchedulePresetState(scheduleCron: string) {
 export function ScheduledTaskDialog({
   branches,
   defaultBranch,
+  defaultProviderId,
   initialValue,
   isPending,
   mode = "create",
   onOpenChange,
   onSubmit,
   open,
+  providers,
 }: {
   branches: string[];
   defaultBranch: string;
+  defaultProviderId: string | null;
   initialValue?: ScheduledTaskDialogValue | null;
   isPending: boolean;
   mode?: "create" | "edit";
   onOpenChange: (open: boolean) => void;
   onSubmit: (input: ScheduledTaskDialogInput) => void;
   open: boolean;
+  providers: ScheduledTaskProviderOption[];
 }) {
-  const initialState = buildInitialDialogState(defaultBranch, initialValue);
+  const initialState = buildInitialDialogState(defaultBranch, defaultProviderId, initialValue);
   const timezoneListId = useId();
   const nameInputId = useId();
   const scheduleInputId = useId();
   const timezoneInputId = useId();
+  const providerInputId = useId();
   const branchInputId = useId();
   const instructionsInputId = useId();
   const runOnceInputId = useId();
@@ -140,6 +157,7 @@ export function ScheduledTaskDialog({
   const [customCron, setCustomCron] = useState(initialState.customCron);
   const [scheduleTimezone, setScheduleTimezone] = useState(initialState.scheduleTimezone);
   const [instructions, setInstructions] = useState(initialState.instructions);
+  const [providerId, setProviderId] = useState(initialState.providerId);
   const [branchMode, setBranchMode] = useState<"default" | "custom">(initialState.branchMode);
   const [branchName, setBranchName] = useState(initialState.branchName);
   const [presetConfig, setPresetConfig] = useState<SchedulePresetConfig>(initialState.presetConfig);
@@ -158,6 +176,12 @@ export function ScheduledTaskDialog({
   const timezoneIsValid = isValidTimezone(scheduleTimezone);
   const instructionsValue = instructions.trim();
   const nameValue = name.trim();
+  const selectedProviderId = providers.some((provider) => provider.id === providerId)
+    ? providerId
+    : (providers.find((provider) => provider.id === defaultProviderId)?.id ??
+      providers[0]?.id ??
+      null);
+  const selectedProvider = providers.find((provider) => provider.id === selectedProviderId) ?? null;
   const selectedBranchName = branchMode === "custom" ? branchName : null;
   const selectedBranchLabel =
     branchMode === "default" ? `Project default (${defaultBranch})` : branchName;
@@ -168,6 +192,7 @@ export function ScheduledTaskDialog({
     instructionsValue.length > 0 &&
     instructionsValue.length <= MAX_SCHEDULED_TASK_INSTRUCTIONS_LENGTH &&
     cronIsValid &&
+    Boolean(selectedProviderId) &&
     timezoneIsValid &&
     (branchMode === "default" || branchName.length > 0) &&
     !isPending;
@@ -486,6 +511,38 @@ export function ScheduledTaskDialog({
           </div>
 
           <div>
+            <div id={providerInputId} className="mb-1.5 text-sm font-medium text-foreground">
+              Provider
+            </div>
+            <Select
+              aria-labelledby={providerInputId}
+              value={selectedProviderId ?? undefined}
+              onValueChange={setProviderId}
+              disabled={providers.length === 0}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Select a provider">
+                  {selectedProvider
+                    ? `${selectedProvider.name}${selectedProvider.isDefault ? " · Default" : ""}`
+                    : "No providers"}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                {providers.map((provider) => (
+                  <SelectItem key={provider.id} value={provider.id}>
+                    {provider.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {selectedProvider
+                ? `${selectedProvider.providerId}/${selectedProvider.providerModel}`
+                : "Add a provider in Settings before creating a scheduled task."}
+            </p>
+          </div>
+
+          <div>
             <div id={branchInputId} className="mb-1.5 text-sm font-medium text-foreground">
               Branch
               <span className="ml-1 text-xs font-normal text-muted-foreground">Optional</span>
@@ -569,6 +626,7 @@ export function ScheduledTaskDialog({
                 branchName: selectedBranchName,
                 instructions: instructionsValue,
                 name: nameValue,
+                providerId: selectedProviderId,
                 runOnce,
                 scheduleCron,
                 scheduleTimezone,

@@ -1,11 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import { ChevronRightIcon, HouseIcon, LoaderIcon } from "lucide-react";
+import { LoaderIcon } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
-import { useSetHeaderSlots } from "@/components/app/header-portal";
 import {
   TaskConversation,
   TaskFollowUpComposer,
@@ -50,7 +49,6 @@ function TaskDetailPage() {
   const queryClient = useQueryClient();
   const terminateTask = useServerFn($terminateTaskById);
   const destroySandbox = useServerFn($destroyTaskSandboxById);
-  const setHeaderSlots = useSetHeaderSlots();
 
   const [followUpInput, setFollowUpInput] = useState("");
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
@@ -139,7 +137,7 @@ function TaskDetailPage() {
   const isCompleted = task && TERMINAL_STATUSES.has(task.status);
   const sandboxAlive = isCompleted && task.sandboxId;
   const taskTitle = task?.title ?? task?.repoName ?? "Task";
-  const projectName = projectQuery.data?.name ?? null;
+  const _projectName = projectQuery.data?.name ?? null;
   const canSendFollowUp = Boolean(
     isCompleted && followUpInput.trim().length >= 10 && !followUpMutation.isPending,
   );
@@ -170,70 +168,6 @@ function TaskDetailPage() {
     task?.parsedFollowUpHistory,
     task?.children,
     scrollToBottom,
-  ]);
-
-  const terminatePending = terminateMutation.isPending;
-  const terminateMutate = terminateMutation.mutate;
-  const destroyPending = destroyMutation.isPending;
-  const destroyMutate = destroyMutation.mutate;
-
-  useEffect(() => {
-    setHeaderSlots({
-      left: (
-        <nav className="flex items-center gap-2 rounded-lg border border-border/50 bg-muted/70 px-4 py-2 text-base">
-          <Link
-            to="/app/projects"
-            className="flex items-center gap-1.5 text-muted-foreground transition-colors hover:text-foreground"
-          >
-            <HouseIcon className="size-4" />
-            Home
-          </Link>
-          {projectName ? (
-            <>
-              <ChevronRightIcon className="size-3.5 text-muted-foreground/40" aria-hidden="true" />
-              <Link
-                to="/app"
-                search={{ projectId: task?.projectId }}
-                className="text-muted-foreground transition-colors hover:text-foreground"
-              >
-                {projectName}
-              </Link>
-            </>
-          ) : null}
-          {taskTitle ? (
-            <>
-              <ChevronRightIcon className="size-3.5 text-muted-foreground/40" aria-hidden="true" />
-              <span className="max-w-48 truncate font-medium text-foreground">{taskTitle}</span>
-            </>
-          ) : null}
-        </nav>
-      ),
-      projectId: task?.projectId ?? null,
-      projectName,
-      right: (
-        <TaskHeaderActions
-          destroyPending={destroyPending}
-          onDestroy={() => destroyMutate()}
-          onTerminate={() => terminateMutate()}
-          sandboxAlive={!!sandboxAlive}
-          taskIsRunning={!!isRunning}
-          terminatePending={terminatePending}
-        />
-      ),
-    });
-    return () => setHeaderSlots({ left: null, projectId: null, projectName: null, right: null });
-  }, [
-    task?.projectId,
-    task?.id,
-    taskTitle,
-    projectName,
-    isRunning,
-    sandboxAlive,
-    terminatePending,
-    terminateMutate,
-    destroyPending,
-    destroyMutate,
-    setHeaderSlots,
   ]);
 
   const handleSendFollowUp = () => {
@@ -274,44 +208,61 @@ function TaskDetailPage() {
       : null;
 
   return (
-    <main className="flex flex-1 flex-col overflow-hidden">
-      <TaskConversation
-        collaborators={collaboratorMap}
-        followUps={followUps}
-        pendingFollowUpPrompt={pendingFollowUpPrompt}
-        scrollRef={scrollRef}
-        task={task}
-        taskIsRunning={!!isRunning}
-      />
-
-      {isCompleted || isRunning ? (
-        <TaskFollowUpComposer
-          attachments={attachments.map((attachment) => ({
-            id: attachment.id,
-            name: attachment.file.name,
-            sizeLabel: formatAttachmentSize(attachment.file.size),
-          }))}
-          canSubmit={canSendFollowUp}
-          disabled={Boolean(isRunning && !sandboxAlive)}
-          isPending={followUpMutation.isPending}
-          onAddAttachments={(files) => {
-            setAttachments((current) => [
-              ...current,
-              ...Array.from(files).map((file) => ({
-                file,
-                id: crypto.randomUUID(),
-              })),
-            ]);
-          }}
-          onChange={setFollowUpInput}
-          onRemoveAttachment={(id) =>
-            setAttachments((current) => current.filter((attachment) => attachment.id !== id))
-          }
-          onSubmit={handleSendFollowUp}
-          task={task}
-          value={followUpInput}
+    <div className="flex flex-1 flex-col overflow-hidden">
+      {/* Page header */}
+      <div className="flex shrink-0 items-center justify-between border-b border-border/60 px-6 py-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="max-w-xs truncate text-sm font-medium text-foreground">{taskTitle}</span>
+        </div>
+        <TaskHeaderActions
+          destroyPending={destroyMutation.isPending}
+          onDestroy={() => destroyMutation.mutate()}
+          onTerminate={() => terminateMutation.mutate()}
+          sandboxAlive={!!sandboxAlive}
+          taskIsRunning={!!isRunning}
+          terminatePending={terminateMutation.isPending}
         />
-      ) : null}
-    </main>
+      </div>
+
+      <main className="flex flex-1 flex-col overflow-hidden">
+        <TaskConversation
+          collaborators={collaboratorMap}
+          followUps={followUps}
+          pendingFollowUpPrompt={pendingFollowUpPrompt}
+          scrollRef={scrollRef}
+          task={task}
+          taskIsRunning={!!isRunning}
+        />
+
+        {isCompleted || isRunning ? (
+          <TaskFollowUpComposer
+            attachments={attachments.map((attachment) => ({
+              id: attachment.id,
+              name: attachment.file.name,
+              sizeLabel: formatAttachmentSize(attachment.file.size),
+            }))}
+            canSubmit={canSendFollowUp}
+            disabled={Boolean(isRunning && !sandboxAlive)}
+            isPending={followUpMutation.isPending}
+            onAddAttachments={(files) => {
+              setAttachments((current) => [
+                ...current,
+                ...Array.from(files).map((file) => ({
+                  file,
+                  id: crypto.randomUUID(),
+                })),
+              ]);
+            }}
+            onChange={setFollowUpInput}
+            onRemoveAttachment={(id) =>
+              setAttachments((current) => current.filter((attachment) => attachment.id !== id))
+            }
+            onSubmit={handleSendFollowUp}
+            task={task}
+            value={followUpInput}
+          />
+        ) : null}
+      </main>
+    </div>
   );
 }

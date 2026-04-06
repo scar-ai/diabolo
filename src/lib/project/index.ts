@@ -3,7 +3,11 @@ import * as R from "remeda";
 
 import { Github } from "@/lib/github";
 import { Log } from "@/lib/log";
-import { type OpenCodeConfig, resolveOpenCodeConfig } from "@/lib/opencode/config";
+import {
+  normalizeOpenCodeModelForProvider,
+  type OpenCodeConfig,
+  resolveOpenCodeConfig,
+} from "@/lib/opencode/config";
 import { Org } from "@/lib/org";
 import {
   normalizeProjectEnvEntries,
@@ -19,6 +23,7 @@ import {
 } from "@/lib/project/skills";
 import { fromPromise } from "@/lib/result";
 import { Sandbox } from "@/lib/sandbox";
+import { findNextPendingTaskMessage, findProcessingTaskMessage } from "@/lib/sandbox/store";
 import { findUserLlmProvider, listUserLlmProviders } from "@/lib/user/data";
 
 import {
@@ -124,8 +129,33 @@ export namespace Project {
         return errAsync(new Error("Selected provider was not found."));
       }
 
+      const trimmedModel = model?.trim() || null;
+      const matchedProviderFromModel = trimmedModel
+        ? (providers.find((candidate) => {
+            if (!candidate.providerId?.trim() || !candidate.providerModel?.trim()) {
+              return false;
+            }
+
+            if (candidate.providerModel.trim() === trimmedModel) {
+              return true;
+            }
+
+            try {
+              return (
+                normalizeOpenCodeModelForProvider(candidate.providerModel, candidate.providerId) ===
+                trimmedModel
+              );
+            } catch {
+              return false;
+            }
+          }) ?? null)
+        : null;
       const resolvedProvider =
-        provider ?? providers.find((value) => value.isDefault) ?? providers[0] ?? null;
+        provider ??
+        matchedProviderFromModel ??
+        providers.find((value) => value.isDefault) ??
+        providers[0] ??
+        null;
 
       if (!resolvedProvider) {
         return errAsync(new Error("Add at least one provider in Settings before starting a task."));
@@ -141,6 +171,21 @@ export namespace Project {
       } catch (error) {
         return errAsync(error instanceof Error ? error : new Error(String(error)));
       }
+    });
+
+  const requireTaskReadyForQueuedPrompt = (taskId: string): ResultAsync<void, Error> =>
+    fromPromise(
+      Promise.all([findProcessingTaskMessage(taskId), findNextPendingTaskMessage(taskId)]),
+    ).andThen(([processingMessage, pendingMessage]) => {
+      if (processingMessage) {
+        return errAsync(new Error("This task is already processing a prompt."));
+      }
+
+      if (pendingMessage) {
+        return errAsync(new Error("This task already has a queued prompt."));
+      }
+
+      return okAsync(undefined);
     });
 
   export const createProjectForUser = (input: {
@@ -362,6 +407,7 @@ export namespace Project {
     instructions: string;
     name: string;
     projectId: string;
+    providerId?: string | null;
     runOnce?: boolean;
     scheduleCron: string;
     scheduleTimezone: string;
@@ -370,18 +416,21 @@ export namespace Project {
     ensureScheduledTaskScheduler();
 
     return requireUserProject(input.projectId, input.userId).andThen(() =>
-      fromPromise(
-        insertScheduledTask({
-          branchName: input.branchName ?? null,
-          createdByUserId: input.userId,
-          id: crypto.randomUUID(),
-          instructions: input.instructions,
-          name: input.name,
-          projectId: input.projectId,
-          runOnce: input.runOnce ? 1 : 0,
-          scheduleCron: input.scheduleCron,
-          scheduleTimezone: input.scheduleTimezone,
-        }),
+      resolveTaskOpenCodeConfig(input.userId, input.providerId ?? null).andThen(() =>
+        fromPromise(
+          insertScheduledTask({
+            branchName: input.branchName ?? null,
+            createdByUserId: input.userId,
+            id: crypto.randomUUID(),
+            instructions: input.instructions,
+            name: input.name,
+            projectId: input.projectId,
+            providerId: input.providerId ?? null,
+            runOnce: input.runOnce ? 1 : 0,
+            scheduleCron: input.scheduleCron,
+            scheduleTimezone: input.scheduleTimezone,
+          }),
+        ),
       ),
     );
   };
@@ -402,6 +451,7 @@ export namespace Project {
     instructions: string;
     name: string;
     projectId: string;
+    providerId?: string | null;
     runOnce: boolean;
     scheduleCron: string;
     scheduleTimezone: string;
@@ -410,12 +460,14 @@ export namespace Project {
   }): ResultAsync<ScheduledTaskRecord, Error> =>
     requireUserProject(input.projectId, input.userId)
       .andThen(() => requireScheduledTaskForProject(input.projectId, input.scheduledTaskId))
+      .andThen(() => resolveTaskOpenCodeConfig(input.userId, input.providerId ?? null))
       .andThen(() =>
         fromPromise(
           updateScheduledTask(input.scheduledTaskId, {
             branchName: input.branchName ?? null,
             instructions: input.instructions,
             name: input.name,
+            providerId: input.providerId ?? null,
             runOnce: input.runOnce ? 1 : 0,
             scheduleCron: input.scheduleCron,
             scheduleTimezone: input.scheduleTimezone,
@@ -512,50 +564,61 @@ export namespace Project {
       const parentTask = value.task;
       const branchName = parentTask.branchName ?? "main";
       const childRepoId = parentTask.repoId ?? value.project.repoId;
+      const executionUserId = parentTask.createdByUserId ?? value.project.userId;
 
       return fromPromise(assertParentCanSpawn(parentTask, value.project)).andThen(() =>
-        Sandbox.startTask(
-          {
-            envVars: serializeProjectEnvEntries(
-              parseStoredProjectEnvEntries(value.project.envVars),
-            ),
-            prompt: input.prompt,
-            repoId: childRepoId,
-            sourceBranch: branchName,
-          },
-          value.project.userId,
-        ).andThen((draft) =>
-          fromPromise(
-            insertTask({
-              branchName,
-              envVars: draft.envVars ? JSON.stringify(draft.envVars) : null,
-              id: draft.id,
-              opencodeModel: input.model ?? parentTask.opencodeModel ?? null,
-              opencodeProviderId: parentTask.opencodeProviderId ?? null,
-              parentTaskId: input.parentTaskId,
-              projectId: parentTask.projectId,
+        resolveTaskOpenCodeConfig(
+          executionUserId,
+          parentTask.opencodeProviderId ?? null,
+          input.model ?? parentTask.opencodeModel ?? null,
+        ).andThen((openCodeConfig) =>
+          Sandbox.startTask(
+            {
+              envVars: serializeProjectEnvEntries(
+                parseStoredProjectEnvEntries(value.project.envVars),
+              ),
+              openCodeConfig,
               prompt: input.prompt,
               repoId: childRepoId,
-              sandboxStatus: "pending",
-              spawnDepth: parentTask.spawnDepth + 1,
-              spawnSource: "agent",
-              stage: input.title.trim() ? `Queued child task: ${input.title.trim()}` : draft.stage,
-              startedAt: new Date(draft.startedAt),
-              status: draft.status,
-              title: input.title.trim() || buildTaskTitle(input.prompt),
-            }),
-          ).andThen((createdTask) =>
-            Sandbox.enqueueTaskMessage(createdTask.id, input.prompt, "initial").andThen(() =>
-              fromPromise(
-                publishChildTaskUpdate({
-                  childTaskId: createdTask.id,
-                  parentTaskId: input.parentTaskId,
-                  sandboxStatus: createdTask.sandboxStatus,
-                  stage: createdTask.stage,
-                  status: createdTask.status,
-                  title: createdTask.title,
-                }),
-              ).map(() => createdTask),
+              sourceBranch: branchName,
+            },
+            executionUserId,
+          ).andThen((draft) =>
+            fromPromise(
+              insertTask({
+                branchName,
+                createdByUserId: executionUserId,
+                envVars: draft.envVars ? JSON.stringify(draft.envVars) : null,
+                id: draft.id,
+                opencodeModel: openCodeConfig.model,
+                opencodeProviderId: openCodeConfig.selectedProviderId,
+                parentTaskId: input.parentTaskId,
+                projectId: parentTask.projectId,
+                prompt: input.prompt,
+                repoId: childRepoId,
+                sandboxStatus: "pending",
+                spawnDepth: parentTask.spawnDepth + 1,
+                spawnSource: "agent",
+                stage: input.title.trim()
+                  ? `Queued child task: ${input.title.trim()}`
+                  : draft.stage,
+                startedAt: new Date(draft.startedAt),
+                status: draft.status,
+                title: input.title.trim() || buildTaskTitle(input.prompt),
+              }),
+            ).andThen((createdTask) =>
+              Sandbox.enqueueTaskMessage(createdTask.id, input.prompt, "initial").andThen(() =>
+                fromPromise(
+                  publishChildTaskUpdate({
+                    childTaskId: createdTask.id,
+                    parentTaskId: input.parentTaskId,
+                    sandboxStatus: createdTask.sandboxStatus,
+                    stage: createdTask.stage,
+                    status: createdTask.status,
+                    title: createdTask.title,
+                  }),
+                ).map(() => createdTask),
+              ),
             ),
           ),
         ),
@@ -656,10 +719,12 @@ export namespace Project {
     userId: string,
   ): ResultAsync<TaskRecord, Error> =>
     requireTaskForUser(taskId, userId).andThen(({ task: value }) =>
-      fromPromise(queueFollowUpPrompt(value, prompt, userId)).map((updated) => {
-        log.info("follow-up queued", { taskId });
-        return updated;
-      }),
+      requireTaskReadyForQueuedPrompt(value.id).andThen(() =>
+        fromPromise(queueFollowUpPrompt(value, prompt, userId)).map((updated) => {
+          log.info("follow-up queued", { taskId });
+          return updated;
+        }),
+      ),
     );
 
   export const prepareTaskFollowUpForUser = (
@@ -668,21 +733,23 @@ export namespace Project {
     userId: string,
   ): ResultAsync<{ messageId: string; task: TaskRecord }, Error> =>
     requireTaskForUser(taskId, userId).andThen(({ task: value }) =>
-      fromPromise(
-        updateTask(value.id, {
-          completedAt: null,
-          error: null,
-          lastHeartbeatAt: new Date(),
-          sandboxStatus: value.sandboxId ? "ready" : "pending",
-          stage: "Queued prompt",
-          status: "queued",
-        }),
-      ).andThen((updatedTask) =>
-        Sandbox.createTaskMessageDraft(value.id, prompt.trim(), "follow_up", userId).map(
-          (message) => ({
-            messageId: message.id,
-            task: updatedTask ?? value,
+      requireTaskReadyForQueuedPrompt(value.id).andThen(() =>
+        fromPromise(
+          updateTask(value.id, {
+            completedAt: null,
+            error: null,
+            lastHeartbeatAt: new Date(),
+            sandboxStatus: value.sandboxId ? "ready" : "pending",
+            stage: "Queued prompt",
+            status: "queued",
           }),
+        ).andThen((updatedTask) =>
+          Sandbox.createTaskMessageDraft(value.id, prompt.trim(), "follow_up", userId).map(
+            (message) => ({
+              messageId: message.id,
+              task: updatedTask ?? value,
+            }),
+          ),
         ),
       ),
     );

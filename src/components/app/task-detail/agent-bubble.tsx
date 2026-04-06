@@ -34,12 +34,6 @@ export function AgentBubble({ task, isRunning }: { task: TaskData; isRunning: bo
 
   return (
     <div className="flex w-full flex-col gap-3">
-      <div className="flex items-center gap-2 text-[11px] tracking-[0.08em] text-muted-foreground/70 uppercase">
-        <span>{task.stage}</span>
-        <span>·</span>
-        <span>{task.sandboxStatus}</span>
-      </div>
-
       {combinedText ? (
         <div className="text-sm leading-relaxed text-foreground">
           <Markdown content={combinedText} />
