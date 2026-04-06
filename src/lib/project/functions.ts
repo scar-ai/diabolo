@@ -2,8 +2,18 @@ import { createServerFn } from "@tanstack/react-start";
 import * as z from "zod";
 
 import { authMiddleware } from "@/lib/auth/middleware";
-import { Project } from "@/lib/project";
+import { Project, ProjectMembers } from "@/lib/project";
+import { listProjectCollaborators, listProjectInvites } from "@/lib/project/data";
+import type { ProjectEnvEntry } from "@/lib/project/env";
+import {
+  isValidCronExpression,
+  isValidTimezone,
+  MAX_SCHEDULED_TASK_INSTRUCTIONS_LENGTH,
+  MAX_SCHEDULED_TASK_NAME_LENGTH,
+} from "@/lib/project/scheduled-tasks";
+import type { ProjectSkillEntry } from "@/lib/project/skills";
 import { unwrap } from "@/lib/result";
+import { searchSkills } from "@/lib/skills/search";
 
 const createProjectInputSchema = z.object({
   name: z.string().min(1),
@@ -14,11 +24,54 @@ const projectIdInputSchema = z.object({
   projectId: z.string().min(1),
 });
 
+const projectEnvEntrySchema: z.ZodType<ProjectEnvEntry> = z.object({
+  key: z.string(),
+  value: z.string(),
+});
+
+const projectSkillEntrySchema: z.ZodType<ProjectSkillEntry> = z.object({
+  installSpec: z.string().min(1),
+  name: z.string().min(1),
+  source: z.string().min(1),
+  url: z.url(),
+});
+
+const updateProjectSettingsInputSchema = z.object({
+  envEntries: z.array(projectEnvEntrySchema),
+  projectId: z.string().min(1),
+  shareWithOrganisation: z.boolean(),
+  skills: z.array(projectSkillEntrySchema),
+});
+
+const searchSkillsInputSchema = z.object({
+  query: z.string().min(2),
+});
+
 const createTaskInputSchema = z.object({
+  providerId: z.string().min(1).nullable().optional(),
   projectId: z.string().min(1),
   prompt: z.string().min(10),
-  quickTask: z.boolean().optional().default(false),
   sourceBranch: z.string().min(1),
+});
+
+const createScheduledTaskInputSchema = z.object({
+  branchName: z.string().min(1).nullable().optional(),
+  instructions: z.string().min(1).max(MAX_SCHEDULED_TASK_INSTRUCTIONS_LENGTH),
+  name: z.string().min(1).max(MAX_SCHEDULED_TASK_NAME_LENGTH),
+  projectId: z.string().min(1),
+  runOnce: z.boolean().optional().default(false),
+  scheduleCron: z.string().refine(isValidCronExpression, "Invalid cron expression."),
+  scheduleTimezone: z.string().refine(isValidTimezone, "Invalid timezone."),
+});
+
+const scheduledTaskIdInputSchema = z.object({
+  projectId: z.string().min(1),
+  scheduledTaskId: z.string().min(1),
+});
+
+const updateScheduledTaskInputSchema = createScheduledTaskInputSchema.extend({
+  runOnce: z.boolean(),
+  scheduledTaskId: z.string().min(1),
 });
 
 const getTaskInputSchema = z.object({
@@ -60,12 +113,48 @@ export const $createTask = createServerFn({ method: "POST" })
     unwrap(Project.createTaskForUser({ ...data, userId: context.user.id })),
   );
 
+export const $createScheduledTask = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .inputValidator((data) => createScheduledTaskInputSchema.parse(data))
+  .handler(async ({ context, data }) =>
+    unwrap(Project.createScheduledTaskForUser({ ...data, userId: context.user.id })),
+  );
+
+export const $updateScheduledTask = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .inputValidator((data) => updateScheduledTaskInputSchema.parse(data))
+  .handler(async ({ context, data }) =>
+    unwrap(Project.updateScheduledTaskForUser({ ...data, userId: context.user.id })),
+  );
+
+export const $deleteScheduledTask = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .inputValidator((data) => scheduledTaskIdInputSchema.parse(data))
+  .handler(async ({ context, data }) =>
+    unwrap(
+      Project.deleteScheduledTaskForUser(data.projectId, data.scheduledTaskId, context.user.id),
+    ),
+  );
+
 export const $listTasks = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
   .inputValidator((data) => projectIdInputSchema.parse(data))
   .handler(async ({ context, data }) =>
     unwrap(Project.listTasksForProject(data.projectId, context.user.id)),
   );
+
+export const $listScheduledTasks = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .inputValidator((data) => projectIdInputSchema.parse(data))
+  .handler(async ({ context, data }) =>
+    unwrap(Project.listScheduledTasksForProject(data.projectId, context.user.id)),
+  );
+
+export const $getServerTime = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async () => ({
+    iso: new Date().toISOString(),
+  }));
 
 export const $getTask = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
@@ -80,6 +169,23 @@ export const $deleteProject = createServerFn({ method: "POST" })
   .handler(async ({ context, data }) =>
     unwrap(Project.deleteProjectForUser(data.projectId, context.user.id)),
   );
+
+export const $updateProjectSettings = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .inputValidator((data) => updateProjectSettingsInputSchema.parse(data))
+  .handler(async ({ context, data }) =>
+    unwrap(
+      Project.updateProjectSettingsForUser({
+        ...data,
+        userId: context.user.id,
+      }),
+    ),
+  );
+
+export const $searchSkills = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .inputValidator((data) => searchSkillsInputSchema.parse(data))
+  .handler(async ({ data }) => searchSkills(data.query));
 
 export const $deleteTask = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
@@ -118,13 +224,6 @@ export const $terminateTaskById = createServerFn({ method: "POST" })
     unwrap(Project.terminateTaskForUser(data.taskId, context.user.id)),
   );
 
-export const $terminateQuickTaskById = createServerFn({ method: "POST" })
-  .middleware([authMiddleware])
-  .inputValidator((data) => taskIdInputSchema.parse(data))
-  .handler(async ({ context, data }) =>
-    unwrap(Project.terminateQuickTaskForUser(data.taskId, context.user.id)),
-  );
-
 export const $listAllUserTasks = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
   .handler(async ({ context }) => unwrap(Project.listAllTasksForUser(context.user.id)));
@@ -145,4 +244,106 @@ export const $runFollowUpById = createServerFn({ method: "POST" })
   .inputValidator((data) => followUpInputSchema.parse(data))
   .handler(async ({ context, data }) =>
     unwrap(Project.runTaskFollowUpForUser(data.taskId, data.prompt, context.user.id)),
+  );
+
+// ─── Collaboration server functions ──────────────────────────────────────────
+
+const inviteMemberInputSchema = z.object({
+  githubUsername: z.string().min(1),
+  projectId: z.string().min(1),
+});
+
+const inviteIdInputSchema = z.object({
+  inviteId: z.string().min(1),
+  projectId: z.string().min(1),
+});
+
+const memberIdInputSchema = z.object({
+  targetUserId: z.string().min(1),
+  projectId: z.string().min(1),
+});
+
+const leaveProjectInputSchema = z.object({
+  projectId: z.string().min(1),
+});
+
+export const $getProjectCollaborators = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .inputValidator((data) => projectIdInputSchema.parse(data))
+  .handler(async ({ context, data }) => {
+    await unwrap(Project.getProjectForUser(data.projectId, context.user.id));
+    return listProjectCollaborators(data.projectId);
+  });
+
+export const $getProjectInvites = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .inputValidator((data) => projectIdInputSchema.parse(data))
+  .handler(async ({ context, data }) => {
+    // Only the owner/member can list invites (access checked by collaborators lookup)
+    await unwrap(Project.getProjectForUser(data.projectId, context.user.id));
+    return listProjectInvites(data.projectId);
+  });
+
+export const $getMyProjectInvites = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => unwrap(ProjectMembers.getMyInvites(context.user.id)));
+
+export const $inviteProjectMember = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .inputValidator((data) => inviteMemberInputSchema.parse(data))
+  .handler(async ({ context, data }) =>
+    unwrap(
+      ProjectMembers.inviteMember({
+        githubUsername: data.githubUsername,
+        projectId: data.projectId,
+        userId: context.user.id,
+      }),
+    ),
+  );
+
+export const $cancelProjectInvite = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .inputValidator((data) => inviteIdInputSchema.parse(data))
+  .handler(async ({ context, data }) =>
+    unwrap(
+      ProjectMembers.cancelInvite({
+        inviteId: data.inviteId,
+        projectId: data.projectId,
+        userId: context.user.id,
+      }),
+    ),
+  );
+
+export const $acceptProjectInvite = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .inputValidator((data) => z.object({ inviteId: z.string().min(1) }).parse(data))
+  .handler(async ({ context, data }) =>
+    unwrap(ProjectMembers.acceptInvite({ inviteId: data.inviteId, userId: context.user.id })),
+  );
+
+export const $declineProjectInvite = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .inputValidator((data) => z.object({ inviteId: z.string().min(1) }).parse(data))
+  .handler(async ({ context, data }) =>
+    unwrap(ProjectMembers.declineInvite({ inviteId: data.inviteId, userId: context.user.id })),
+  );
+
+export const $kickProjectMember = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .inputValidator((data) => memberIdInputSchema.parse(data))
+  .handler(async ({ context, data }) =>
+    unwrap(
+      ProjectMembers.kickMember({
+        targetUserId: data.targetUserId,
+        projectId: data.projectId,
+        userId: context.user.id,
+      }),
+    ),
+  );
+
+export const $leaveProject = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .inputValidator((data) => leaveProjectInputSchema.parse(data))
+  .handler(async ({ context, data }) =>
+    unwrap(ProjectMembers.leaveProject({ projectId: data.projectId, userId: context.user.id })),
   );

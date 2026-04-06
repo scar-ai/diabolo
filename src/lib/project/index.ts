@@ -1,186 +1,96 @@
-import { and, desc, eq, inArray } from "drizzle-orm";
 import { errAsync, okAsync, ResultAsync } from "neverthrow";
 import * as R from "remeda";
 
-import { db } from "@/lib/db";
 import { Github } from "@/lib/github";
 import { Log } from "@/lib/log";
+import { type OpenCodeConfig, resolveOpenCodeConfig } from "@/lib/opencode/config";
+import { Org } from "@/lib/org";
+import {
+  normalizeProjectEnvEntries,
+  parseStoredProjectEnvEntries,
+  serializeProjectEnvEntries,
+  type ProjectEnvEntry,
+} from "@/lib/project/env";
+import { ensureScheduledTaskScheduler } from "@/lib/project/scheduler.server";
+import {
+  normalizeProjectSkills,
+  parseStoredProjectSkills,
+  type ProjectSkillEntry,
+} from "@/lib/project/skills";
 import { fromPromise } from "@/lib/result";
 import { Sandbox } from "@/lib/sandbox";
-import { SandboxEvents } from "@/lib/sandbox/events";
+import { findUserLlmProvider, listUserLlmProviders } from "@/lib/user/data";
+
 import {
-  listTaskArtifacts,
-  listTaskEventsAfter,
-  listTaskMessages,
-  type ParsedTaskArtifactRecord,
-  type ParsedTaskEventRecord,
-} from "@/lib/sandbox/store";
-
-import { project, task, taskMessage } from "./project.sql";
-
-export type ProjectId = string & { __brand: "ProjectId" };
-export type TaskId = string & { __brand: "TaskId" };
+  deleteScheduledTask,
+  deleteProject,
+  deleteTask,
+  findOwnedProject,
+  findProject,
+  findProjectScheduledTask,
+  findProjectTask,
+  findTask,
+  findTaskWithProject,
+  findUserTask,
+  insertProject,
+  insertScheduledTask,
+  insertTask,
+  listChildTaskSummaries,
+  listProjectIds,
+  listProjectScheduledTasks,
+  listProjectTasks,
+  listProjects,
+  listUserTaskSummaries,
+  listUserTasks,
+  updateProject,
+  updateScheduledTask,
+  updateTask,
+  type ProjectRecord as TProjectRecord,
+  type TaskForUserRecord as TTaskForUserRecord,
+} from "./data";
+import {
+  assertParentCanSpawn,
+  buildTaskDetail,
+  destroyTaskSandboxRecord,
+  publishChildTaskUpdate,
+  queueFollowUpPrompt,
+  syncTaskRuntime,
+  syncTaskSummaryRuntime,
+  terminateTaskRecord,
+  type TaskDetailRecord as TTaskDetailRecord,
+} from "./runtime";
+import {
+  buildTaskTitle,
+  RUNNING_TASK_STATUSES,
+  type TaskMessageRecord as TTaskMessageRecord,
+  type TaskRecord as TTaskRecord,
+  type TaskSummaryRecord as TTaskSummaryRecord,
+} from "./shared";
+import { generateTaskTitle } from "./title";
 
 const log = Log.create({ ns: "project" });
 
-const MAX_CHILD_DEPTH = 2;
-const MAX_ACTIVE_CHILDREN = 5;
-const MAX_TOTAL_CHILDREN = 15;
-const ACTIVE_TASK_STATUSES = new Set(["queued", "running"]);
-const RUNNING_TASK_STATUSES = new Set(["queued", "running"]);
-const SPAWNABLE_PARENT_STATUSES = new Set(["queued", "running", "succeeded"]);
-
-const buildTaskTitle = (prompt: string) => prompt.split("\n")[0]?.trim().slice(0, 120) || null;
+export type { ProjectId, TaskId } from "./shared";
+export { ProjectMembers } from "./members";
 
 export namespace Project {
-  export type ProjectRecord = typeof project.$inferSelect;
-  export type TaskRecord = typeof task.$inferSelect;
-  export type TaskMessageRecord = typeof taskMessage.$inferSelect;
+  export type ProjectRecord = TProjectRecord;
+  export type TaskRecord = TTaskRecord;
+  export type ScheduledTaskRecord = import("./data").ScheduledTaskRecord;
+  export type TaskMessageRecord = TTaskMessageRecord;
+  export type TaskSummaryRecord = TTaskSummaryRecord;
+  export type TaskForUserRecord = TTaskForUserRecord;
+  export type TaskDetailRecord = TTaskDetailRecord;
 
-  export type TaskSummaryRecord = Pick<TaskRecord, TaskSummaryKey>;
-  export type TaskForUserRecord = {
-    project: ProjectRecord;
-    task: TaskRecord;
-  };
-  export type TaskDetailRecord = TaskRecord & {
-    artifacts: ParsedTaskArtifactRecord[];
-    children: TaskSummaryRecord[];
-    events: ParsedTaskEventRecord[];
-    messages: TaskMessageRecord[];
-    parentTask: TaskSummaryRecord | null;
-  };
-
-  const taskSummarySelection = {
-    branchName: task.branchName,
-    completedAt: task.completedAt,
-    createdAt: task.createdAt,
-    id: task.id,
-    lastHeartbeatAt: task.lastHeartbeatAt,
-    parentTaskId: task.parentTaskId,
-    projectId: task.projectId,
-    prompt: task.prompt,
-    quickTask: task.quickTask,
-    repoName: task.repoName,
-    sandboxId: task.sandboxId,
-    sandboxStatus: task.sandboxStatus,
-    spawnDepth: task.spawnDepth,
-    stage: task.stage,
-    startedAt: task.startedAt,
-    status: task.status,
-    title: task.title,
-    updatedAt: task.updatedAt,
-  } as const;
-
-  type TaskSummaryKey = keyof typeof taskSummarySelection;
-
-  const insertProject = (input: { id: string; name: string; repoId: string; userId: string }) =>
-    db
-      .insert(project)
-      .values(input)
-      .returning()
-      .then((rows) => rows[0]);
-
-  const deleteProject = (projectId: string) => db.delete(project).where(eq(project.id, projectId));
-
-  const findProject = (projectId: string, userId: string) =>
-    db
-      .select()
-      .from(project)
-      .where(and(eq(project.id, projectId), eq(project.userId, userId)))
-      .then((rows) => rows[0]);
-
-  const listProjects = (userId: string) =>
-    db.select().from(project).where(eq(project.userId, userId)).orderBy(desc(project.createdAt));
-
-  const listProjectIds = (userId: string) =>
-    db.select({ id: project.id }).from(project).where(eq(project.userId, userId));
-
-  const insertTask = (input: {
-    branchName: string;
-    id: string;
-    opencodeModel?: string | null;
-    parentTaskId?: string | null;
-    projectId: string;
-    prompt: string;
-    quickTask: boolean;
-    repoId: string;
-    sandboxStatus?: string;
-    spawnDepth?: number;
-    spawnSource?: string;
-    stage: string;
-    startedAt: Date;
-    status: string;
-    title?: string | null;
-  }) =>
-    db
-      .insert(task)
-      .values(input)
-      .returning()
-      .then((rows) => rows[0]);
-
-  const deleteTask = (taskId: string, projectId: string) =>
-    db.delete(task).where(and(eq(task.id, taskId), eq(task.projectId, projectId)));
-
-  const findTask = (taskId: string) =>
-    db
-      .select()
-      .from(task)
-      .where(eq(task.id, taskId))
-      .then((rows) => rows[0]);
-
-  const findTaskWithProject = (taskId: string) =>
-    db
-      .select()
-      .from(task)
-      .innerJoin(project, eq(task.projectId, project.id))
-      .where(eq(task.id, taskId))
-      .then((rows) => rows[0] as TaskForUserRecord | undefined);
-
-  const findProjectTask = (taskId: string, projectId: string) =>
-    db
-      .select()
-      .from(task)
-      .where(and(eq(task.id, taskId), eq(task.projectId, projectId)))
-      .then((rows) => rows[0]);
-
-  const findUserTask = (taskId: string, userId: string) =>
-    db
-      .select()
-      .from(task)
-      .innerJoin(project, eq(task.projectId, project.id))
-      .where(and(eq(task.id, taskId), eq(project.userId, userId)))
-      .then((rows) => rows[0] as TaskForUserRecord | undefined);
-
-  const listProjectTasks = (projectId: string) =>
-    db.select().from(task).where(eq(task.projectId, projectId)).orderBy(desc(task.createdAt));
-
-  const listChildTaskSummaries = (parentTaskId: string) =>
-    db
-      .select(taskSummarySelection)
-      .from(task)
-      .where(eq(task.parentTaskId, parentTaskId))
-      .orderBy(desc(task.updatedAt));
-
-  const listUserTasks = (projectIds: string[]) =>
-    db.select().from(task).where(inArray(task.projectId, projectIds)).orderBy(desc(task.startedAt));
-
-  const listUserTaskSummaries = (projectIds: string[]) =>
-    db
-      .select(taskSummarySelection)
-      .from(task)
-      .where(inArray(task.projectId, projectIds))
-      .orderBy(desc(task.startedAt));
-
-  const updateTask = (taskId: string, values: Partial<TaskRecord>) =>
-    db
-      .update(task)
-      .set(values)
-      .where(eq(task.id, taskId))
-      .returning()
-      .then((rows) => rows[0]);
-
+  /** Require project access: owner OR member. Used by most operations. */
   const requireUserProject = (projectId: string, userId: string) =>
     fromPromise(findProject(projectId, userId)).andThen((value) =>
+      value ? okAsync(value) : errAsync(new Error("Project not found.")),
+    );
+
+  /** Require project ownership. Used by privileged operations (delete, settings). */
+  const requireOwnedProject = (projectId: string, userId: string) =>
+    fromPromise(findOwnedProject(projectId, userId)).andThen((value) =>
       value ? okAsync(value) : errAsync(new Error("Project not found.")),
     );
 
@@ -194,111 +104,44 @@ export namespace Project {
       value ? okAsync(value) : errAsync(new Error("Task not found.")),
     );
 
-  const pickTaskSummary = (value: TaskRecord): TaskSummaryRecord => ({
-    branchName: value.branchName,
-    completedAt: value.completedAt,
-    createdAt: value.createdAt,
-    id: value.id,
-    lastHeartbeatAt: value.lastHeartbeatAt,
-    parentTaskId: value.parentTaskId,
-    projectId: value.projectId,
-    prompt: value.prompt,
-    quickTask: value.quickTask,
-    repoName: value.repoName,
-    sandboxId: value.sandboxId,
-    sandboxStatus: value.sandboxStatus,
-    spawnDepth: value.spawnDepth,
-    stage: value.stage,
-    startedAt: value.startedAt,
-    status: value.status,
-    title: value.title,
-    updatedAt: value.updatedAt,
-  });
-
-  const syncTaskRuntime = async (value: TaskRecord) => {
-    if (RUNNING_TASK_STATUSES.has(value.status)) {
-      await Sandbox.resumeTask(value.id).match(
-        () => {},
-        () => {},
-      );
-    }
-
-    return (await findTask(value.id)) ?? value;
-  };
-
-  const syncTaskSummaryRuntime = async (value: TaskSummaryRecord) =>
-    pickTaskSummary(await syncTaskRuntime(value as TaskRecord));
-
-  const buildTaskDetail = async (taskId: string): Promise<TaskDetailRecord> => {
-    const taskRecord = await findTask(taskId);
-
-    if (!taskRecord) {
-      throw new Error("Task not found.");
-    }
-
-    const [messages, events, artifacts, children, parentTask] = await Promise.all([
-      listTaskMessages(taskId),
-      listTaskEventsAfter(taskId, -1),
-      listTaskArtifacts(taskId),
-      listChildTaskSummaries(taskId),
-      taskRecord.parentTaskId
-        ? db
-            .select(taskSummarySelection)
-            .from(task)
-            .where(eq(task.id, taskRecord.parentTaskId))
-            .then((rows) => rows[0] ?? null)
-        : Promise.resolve(null),
-    ]);
-
-    return {
-      ...taskRecord,
-      artifacts,
-      children,
-      events,
-      messages,
-      parentTask,
-    };
-  };
-
-  const terminateTaskRecord = async (taskId: string) => {
-    await Sandbox.terminateTask(taskId).match(
-      () => {},
-      () => {},
+  const requireScheduledTaskForProject = (projectId: string, scheduledTaskId: string) =>
+    fromPromise(findProjectScheduledTask(scheduledTaskId, projectId)).andThen((value) =>
+      value ? okAsync(value) : errAsync(new Error("Scheduled task not found.")),
     );
 
-    return (await findTask(taskId)) ?? (await updateTask(taskId, {}));
-  };
+  const resolveTaskOpenCodeConfig = (
+    userId: string,
+    providerRecordId?: string | null,
+    model?: string | null,
+  ): ResultAsync<OpenCodeConfig, Error> =>
+    fromPromise(
+      Promise.all([
+        providerRecordId ? findUserLlmProvider(userId, providerRecordId) : Promise.resolve(null),
+        listUserLlmProviders(userId),
+      ]),
+    ).andThen(([provider, providers]) => {
+      if (providerRecordId && !provider) {
+        return errAsync(new Error("Selected provider was not found."));
+      }
 
-  const assertParentCanSpawn = async (parentTask: TaskRecord, projectRecord: ProjectRecord) => {
-    if (!SPAWNABLE_PARENT_STATUSES.has(parentTask.status)) {
-      throw new Error("Parent task is not eligible for spawning.");
-    }
+      const resolvedProvider =
+        provider ?? providers.find((value) => value.isDefault) ?? providers[0] ?? null;
 
-    if (parentTask.spawnDepth >= MAX_CHILD_DEPTH) {
-      throw new Error("Child task depth limit reached.");
-    }
+      if (!resolvedProvider) {
+        return errAsync(new Error("Add at least one provider in Settings before starting a task."));
+      }
 
-    const children = await listChildTaskSummaries(parentTask.id);
-    const activeChildren = children.filter((child) => ACTIVE_TASK_STATUSES.has(child.status));
-
-    if (activeChildren.length >= MAX_ACTIVE_CHILDREN) {
-      throw new Error("Too many active child tasks for this parent.");
-    }
-
-    if (children.length >= MAX_TOTAL_CHILDREN) {
-      throw new Error("Total child task limit reached for this parent.");
-    }
-
-    const parentRepoId = parentTask.repoId ?? projectRecord.repoId;
-
-    if (
-      parentRepoId !== projectRecord.repoId &&
-      parentTask.repoId &&
-      parentTask.repoId !== projectRecord.repoId
-    ) {
-      throw new Error("Parent task repository does not match its project.");
-    }
-  };
+      try {
+        return okAsync(
+          resolveOpenCodeConfig({
+            model,
+            provider: resolvedProvider,
+          }),
+        );
+      } catch (error) {
+        return errAsync(error instanceof Error ? error : new Error(String(error)));
+      }
+    });
 
   export const createProjectForUser = (input: {
     name: string;
@@ -325,6 +168,8 @@ export namespace Project {
     userId: string,
   ): ResultAsync<
     ProjectRecord & {
+      envEntries: ProjectEnvEntry[];
+      skills: ProjectSkillEntry[];
       repoDefaultBranch: string | null;
       repoDescription: string | null;
       repoFullName: string | null;
@@ -335,6 +180,8 @@ export namespace Project {
     requireUserProject(projectId, userId).andThen((value) =>
       Github.getRepo(value.repoId).map((repo) => ({
         ...value,
+        envEntries: parseStoredProjectEnvEntries(value.envVars),
+        skills: parseStoredProjectSkills(value.agentSkills),
         repoDefaultBranch: repo?.defaultBranch ?? null,
         repoDescription: repo?.description ?? null,
         repoFullName: repo?.fullName ?? null,
@@ -346,16 +193,39 @@ export namespace Project {
     projectId: string,
     userId: string,
   ): ResultAsync<void, Error> =>
-    requireUserProject(projectId, userId)
+    requireOwnedProject(projectId, userId)
       .andThen(() => fromPromise(deleteProject(projectId)))
       .map(() => {
         log.info("project deleted", { projectId });
       });
 
+  export const updateProjectSettingsForUser = (input: {
+    envEntries: ProjectEnvEntry[];
+    projectId: string;
+    shareWithOrganisation: boolean;
+    skills: ProjectSkillEntry[];
+    userId: string;
+  }): ResultAsync<ProjectRecord, Error> =>
+    requireOwnedProject(input.projectId, input.userId).andThen(() =>
+      Org.getMembershipForUser(input.userId).andThen((membership) => {
+        if (input.shareWithOrganisation && !membership) {
+          return errAsync(new Error("Join an organisation before sharing projects with it."));
+        }
+
+        return fromPromise(
+          updateProject(input.projectId, {
+            agentSkills: JSON.stringify(normalizeProjectSkills(input.skills)),
+            envVars: JSON.stringify(normalizeProjectEnvEntries(input.envEntries)),
+            sharedWithOrgId: input.shareWithOrganisation ? (membership?.orgId ?? null) : null,
+          }),
+        ).andThen((value) => (value ? okAsync(value) : errAsync(new Error("Project not found."))));
+      }),
+    );
+
   export const createTaskForUser = (input: {
+    providerId?: string | null;
     projectId: string;
     prompt: string;
-    quickTask: boolean;
     sourceBranch: string;
     userId: string;
   }): ResultAsync<TaskRecord, Error> => {
@@ -363,34 +233,46 @@ export namespace Project {
 
     return requireUserProject(input.projectId, input.userId)
       .andThen((value) =>
+        resolveTaskOpenCodeConfig(input.userId, input.providerId ?? null).map((openCodeConfig) => ({
+          openCodeConfig,
+          project: value,
+        })),
+      )
+      .andThen(({ openCodeConfig, project }) =>
         Sandbox.startTask(
           {
+            envVars: serializeProjectEnvEntries(parseStoredProjectEnvEntries(project.envVars)),
+            openCodeConfig,
             prompt: input.prompt,
-            quickTask: input.quickTask,
-            repoId: value.repoId,
+            repoId: project.repoId,
             sourceBranch: input.sourceBranch,
           },
           input.userId,
-        ),
+        ).map((draft) => ({ draft, openCodeConfig })),
       )
-      .andThen((draft) =>
-        fromPromise(
-          insertTask({
-            branchName: draft.sourceBranch,
-            id: draft.id,
-            projectId: input.projectId,
-            prompt: draft.prompt,
-            quickTask: draft.quickTask,
-            repoId: draft.repoId,
-            sandboxStatus: "pending",
-            stage: draft.stage,
-            startedAt: new Date(draft.startedAt),
-            status: draft.status,
-            title: buildTaskTitle(draft.prompt),
-          }),
-        ).andThen((createdTask) =>
-          Sandbox.enqueueTaskMessage(createdTask.id, draft.prompt, "initial").map(
-            () => createdTask,
+      .andThen(({ draft, openCodeConfig }) =>
+        fromPromise(generateTaskTitle(draft.prompt, openCodeConfig)).andThen((title) =>
+          fromPromise(
+            insertTask({
+              branchName: draft.sourceBranch,
+              createdByUserId: input.userId,
+              envVars: draft.envVars ? JSON.stringify(draft.envVars) : null,
+              id: draft.id,
+              opencodeModel: openCodeConfig.model,
+              opencodeProviderId: openCodeConfig.selectedProviderId,
+              projectId: input.projectId,
+              prompt: draft.prompt,
+              repoId: draft.repoId,
+              sandboxStatus: "pending",
+              stage: draft.stage,
+              startedAt: new Date(draft.startedAt),
+              status: draft.status,
+              title,
+            }),
+          ).andThen((createdTask) =>
+            Sandbox.enqueueTaskMessage(createdTask.id, draft.prompt, "initial", input.userId).map(
+              () => createdTask,
+            ),
           ),
         ),
       )
@@ -399,6 +281,222 @@ export namespace Project {
         return value;
       });
   };
+
+  export const createTaskForScheduledTask = (input: {
+    projectId: string;
+    prompt: string;
+    scheduledTaskId: string;
+    sourceBranch: string;
+    userId: string;
+  }): ResultAsync<TaskRecord, Error> => {
+    const op = log.child({
+      projectId: input.projectId,
+      scheduledTaskId: input.scheduledTaskId,
+      userId: input.userId,
+    });
+
+    return requireUserProject(input.projectId, input.userId)
+      .andThen((project) =>
+        requireScheduledTaskForProject(input.projectId, input.scheduledTaskId).map(
+          (scheduledTask) => ({
+            project,
+            scheduledTask,
+          }),
+        ),
+      )
+      .andThen(({ project, scheduledTask }) =>
+        resolveTaskOpenCodeConfig(input.userId).map((openCodeConfig) => ({
+          openCodeConfig,
+          project,
+          scheduledTask,
+        })),
+      )
+      .andThen(({ openCodeConfig, project, scheduledTask }) =>
+        Sandbox.startTask(
+          {
+            envVars: serializeProjectEnvEntries(parseStoredProjectEnvEntries(project.envVars)),
+            openCodeConfig,
+            prompt: input.prompt,
+            repoId: project.repoId,
+            sourceBranch: input.sourceBranch,
+          },
+          input.userId,
+        ).map((draft) => ({ draft, openCodeConfig, scheduledTask })),
+      )
+      .andThen(({ draft, openCodeConfig }) =>
+        fromPromise(generateTaskTitle(draft.prompt, openCodeConfig)).andThen((title) =>
+          fromPromise(
+            insertTask({
+              branchName: draft.sourceBranch,
+              createdByUserId: input.userId,
+              envVars: draft.envVars ? JSON.stringify(draft.envVars) : null,
+              id: draft.id,
+              opencodeModel: openCodeConfig.model,
+              opencodeProviderId: openCodeConfig.selectedProviderId,
+              projectId: input.projectId,
+              prompt: draft.prompt,
+              repoId: draft.repoId,
+              scheduledTaskId: input.scheduledTaskId,
+              sandboxStatus: "pending",
+              spawnSource: "scheduled",
+              stage: draft.stage,
+              startedAt: new Date(draft.startedAt),
+              status: draft.status,
+              title,
+            }),
+          ).andThen((createdTask) =>
+            Sandbox.enqueueTaskMessage(createdTask.id, draft.prompt, "initial", input.userId).map(
+              () => createdTask,
+            ),
+          ),
+        ),
+      )
+      .map((value) => {
+        op.info("scheduled task run created", { taskId: value.id });
+        return value;
+      });
+  };
+
+  export const createScheduledTaskForUser = (input: {
+    branchName?: string | null;
+    instructions: string;
+    name: string;
+    projectId: string;
+    runOnce?: boolean;
+    scheduleCron: string;
+    scheduleTimezone: string;
+    userId: string;
+  }): ResultAsync<ScheduledTaskRecord, Error> => {
+    ensureScheduledTaskScheduler();
+
+    return requireUserProject(input.projectId, input.userId).andThen(() =>
+      fromPromise(
+        insertScheduledTask({
+          branchName: input.branchName ?? null,
+          createdByUserId: input.userId,
+          id: crypto.randomUUID(),
+          instructions: input.instructions,
+          name: input.name,
+          projectId: input.projectId,
+          runOnce: input.runOnce ? 1 : 0,
+          scheduleCron: input.scheduleCron,
+          scheduleTimezone: input.scheduleTimezone,
+        }),
+      ),
+    );
+  };
+
+  export const listScheduledTasksForProject = (
+    projectId: string,
+    userId: string,
+  ): ResultAsync<ScheduledTaskRecord[], Error> => {
+    ensureScheduledTaskScheduler();
+
+    return requireUserProject(projectId, userId).andThen(() =>
+      fromPromise(listProjectScheduledTasks(projectId)),
+    );
+  };
+
+  export const updateScheduledTaskForUser = (input: {
+    branchName?: string | null;
+    instructions: string;
+    name: string;
+    projectId: string;
+    runOnce: boolean;
+    scheduleCron: string;
+    scheduleTimezone: string;
+    scheduledTaskId: string;
+    userId: string;
+  }): ResultAsync<ScheduledTaskRecord, Error> =>
+    requireUserProject(input.projectId, input.userId)
+      .andThen(() => requireScheduledTaskForProject(input.projectId, input.scheduledTaskId))
+      .andThen(() =>
+        fromPromise(
+          updateScheduledTask(input.scheduledTaskId, {
+            branchName: input.branchName ?? null,
+            instructions: input.instructions,
+            name: input.name,
+            runOnce: input.runOnce ? 1 : 0,
+            scheduleCron: input.scheduleCron,
+            scheduleTimezone: input.scheduleTimezone,
+          }),
+        ),
+      );
+
+  export const deleteScheduledTaskForUser = (
+    projectId: string,
+    scheduledTaskId: string,
+    userId: string,
+  ): ResultAsync<void, Error> =>
+    requireUserProject(projectId, userId)
+      .andThen(() => requireScheduledTaskForProject(projectId, scheduledTaskId))
+      .andThen(() => fromPromise(deleteScheduledTask(scheduledTaskId, projectId)))
+      .map(() => {
+        log.info("scheduled task deleted", { projectId, scheduledTaskId });
+      });
+
+  export const createTaskDraftForUser = (input: {
+    providerId?: string | null;
+    projectId: string;
+    prompt: string;
+    sourceBranch: string;
+    userId: string;
+  }): ResultAsync<{ messageId: string; task: TaskRecord }, Error> =>
+    requireUserProject(input.projectId, input.userId)
+      .andThen((value) =>
+        resolveTaskOpenCodeConfig(input.userId, input.providerId ?? null).map((openCodeConfig) => ({
+          openCodeConfig,
+          project: value,
+        })),
+      )
+      .andThen(({ openCodeConfig, project }) =>
+        Sandbox.startTask(
+          {
+            envVars: serializeProjectEnvEntries(parseStoredProjectEnvEntries(project.envVars)),
+            openCodeConfig,
+            prompt: input.prompt,
+            repoId: project.repoId,
+            sourceBranch: input.sourceBranch,
+          },
+          input.userId,
+        ).map((draft) => ({ draft, openCodeConfig })),
+      )
+      .andThen(({ draft, openCodeConfig }) =>
+        fromPromise(
+          insertTask({
+            branchName: draft.sourceBranch,
+            createdByUserId: input.userId,
+            envVars: draft.envVars ? JSON.stringify(draft.envVars) : null,
+            id: draft.id,
+            opencodeModel: openCodeConfig.model,
+            opencodeProviderId: openCodeConfig.selectedProviderId,
+            projectId: input.projectId,
+            prompt: draft.prompt,
+            repoId: draft.repoId,
+            sandboxStatus: "pending",
+            stage: draft.stage,
+            startedAt: new Date(draft.startedAt),
+            status: draft.status,
+            title: null,
+          }),
+        ).andThen((task) => {
+          void generateTaskTitle(draft.prompt, openCodeConfig).then((title) =>
+            updateTask(task.id, { title }),
+          );
+          return Sandbox.createTaskMessageDraft(task.id, draft.prompt, "initial", input.userId).map(
+            (message) => ({
+              messageId: message.id,
+              task,
+            }),
+          );
+        }),
+      );
+
+  export const queueTaskMessageForTask = (
+    taskId: string,
+    messageId: string,
+    prompt: string,
+  ): ResultAsync<void, Error> => Sandbox.queueTaskMessage(taskId, messageId, prompt);
 
   export const createChildTaskForTask = (input: {
     model?: string | null;
@@ -418,8 +516,10 @@ export namespace Project {
       return fromPromise(assertParentCanSpawn(parentTask, value.project)).andThen(() =>
         Sandbox.startTask(
           {
+            envVars: serializeProjectEnvEntries(
+              parseStoredProjectEnvEntries(value.project.envVars),
+            ),
             prompt: input.prompt,
-            quickTask: false,
             repoId: childRepoId,
             sourceBranch: branchName,
           },
@@ -428,12 +528,13 @@ export namespace Project {
           fromPromise(
             insertTask({
               branchName,
+              envVars: draft.envVars ? JSON.stringify(draft.envVars) : null,
               id: draft.id,
-              opencodeModel: input.model ?? null,
+              opencodeModel: input.model ?? parentTask.opencodeModel ?? null,
+              opencodeProviderId: parentTask.opencodeProviderId ?? null,
               parentTaskId: input.parentTaskId,
               projectId: parentTask.projectId,
               prompt: input.prompt,
-              quickTask: false,
               repoId: childRepoId,
               sandboxStatus: "pending",
               spawnDepth: parentTask.spawnDepth + 1,
@@ -446,17 +547,13 @@ export namespace Project {
           ).andThen((createdTask) =>
             Sandbox.enqueueTaskMessage(createdTask.id, input.prompt, "initial").andThen(() =>
               fromPromise(
-                SandboxEvents.publish({
-                  payload: {
-                    childTaskId: createdTask.id,
-                    parentTaskId: input.parentTaskId,
-                    sandboxStatus: createdTask.sandboxStatus,
-                    stage: createdTask.stage,
-                    status: createdTask.status,
-                    title: createdTask.title,
-                  },
-                  taskId: input.parentTaskId,
-                  type: "child_task_update",
+                publishChildTaskUpdate({
+                  childTaskId: createdTask.id,
+                  parentTaskId: input.parentTaskId,
+                  sandboxStatus: createdTask.sandboxStatus,
+                  stage: createdTask.stage,
+                  status: createdTask.status,
+                  title: createdTask.title,
                 }),
               ).map(() => createdTask),
             ),
@@ -545,72 +642,12 @@ export namespace Project {
       }),
     );
 
-  export const terminateQuickTaskForUser = (
-    taskId: string,
-    userId: string,
-  ): ResultAsync<TaskRecord, Error> =>
-    requireTaskForUser(taskId, userId).andThen(({ task: value }) => {
-      if (!value.quickTask) {
-        return errAsync(new Error("This action is only available for quick tasks."));
-      }
-
-      return fromPromise(
-        (async () => {
-          await Sandbox.terminateTask(value.id).match(
-            () => {},
-            () => {},
-          );
-
-          if (value.sandboxId) {
-            await Sandbox.destroySandbox(value.sandboxId).match(
-              () => {},
-              () => {},
-            );
-          }
-
-          return (
-            (await findTask(value.id)) ??
-            updateTask(value.id, {
-              completedAt: new Date(),
-              error: "Quick task was stopped by user.",
-              sandboxId: null,
-              sandboxName: null,
-              sandboxPath: null,
-              sandboxStatus: "stopped",
-              stage: "Quick task stopped",
-              status: "failed",
-            })
-          );
-        })(),
-      ).map((updated) => {
-        log.info("quick task terminated", { taskId });
-        return updated;
-      });
-    });
-
   export const destroyTaskSandboxForUser = (
     taskId: string,
     userId: string,
   ): ResultAsync<TaskRecord, Error> =>
     requireTaskForUser(taskId, userId).andThen(({ task: value }) =>
-      fromPromise(
-        (async () => {
-          if (value.sandboxId) {
-            await Sandbox.destroySandbox(value.sandboxId).match(
-              () => {},
-              () => {},
-            );
-          }
-
-          return updateTask(value.id, {
-            sandboxId: null,
-            sandboxName: null,
-            sandboxPath: null,
-            sandboxStatus: "stopped",
-            stage: "Sandbox stopped",
-          });
-        })(),
-      ),
+      fromPromise(destroyTaskSandboxRecord(value)),
     );
 
   export const runTaskFollowUpForUser = (
@@ -618,36 +655,37 @@ export namespace Project {
     prompt: string,
     userId: string,
   ): ResultAsync<TaskRecord, Error> =>
-    requireTaskForUser(taskId, userId).andThen(({ task: value }) => {
-      if (value.quickTask) {
-        return errAsync(new Error("Quick tasks are read-only."));
-      }
-
-      return fromPromise(
-        (async () => {
-          await updateTask(value.id, {
-            completedAt: null,
-            error: null,
-            lastHeartbeatAt: new Date(),
-            sandboxStatus: value.sandboxId ? "ready" : "pending",
-            stage: "Queued prompt",
-            status: "queued",
-          });
-
-          await Sandbox.runTaskFollowUp(value.id, prompt.trim()).match(
-            () => {},
-            (error) => {
-              throw error;
-            },
-          );
-
-          return (await findTask(value.id)) ?? value;
-        })(),
-      ).map((updated) => {
+    requireTaskForUser(taskId, userId).andThen(({ task: value }) =>
+      fromPromise(queueFollowUpPrompt(value, prompt, userId)).map((updated) => {
         log.info("follow-up queued", { taskId });
         return updated;
-      });
-    });
+      }),
+    );
+
+  export const prepareTaskFollowUpForUser = (
+    taskId: string,
+    prompt: string,
+    userId: string,
+  ): ResultAsync<{ messageId: string; task: TaskRecord }, Error> =>
+    requireTaskForUser(taskId, userId).andThen(({ task: value }) =>
+      fromPromise(
+        updateTask(value.id, {
+          completedAt: null,
+          error: null,
+          lastHeartbeatAt: new Date(),
+          sandboxStatus: value.sandboxId ? "ready" : "pending",
+          stage: "Queued prompt",
+          status: "queued",
+        }),
+      ).andThen((updatedTask) =>
+        Sandbox.createTaskMessageDraft(value.id, prompt.trim(), "follow_up", userId).map(
+          (message) => ({
+            messageId: message.id,
+            task: updatedTask ?? value,
+          }),
+        ),
+      ),
+    );
 
   export const listAllTasksForUser = (userId: string): ResultAsync<TaskRecord[], Error> =>
     fromPromise(listProjectIds(userId)).andThen((ids) => {

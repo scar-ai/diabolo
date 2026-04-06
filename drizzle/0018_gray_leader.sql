@@ -1,0 +1,1 @@
+ALTER TABLE "task" ADD COLUMN "scheduled_task_id" text;

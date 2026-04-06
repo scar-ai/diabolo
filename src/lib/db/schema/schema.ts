@@ -1,6 +1,9 @@
 import { relations } from "drizzle-orm";
 import { pgTable, text, timestamp, boolean, index } from "drizzle-orm/pg-core";
 
+import { organisation } from "@/lib/org/org.sql";
+import { scheduledTask } from "@/lib/project/project.sql";
+
 export const user = pgTable("user", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
@@ -73,9 +76,51 @@ export const verification = pgTable(
   (table) => [index("verification_identifier_idx").on(table.identifier)],
 );
 
+export const userProviderSettings = pgTable(
+  "user_provider_settings",
+  {
+    userId: text("user_id")
+      .primaryKey()
+      .references(() => user.id, { onDelete: "cascade" }),
+    providerBaseUrl: text("provider_base_url"),
+    providerModel: text("provider_model"),
+    providerApiKey: text("provider_api_key"),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => [index("user_provider_settings_user_id_idx").on(table.userId)],
+);
+
+export const userLlmProvider = pgTable(
+  "user_llm_provider",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").references(() => user.id, { onDelete: "cascade" }),
+    orgId: text("org_id").references(() => organisation.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    providerId: text("provider_id").notNull(),
+    providerBaseUrl: text("provider_base_url").notNull(),
+    providerModel: text("provider_model").notNull(),
+    providerApiKey: text("provider_api_key").notNull(),
+    isDefault: boolean("is_default").default(false).notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at")
+      .defaultNow()
+      .$onUpdate(() => /* @__PURE__ */ new Date())
+      .notNull(),
+  },
+  (table) => [
+    index("user_llm_provider_user_id_idx").on(table.userId),
+    index("user_llm_provider_user_id_is_default_idx").on(table.userId, table.isDefault),
+    index("user_llm_provider_org_id_idx").on(table.orgId),
+  ],
+);
+
 export const userRelations = relations(user, ({ many }) => ({
   sessions: many(session),
   accounts: many(account),
+  scheduledTasks: many(scheduledTask),
+  llmProviders: many(userLlmProvider),
+  providerSettings: many(userProviderSettings),
 }));
 
 export const sessionRelations = relations(session, ({ one }) => ({
@@ -88,6 +133,24 @@ export const sessionRelations = relations(session, ({ one }) => ({
 export const accountRelations = relations(account, ({ one }) => ({
   user: one(user, {
     fields: [account.userId],
+    references: [user.id],
+  }),
+}));
+
+export const userProviderSettingsRelations = relations(userProviderSettings, ({ one }) => ({
+  user: one(user, {
+    fields: [userProviderSettings.userId],
+    references: [user.id],
+  }),
+}));
+
+export const userLlmProviderRelations = relations(userLlmProvider, ({ one }) => ({
+  org: one(organisation, {
+    fields: [userLlmProvider.orgId],
+    references: [organisation.id],
+  }),
+  user: one(user, {
+    fields: [userLlmProvider.userId],
     references: [user.id],
   }),
 }));

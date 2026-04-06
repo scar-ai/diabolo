@@ -119,6 +119,19 @@ export const listTaskArtifacts = async (taskId: string) => {
   }));
 };
 
+export const listTaskArtifactsByMessageId = async (messageId: string) => {
+  const rows = await db
+    .select()
+    .from(taskArtifact)
+    .where(eq(taskArtifact.messageId, messageId))
+    .orderBy(asc(taskArtifact.createdAt));
+
+  return rows.map((row) => ({
+    ...row,
+    parsedMetadata: parseJson<JsonObject>(row.metadata),
+  }));
+};
+
 export const findTaskMessage = (messageId: string) =>
   db
     .select()
@@ -143,6 +156,7 @@ export const findNextPendingTaskMessage = (taskId: string) =>
     .then((rows) => rows[0]);
 
 export const createTaskMessage = async (input: {
+  createdByUserId?: string | null;
   kind: "follow_up" | "initial";
   prompt: string;
   taskId: string;
@@ -161,6 +175,7 @@ export const createTaskMessage = async (input: {
     const inserted = await tx
       .insert(taskMessage)
       .values({
+        createdByUserId: input.createdByUserId ?? null,
         id: crypto.randomUUID(),
         kind: input.kind,
         prompt: input.prompt,

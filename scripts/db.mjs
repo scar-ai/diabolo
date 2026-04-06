@@ -32,7 +32,7 @@ if (shouldStartLocalDb) {
   }
 }
 
-const drizzleResult = spawnSync("drizzle-kit", args, {
+const drizzleResult = spawnSync("pnpm", ["exec", "drizzle-kit", ...args], {
   stdio: "inherit",
 });
 

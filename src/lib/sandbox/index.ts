@@ -3,13 +3,14 @@ import { ResultAsync } from "neverthrow";
 
 import { Github } from "@/lib/github";
 import { Log } from "@/lib/log";
-import { ensureOpenCodeConfig } from "@/lib/opencode/config";
+import type { OpenCodeConfig } from "@/lib/opencode/config";
 import { createSpawnTaskToken, getSpawnTaskEndpoint } from "@/lib/opencode/spawn-task";
 import { fromPromise, toError } from "@/lib/result";
 import { getSandboxProvider } from "@/lib/sandbox/daytona-provider";
 import { SandboxEvents } from "@/lib/sandbox/events";
 import { SandboxQueue } from "@/lib/sandbox/queue";
 import { createTaskMessage, findTaskRecord } from "@/lib/sandbox/store";
+import type { TaskMessageRecord } from "@/lib/sandbox/store";
 import { SandboxWorkspace } from "@/lib/sandbox/workspace";
 
 const log = Log.create({ ns: "sandbox" });
@@ -20,8 +21,9 @@ const makeJobId = () => `tk-${crypto.randomUUID()}`;
 
 export namespace Sandbox {
   export type TaskInput = {
+    envVars?: Record<string, string>;
+    openCodeConfig?: OpenCodeConfig;
     prompt: string;
-    quickTask: boolean;
     repoId: string;
     sourceBranch: string;
   };
@@ -34,9 +36,9 @@ export namespace Sandbox {
   };
 
   export type TaskJob = {
+    envVars?: Record<string, string>;
     id: string;
     prompt: string;
-    quickTask: boolean;
     repoId: string;
     sourceBranch: string;
     stage: string;
@@ -72,6 +74,7 @@ export namespace Sandbox {
     id: string;
     name: string;
     stop(timeoutSeconds?: number): Promise<void>;
+    uploadFile(localPath: string, remotePath: string, timeoutSeconds?: number): Promise<void>;
   }
 
   export interface Provider {
@@ -102,14 +105,16 @@ export namespace Sandbox {
           throw new Error("Prompt must be at least 10 characters.");
         }
 
-        const repo = await Github.getRepo(input.repoId).match(
+        const repo = await Github.getRepoForUser(input.repoId, userId).match(
           (value) => value,
           (error) => {
             throw error;
           },
         );
 
-        ensureOpenCodeConfig();
+        if (!input.openCodeConfig) {
+          throw new Error("OpenCode provider configuration is required.");
+        }
 
         if (!repo) {
           throw new Error("Unknown repository selection.");
@@ -118,9 +123,9 @@ export namespace Sandbox {
         const startedAt = new Date().toISOString();
 
         return {
+          envVars: input.envVars,
           id: makeJobId(),
           prompt,
-          quickTask: input.quickTask,
           repoId: input.repoId,
           sourceBranch: input.sourceBranch.trim() || repo.defaultBranch,
           stage: "Queued",
@@ -131,11 +136,12 @@ export namespace Sandbox {
       })(),
     );
 
-  export const enqueueTaskMessage = (
+  export const createTaskMessageDraft = (
     taskId: string,
     prompt: string,
     kind: "follow_up" | "initial",
-  ): ResultAsync<void, Error> =>
+    createdByUserId?: string | null,
+  ): ResultAsync<TaskMessageRecord, Error> =>
     fromPromise(
       (async () => {
         const trimmedPrompt = prompt.trim();
@@ -148,21 +154,42 @@ export namespace Sandbox {
           throw new Error("Prompt must be at least 10 characters.");
         }
 
-        const message = await createTaskMessage({
+        return createTaskMessage({
+          createdByUserId: createdByUserId ?? null,
           kind,
           prompt: trimmedPrompt,
           taskId,
         });
+      })(),
+    );
+
+  export const queueTaskMessage = (
+    taskId: string,
+    messageId: string,
+    prompt: string,
+  ): ResultAsync<void, Error> =>
+    fromPromise(
+      (async () => {
         await SandboxEvents.publish({
-          messageId: message.id,
+          messageId,
           payload: {
-            prompt: trimmedPrompt,
+            prompt: prompt.trim(),
           },
           taskId,
           type: "user_message",
         });
         await SandboxQueue.enqueue(taskId);
       })(),
+    );
+
+  export const enqueueTaskMessage = (
+    taskId: string,
+    prompt: string,
+    kind: "follow_up" | "initial",
+    createdByUserId?: string | null,
+  ): ResultAsync<TaskMessageRecord, Error> =>
+    createTaskMessageDraft(taskId, prompt, kind, createdByUserId).andThen((message) =>
+      queueTaskMessage(taskId, message.id, prompt).map(() => message),
     );
 
   export const getTask = (
@@ -189,6 +216,10 @@ export namespace Sandbox {
       log.info("sandbox destroyed", { sandboxId });
     });
 
-  export const runTaskFollowUp = (jobId: string, prompt: string): ResultAsync<void, Error> =>
-    enqueueTaskMessage(jobId, prompt, "follow_up");
+  export const runTaskFollowUp = (
+    jobId: string,
+    prompt: string,
+    createdByUserId?: string | null,
+  ): ResultAsync<void, Error> =>
+    enqueueTaskMessage(jobId, prompt, "follow_up", createdByUserId).map(() => undefined);
 }

@@ -1,14 +1,20 @@
 import { relations } from "drizzle-orm";
-import { boolean, index, integer, pgTable, primaryKey, text, timestamp } from "drizzle-orm/pg-core";
+import { index, integer, pgTable, primaryKey, text, timestamp } from "drizzle-orm/pg-core";
 
 import { user } from "@/lib/db/schema";
+import { organisation } from "@/lib/org/org.sql";
 
 export const project = pgTable(
   "project",
   {
     id: text().primaryKey(),
+    agentSkills: text("agent_skills"),
     name: text().notNull(),
+    envVars: text("env_vars"),
     repoId: text().notNull(),
+    sharedWithOrgId: text("shared_with_org_id").references(() => organisation.id, {
+      onDelete: "set null",
+    }),
     userId: text()
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
@@ -21,6 +27,49 @@ export const project = pgTable(
   (table) => [index("project_userId_idx").on(table.userId)],
 );
 
+export const projectMember = pgTable(
+  "project_member",
+  {
+    projectId: text("project_id")
+      .notNull()
+      .references(() => project.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    role: text().notNull().default("member"),
+    joinedAt: timestamp("joined_at").defaultNow().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.projectId, table.userId] }),
+    index("project_member_userId_idx").on(table.userId),
+  ],
+);
+
+export const projectInvite = pgTable(
+  "project_invite",
+  {
+    id: text().primaryKey(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => project.id, { onDelete: "cascade" }),
+    githubUsername: text("github_username").notNull(),
+    githubUserId: text("github_user_id").notNull(),
+    invitedByUserId: text("invited_by_user_id")
+      .notNull()
+      .references(() => user.id),
+    status: text().notNull().default("pending"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at")
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    index("project_invite_projectId_idx").on(table.projectId),
+    index("project_invite_githubUserId_idx").on(table.githubUserId),
+  ],
+);
+
 export const task = pgTable(
   "task",
   {
@@ -30,7 +79,6 @@ export const task = pgTable(
       .references(() => project.id, { onDelete: "cascade" }),
     prompt: text().notNull(),
     title: text(),
-    quickTask: boolean().notNull().default(false),
     status: text().notNull().default("queued"),
     stage: text().notNull().default("Queued"),
     spawnDepth: integer("spawn_depth").notNull().default(0),
@@ -43,7 +91,9 @@ export const task = pgTable(
     sandboxStatus: text("sandbox_status").notNull().default("pending"),
     branchName: text(),
     spawnSource: text().notNull().default("user"),
+    scheduledTaskId: text("scheduled_task_id"),
     opencodeModel: text(),
+    opencodeProviderId: text("opencode_provider_id"),
     sandboxPath: text("clone_path"),
     nextMessageSequence: integer("next_message_sequence").notNull().default(0),
     spawnFailureCount: integer("spawn_failure_count").notNull().default(0),
@@ -51,12 +101,14 @@ export const task = pgTable(
     lastSpawnError: text("last_spawn_error"),
     lastHeartbeatAt: timestamp("last_heartbeat_at"),
     logs: text(),
+    envVars: text("env_vars"),
     agentMessages: text(),
     followUpHistory: text(),
     error: text(),
     prNumber: integer(),
     prUrl: text(),
     cancelRequestedAt: timestamp(),
+    createdByUserId: text("created_by_user_id").references(() => user.id, { onDelete: "set null" }),
     startedAt: timestamp().defaultNow().notNull(),
     completedAt: timestamp(),
     createdAt: timestamp().defaultNow().notNull(),
@@ -70,6 +122,36 @@ export const task = pgTable(
     index("task_parentTaskId_idx").on(table.parentTaskId),
     index("task_status_idx").on(table.status),
     index("task_sandboxStatus_idx").on(table.sandboxStatus),
+  ],
+);
+
+export const scheduledTask = pgTable(
+  "scheduled_task",
+  {
+    id: text().primaryKey(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => project.id, { onDelete: "cascade" }),
+    name: text().notNull(),
+    scheduleCron: text("schedule_cron").notNull(),
+    scheduleTimezone: text("schedule_timezone").notNull(),
+    instructions: text().notNull(),
+    branchName: text("branch_name"),
+    enabled: integer().notNull().default(1),
+    runOnce: integer("run_once").notNull().default(0),
+    createdByUserId: text("created_by_user_id").references(() => user.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp().defaultNow().notNull(),
+    updatedAt: timestamp()
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    index("scheduled_task_projectId_idx").on(table.projectId),
+    index("scheduled_task_createdByUserId_idx").on(table.createdByUserId),
+    index("scheduled_task_enabled_idx").on(table.enabled),
   ],
 );
 
@@ -88,6 +170,7 @@ export const taskMessage = pgTable(
     logs: text(),
     responseMessages: text(),
     error: text(),
+    createdByUserId: text("created_by_user_id").references(() => user.id, { onDelete: "set null" }),
     processingStartedAt: timestamp(),
     startedAt: timestamp().defaultNow().notNull(),
     completedAt: timestamp(),
@@ -158,8 +241,26 @@ export const taskEventSequence = pgTable(
   (table) => [primaryKey({ columns: [table.taskId] })],
 );
 
-export const projectRelations = relations(project, ({ many }) => ({
+export const projectRelations = relations(project, ({ many, one }) => ({
   tasks: many(task),
+  scheduledTasks: many(scheduledTask),
+  members: many(projectMember),
+  invites: many(projectInvite),
+  owner: one(user, { fields: [project.userId], references: [user.id] }),
+  sharedWithOrg: one(organisation, {
+    fields: [project.sharedWithOrgId],
+    references: [organisation.id],
+  }),
+}));
+
+export const projectMemberRelations = relations(projectMember, ({ one }) => ({
+  project: one(project, { fields: [projectMember.projectId], references: [project.id] }),
+  user: one(user, { fields: [projectMember.userId], references: [user.id] }),
+}));
+
+export const projectInviteRelations = relations(projectInvite, ({ one }) => ({
+  project: one(project, { fields: [projectInvite.projectId], references: [project.id] }),
+  invitedBy: one(user, { fields: [projectInvite.invitedByUserId], references: [user.id] }),
 }));
 
 export const taskRelations = relations(task, ({ many, one }) => ({
@@ -176,12 +277,31 @@ export const taskRelations = relations(task, ({ many, one }) => ({
     fields: [task.projectId],
     references: [project.id],
   }),
+  createdBy: one(user, {
+    fields: [task.createdByUserId],
+    references: [user.id],
+  }),
+}));
+
+export const scheduledTaskRelations = relations(scheduledTask, ({ one }) => ({
+  project: one(project, {
+    fields: [scheduledTask.projectId],
+    references: [project.id],
+  }),
+  createdBy: one(user, {
+    fields: [scheduledTask.createdByUserId],
+    references: [user.id],
+  }),
 }));
 
 export const taskMessageRelations = relations(taskMessage, ({ one }) => ({
   task: one(task, {
     fields: [taskMessage.taskId],
     references: [task.id],
+  }),
+  createdBy: one(user, {
+    fields: [taskMessage.createdByUserId],
+    references: [user.id],
   }),
 }));
 

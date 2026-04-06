@@ -1,35 +1,46 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import { LoaderIcon } from "lucide-react";
+import { ChevronRightIcon, HouseIcon, LoaderIcon } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { useSetHeaderSlots } from "@/components/app/header-portal";
 import {
-  QuickTaskDetail,
   TaskConversation,
   TaskFollowUpComposer,
   TaskHeaderActions,
 } from "@/components/app/task-detail";
+import type { CollaboratorMap } from "@/components/app/task-detail/types";
 import { Button } from "@/components/ui/button";
+import { $destroyTaskSandboxById, $terminateTaskById } from "@/lib/project/functions";
 import {
-  $destroyTaskSandboxById,
-  $runFollowUpById,
-  $terminateQuickTaskById,
-  $terminateTaskById,
-} from "@/lib/project/functions";
-import { type TaskDetailResult, taskDetailQueryOptions, taskKeys } from "@/lib/project/queries";
+  projectCollaboratorsQueryOptions,
+  projectDetailQueryOptions,
+  type TaskDetailResult,
+  taskDetailQueryOptions,
+  taskKeys,
+} from "@/lib/project/queries";
 import { useTaskStream } from "@/lib/project/use-task-stream";
 
 const TERMINAL_STATUSES = new Set(["failed", "succeeded"]);
 
+type PendingAttachment = {
+  file: File;
+  id: string;
+};
+
+const formatAttachmentSize = (bytes: number) => {
+  if (bytes < 1024 * 1024) {
+    return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  }
+
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+};
+
 export const Route = createFileRoute("/_auth/app/tasks/$taskId")({
-  loader: async ({ context, params }) => {
-    await context.queryClient.ensureQueryData({
-      ...taskDetailQueryOptions(params.taskId),
-      revalidateIfStale: true,
-    });
+  loader: ({ context, params }) => {
+    context.queryClient.prefetchQuery(taskDetailQueryOptions(params.taskId));
   },
   component: TaskDetailPage,
 });
@@ -38,12 +49,11 @@ function TaskDetailPage() {
   const { taskId } = Route.useParams();
   const queryClient = useQueryClient();
   const terminateTask = useServerFn($terminateTaskById);
-  const terminateQuickTask = useServerFn($terminateQuickTaskById);
   const destroySandbox = useServerFn($destroyTaskSandboxById);
-  const runFollowUp = useServerFn($runFollowUpById);
   const setHeaderSlots = useSetHeaderSlots();
 
   const [followUpInput, setFollowUpInput] = useState("");
+  const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const taskQuery = useQuery({
@@ -79,23 +89,33 @@ function TaskDetailPage() {
     },
   });
 
-  const terminateQuickTaskMutation = useMutation({
-    mutationFn: () => terminateQuickTask({ data: { taskId } }),
-    onSuccess: () => {
-      toast.success("Quick task stopped and sandbox destroyed.");
-      queryClient.invalidateQueries({ queryKey: taskKeys.detail(taskId) });
-      queryClient.invalidateQueries({ queryKey: taskKeys.all });
-    },
-    onError: (error) => {
-      toast.error(error instanceof Error ? error.message : "Failed to stop quick task.");
-    },
-  });
-
   const followUpMutation = useMutation({
-    mutationFn: (prompt: string) => runFollowUp({ data: { taskId, prompt } }),
+    mutationFn: async (data: { attachments: File[]; prompt: string }) => {
+      const formData = new FormData();
+      formData.set("prompt", data.prompt);
+
+      for (const file of data.attachments) {
+        formData.append("attachments", file);
+      }
+
+      const response = await fetch(`/api/tasks/${taskId}/follow-up`, {
+        body: formData,
+        method: "POST",
+      });
+      const payload = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          typeof payload?.error === "string" ? payload.error : "Failed to start follow-up.",
+        );
+      }
+
+      return payload;
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: taskKeys.detail(taskId) });
       queryClient.invalidateQueries({ queryKey: taskKeys.all });
+      setAttachments([]);
     },
     onError: (error) => {
       toast.error(error instanceof Error ? error.message : "Failed to start follow-up.");
@@ -103,14 +123,25 @@ function TaskDetailPage() {
   });
 
   const task = taskQuery.data as TaskDetailResult | undefined;
+  const projectQuery = useQuery({
+    ...projectDetailQueryOptions(task?.projectId ?? ""),
+    enabled: Boolean(task?.projectId),
+  });
+  const collaboratorsQuery = useQuery({
+    ...projectCollaboratorsQueryOptions(task?.projectId ?? ""),
+    enabled: Boolean(task?.projectId),
+  });
+  const collaboratorMap: CollaboratorMap = new Map(
+    (collaboratorsQuery.data ?? []).map((c) => [c.userId, c.user]),
+  );
   useTaskStream(taskId, true);
   const isRunning = task && !TERMINAL_STATUSES.has(task.status);
   const isCompleted = task && TERMINAL_STATUSES.has(task.status);
   const sandboxAlive = isCompleted && task.sandboxId;
-  const isQuickTask = task?.quickTask === true;
   const taskTitle = task?.title ?? task?.repoName ?? "Task";
+  const projectName = projectQuery.data?.name ?? null;
   const canSendFollowUp = Boolean(
-    isCompleted && !isQuickTask && followUpInput.trim().length >= 10 && !followUpMutation.isPending,
+    isCompleted && followUpInput.trim().length >= 10 && !followUpMutation.isPending,
   );
 
   const scrollToBottom = useCallback(() => {
@@ -148,9 +179,37 @@ function TaskDetailPage() {
 
   useEffect(() => {
     setHeaderSlots({
-      left: taskTitle ? (
-        <span className="truncate text-sm font-medium text-foreground">{taskTitle}</span>
-      ) : null,
+      left: (
+        <nav className="flex items-center gap-2 rounded-lg border border-border/50 bg-muted/70 px-4 py-2 text-base">
+          <Link
+            to="/app/projects"
+            className="flex items-center gap-1.5 text-muted-foreground transition-colors hover:text-foreground"
+          >
+            <HouseIcon className="size-4" />
+            Home
+          </Link>
+          {projectName ? (
+            <>
+              <ChevronRightIcon className="size-3.5 text-muted-foreground/40" aria-hidden="true" />
+              <Link
+                to="/app"
+                search={{ projectId: task?.projectId }}
+                className="text-muted-foreground transition-colors hover:text-foreground"
+              >
+                {projectName}
+              </Link>
+            </>
+          ) : null}
+          {taskTitle ? (
+            <>
+              <ChevronRightIcon className="size-3.5 text-muted-foreground/40" aria-hidden="true" />
+              <span className="max-w-48 truncate font-medium text-foreground">{taskTitle}</span>
+            </>
+          ) : null}
+        </nav>
+      ),
+      projectId: task?.projectId ?? null,
+      projectName,
       right: (
         <TaskHeaderActions
           destroyPending={destroyPending}
@@ -162,10 +221,12 @@ function TaskDetailPage() {
         />
       ),
     });
-    return () => setHeaderSlots({ left: null, right: null });
+    return () => setHeaderSlots({ left: null, projectId: null, projectName: null, right: null });
   }, [
+    task?.projectId,
     task?.id,
     taskTitle,
+    projectName,
     isRunning,
     sandboxAlive,
     terminatePending,
@@ -179,7 +240,10 @@ function TaskDetailPage() {
     if (!canSendFollowUp) return;
     const prompt = followUpInput.trim();
     setFollowUpInput("");
-    followUpMutation.mutate(prompt);
+    followUpMutation.mutate({
+      attachments: attachments.map((attachment) => attachment.file),
+      prompt,
+    });
   };
 
   if (!task && taskQuery.isPending) {
@@ -205,23 +269,14 @@ function TaskDetailPage() {
   const pendingFollowUpPrompt =
     followUpMutation.isPending &&
     followUpMutation.variables &&
-    followUps.at(-1)?.prompt !== followUpMutation.variables
-      ? followUpMutation.variables
+    followUps.at(-1)?.prompt !== followUpMutation.variables.prompt
+      ? followUpMutation.variables.prompt
       : null;
-
-  if (isQuickTask) {
-    return (
-      <QuickTaskDetail
-        isStopping={terminateQuickTaskMutation.isPending}
-        onStop={() => terminateQuickTaskMutation.mutate()}
-        task={task}
-      />
-    );
-  }
 
   return (
     <main className="flex flex-1 flex-col overflow-hidden">
       <TaskConversation
+        collaborators={collaboratorMap}
         followUps={followUps}
         pendingFollowUpPrompt={pendingFollowUpPrompt}
         scrollRef={scrollRef}
@@ -231,10 +286,27 @@ function TaskDetailPage() {
 
       {isCompleted || isRunning ? (
         <TaskFollowUpComposer
+          attachments={attachments.map((attachment) => ({
+            id: attachment.id,
+            name: attachment.file.name,
+            sizeLabel: formatAttachmentSize(attachment.file.size),
+          }))}
           canSubmit={canSendFollowUp}
           disabled={Boolean(isRunning && !sandboxAlive)}
           isPending={followUpMutation.isPending}
+          onAddAttachments={(files) => {
+            setAttachments((current) => [
+              ...current,
+              ...Array.from(files).map((file) => ({
+                file,
+                id: crypto.randomUUID(),
+              })),
+            ]);
+          }}
           onChange={setFollowUpInput}
+          onRemoveAttachment={(id) =>
+            setAttachments((current) => current.filter((attachment) => attachment.id !== id))
+          }
           onSubmit={handleSendFollowUp}
           task={task}
           value={followUpInput}

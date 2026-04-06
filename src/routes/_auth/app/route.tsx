@@ -1,14 +1,16 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { createFileRoute, Link, Outlet, useMatchRoute, useRouter } from "@tanstack/react-router";
-import { HouseIcon, HistoryIcon, LogOutIcon } from "lucide-react";
+import { createFileRoute, Link, Outlet, useRouter, useRouterState } from "@tanstack/react-router";
+import { BuildingIcon, HistoryIcon, HouseIcon, LogOutIcon, SettingsIcon } from "lucide-react";
 
+import { AttachmentDropProvider } from "@/components/app/attachment-drop";
 import { HeaderPortalProvider, useHeaderSlots } from "@/components/app/header-portal";
-import { ThemeToggle } from "@/components/theme-toggle";
+import { ProjectSettingsDialog } from "@/components/app/project-settings-dialog";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import authClient from "@/lib/auth/auth-client";
@@ -19,21 +21,26 @@ export const Route = createFileRoute("/_auth/app")({
 
 function AppLayout() {
   return (
-    <HeaderPortalProvider>
-      <AppLayoutInner />
-    </HeaderPortalProvider>
+    <AttachmentDropProvider>
+      <HeaderPortalProvider>
+        <AppLayoutInner />
+      </HeaderPortalProvider>
+    </AttachmentDropProvider>
   );
 }
 
 function AppLayoutInner() {
   const { user } = Route.useRouteContext();
   const queryClient = useQueryClient();
-  const matchRoute = useMatchRoute();
   const router = useRouter();
+  const location = useRouterState({ select: (s) => s.location.pathname });
   const initials = (user.name ?? user.email ?? "?").slice(0, 1).toUpperCase();
-  const isSessionsActive =
-    !!matchRoute({ to: "/app/sessions" }) || !!matchRoute({ to: "/app/tasks/$taskId" });
   const headerSlots = useHeaderSlots();
+  const isMainNav = location === "/app/projects" || location === "/app/organisation";
+  const isSettingsPage = location === "/app/settings";
+  const isSessionsActive = location === "/app/sessions" || location.startsWith("/app/tasks/");
+  const projectIdForNav = headerSlots.projectId ?? undefined;
+  const sharedSearch = projectIdForNav ? { projectId: projectIdForNav } : {};
 
   return (
     <div className="flex h-svh flex-col overflow-hidden bg-background">
@@ -50,33 +57,67 @@ function AppLayoutInner() {
           {headerSlots.left}
         </div>
 
-        <nav className="absolute left-1/2 flex -translate-x-1/2 items-center gap-x-0.5 rounded-lg bg-muted p-0.5">
-          <Link
-            to="/app"
-            activeOptions={{ exact: true }}
-            className="relative flex h-8 shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-md px-2.5 text-sm font-medium whitespace-nowrap transition-colors [&_svg]:size-4"
-            activeProps={{ className: "bg-background text-foreground shadow-sm/5 dark:bg-input" }}
-            inactiveProps={{ className: "text-muted-foreground/72 hover:text-muted-foreground" }}
-          >
-            <HouseIcon aria-hidden="true" />
-            Home
-          </Link>
-          <Link
-            to="/app/sessions"
-            className={`relative flex h-8 shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-md px-2.5 text-sm font-medium whitespace-nowrap transition-colors [&_svg]:size-4 ${
-              isSessionsActive
-                ? "bg-background text-foreground shadow-sm/5 dark:bg-input"
-                : "text-muted-foreground/72 hover:text-muted-foreground"
-            }`}
-          >
-            <HistoryIcon aria-hidden="true" />
-            Sessions
-          </Link>
-        </nav>
+        {isSettingsPage ? null : isMainNav ? (
+          <nav className="absolute left-1/2 flex -translate-x-1/2 items-center gap-x-0.5 rounded-lg bg-muted p-0.5">
+            <Link
+              to="/app/projects"
+              activeOptions={{ exact: true }}
+              className="relative flex h-8 shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-md px-2.5 text-sm font-medium whitespace-nowrap transition-colors [&_svg]:size-4"
+              activeProps={{ className: "bg-background text-foreground shadow-sm/5 dark:bg-input" }}
+              inactiveProps={{ className: "text-muted-foreground/72 hover:text-muted-foreground" }}
+            >
+              <HouseIcon aria-hidden="true" />
+              Projects
+            </Link>
+            <Link
+              to="/app/organisation"
+              activeOptions={{ exact: true }}
+              className="relative flex h-8 shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-md px-2.5 text-sm font-medium whitespace-nowrap transition-colors [&_svg]:size-4"
+              activeProps={{ className: "bg-background text-foreground shadow-sm/5 dark:bg-input" }}
+              inactiveProps={{ className: "text-muted-foreground/72 hover:text-muted-foreground" }}
+            >
+              <BuildingIcon aria-hidden="true" />
+              Organisation
+            </Link>
+          </nav>
+        ) : (
+          <nav className="absolute left-1/2 flex -translate-x-1/2 items-center gap-x-0.5 rounded-lg bg-muted p-0.5">
+            <Link
+              to="/app"
+              search={sharedSearch}
+              activeOptions={{ exact: true }}
+              className="relative flex h-8 shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-md px-2.5 text-sm font-medium whitespace-nowrap transition-colors [&_svg]:size-4"
+              activeProps={{ className: "bg-background text-foreground shadow-sm/5 dark:bg-input" }}
+              inactiveProps={{ className: "text-muted-foreground/72 hover:text-muted-foreground" }}
+            >
+              <HouseIcon aria-hidden="true" />
+              Home
+            </Link>
+            <Link
+              to="/app/sessions"
+              search={sharedSearch}
+              className={`relative flex h-8 shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-md px-2.5 text-sm font-medium whitespace-nowrap transition-colors [&_svg]:size-4 ${
+                isSessionsActive
+                  ? "bg-background text-foreground shadow-sm/5 dark:bg-input"
+                  : "text-muted-foreground/72 hover:text-muted-foreground"
+              }`}
+            >
+              <HistoryIcon aria-hidden="true" />
+              Sessions
+            </Link>
+          </nav>
+        )}
 
         <div className="flex items-center gap-2">
+          {headerSlots.projectId ? (
+            <ProjectSettingsDialog
+              currentUserId={user.id}
+              disabled={false}
+              projectId={headerSlots.projectId}
+              projectName={headerSlots.projectName}
+            />
+          ) : null}
           {headerSlots.right}
-          <ThemeToggle />
           <DropdownMenu>
             <DropdownMenuTrigger className="rounded-full">
               <Avatar className="size-9 border border-border">
@@ -85,6 +126,11 @@ function AppLayoutInner() {
               </Avatar>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => router.navigate({ to: "/app/settings" })}>
+                <SettingsIcon />
+                Settings
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
               <DropdownMenuItem
                 variant="destructive"
                 onClick={async () => {

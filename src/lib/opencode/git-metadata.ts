@@ -1,5 +1,9 @@
 import "@tanstack/react-start/server-only";
-import { getProviderScopedModelId } from "./config";
+import {
+  getOpenCodeChatCompletionsEndpoint,
+  getProviderScopedModelId,
+  type OpenCodeConfig,
+} from "./config";
 
 const GIT_METADATA_TIMEOUT_MS = 20_000;
 
@@ -102,19 +106,18 @@ export const didGitMetadataGenerationTimeout = (startedAt: number) =>
 
 export const generateGitMetadata = async (
   context: GitMetadataContext,
-  apiKey: string,
-  model: string,
+  config: OpenCodeConfig,
 ): Promise<GeneratedGitMetadata> => {
   const fallback = getFallbackGitMetadata(context.userPrompt);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), GIT_METADATA_TIMEOUT_MS);
 
   try {
-    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    const response = await fetch(getOpenCodeChatCompletionsEndpoint(config), {
       method: "POST",
       signal: controller.signal,
       headers: {
-        Authorization: `Bearer ${apiKey}`,
+        Authorization: `Bearer ${config.apiKey}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
@@ -150,7 +153,7 @@ export const generateGitMetadata = async (
             ].join("\n"),
           },
         ],
-        model: getProviderScopedModelId(model),
+        model: getProviderScopedModelId(config.model, config.providerId),
         temperature: 0.4,
       }),
     });

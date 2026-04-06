@@ -30,6 +30,16 @@ export const opencodeInstallCommand = [
 export const buildOpenCodePrompt = (
   userPrompt: string,
   options?: {
+    attachments?: Array<{ fileName: string; mediaType: string; sandboxPath: string }>;
+    conversationHistory?: Array<{
+      error?: string | null;
+      kind: "follow_up" | "initial";
+      prompt: string;
+      responseMessages: Array<{ text: string }>;
+      sequence: number;
+      status: string;
+    }>;
+    envVarKeys?: string[];
     sandboxId?: string;
   },
 ) =>
@@ -53,14 +63,69 @@ export const buildOpenCodePrompt = (
     "Key tools available include open_url, snapshot, click, fill, type, keyboard_type, press, wait, screenshot, evaluate, and close.",
     "Preferred workflow: open the page, take a snapshot to get refs like @e1, interact using those refs, then capture a screenshot before finishing when visual verification matters.",
     "",
+    ...(options?.envVarKeys?.length
+      ? [
+          "Project environment variables:",
+          `The following environment variables have been injected into this sandbox by the user: ${options.envVarKeys.join(", ")}.`,
+          "They are available as process environment variables and are also written to a .env file at the repository root.",
+          "Do not tell the user that no environment variables are defined — they are already present in this sandbox.",
+          "",
+        ]
+      : []),
+    ...(options?.attachments?.length
+      ? [
+          "Message attachments:",
+          "The following files are attached to this OpenCode message and are also available inside the repository workspace:",
+          ...options.attachments.map(
+            (attachment) =>
+              `- ${attachment.fileName} (${attachment.mediaType}) at ${attachment.sandboxPath}`,
+          ),
+          "Use these attachments as part of the user's request. If an attachment is an image, inspect it directly.",
+          "",
+        ]
+      : []),
+    ...(options?.conversationHistory?.length
+      ? [
+          "Conversation history from earlier task messages:",
+          "Use earlier user messages here as context for the current follow-up.",
+          "Do not treat earlier agent responses as the final answer for this follow-up.",
+          ...options.conversationHistory.flatMap((message) => {
+            return [
+              `Earlier ${message.kind === "initial" ? "initial task" : "follow-up"} ${message.sequence + 1} user message:`,
+              message.prompt.trim(),
+              ...(message.error?.trim()
+                ? [
+                    `Earlier ${message.kind === "initial" ? "initial task" : "follow-up"} ${message.sequence + 1} error:`,
+                    message.error.trim(),
+                  ]
+                : []),
+              ...(message.status !== "completed"
+                ? [
+                    `Earlier ${message.kind === "initial" ? "initial task" : "follow-up"} ${message.sequence + 1} status:`,
+                    message.status,
+                  ]
+                : []),
+              "",
+            ];
+          }),
+        ]
+      : []),
     "User task:",
     userPrompt.trim(),
   ].join("\n");
 
-export const buildOpenCodeRunCommand = (model: string, prompt: string) =>
+export const buildOpenCodeRunCommand = (
+  model: string,
+  prompt: string,
+  attachments?: Array<{ sandboxPath: string }>,
+) =>
   [
     SANDBOX_TOOL_PATH_EXPORT,
     writeGeneratedConfigCommand,
     'export OPENCODE_CONFIG="$PWD/../.opencode.generated.json"',
-    `opencode run --format json --model '${escapeForSingleQuotedShell(model)}' "$(cat <<'EOF'\n${prompt}\nEOF\n)"`,
+    `opencode run --format json --model '${escapeForSingleQuotedShell(model)}' "$(cat <<'EOF'\n${prompt}\nEOF\n)"${(
+      attachments ?? []
+    )
+      .map((attachment) => ` --file '${escapeForSingleQuotedShell(attachment.sandboxPath)}'`)
+      .join("")}`,
   ].join("\n");

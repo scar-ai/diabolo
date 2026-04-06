@@ -2,6 +2,8 @@ import { createContext, useContext, useState, type ReactNode } from "react";
 
 type HeaderSlots = {
   left: ReactNode;
+  projectId: string | null;
+  projectName: string | null;
   right: ReactNode;
 };
 
@@ -13,7 +15,12 @@ type HeaderPortalContextValue = {
 const HeaderPortalContext = createContext<HeaderPortalContextValue | null>(null);
 
 export function HeaderPortalProvider({ children }: { children: ReactNode }) {
-  const [slots, setSlots] = useState<HeaderSlots>({ left: null, right: null });
+  const [slots, setSlots] = useState<HeaderSlots>({
+    left: null,
+    projectId: null,
+    projectName: null,
+    right: null,
+  });
   return (
     <HeaderPortalContext.Provider value={{ slots, setSlots }}>
       {children}

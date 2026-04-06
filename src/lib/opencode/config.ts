@@ -1,74 +1,118 @@
 import "@tanstack/react-start/server-only";
-import { env } from "@/env/server";
 
-const DEFAULT_OPENCODE_MODEL = "openrouter/openai/gpt-5-codex";
+const CUSTOM_OPENCODE_PROVIDER_PACKAGE = "@ai-sdk/openai-compatible";
+const CUSTOM_OPENCODE_API_KEY_ENV_VAR = "OPENCODE_PROVIDER_API_KEY";
+
+export type SavedOpenCodeProvider = {
+  id?: string | null;
+  name?: string | null;
+  providerApiKey?: string | null;
+  providerBaseUrl?: string | null;
+  providerId?: string | null;
+  providerModel?: string | null;
+};
 
 export type OpenCodeConfig = {
   apiKey: string;
+  apiKeyEnvVar: string;
+  baseUrl: string;
   model: string;
+  providerId: string;
+  providerName: string;
+  selectedProviderId: string;
 };
 
-export const getProviderScopedModelId = (model: string) => {
-  if (model.startsWith("openrouter/")) {
-    return model.slice("openrouter/".length);
+const trimToNull = (value?: string | null) => {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : null;
+};
+
+const normalizeBaseUrl = (value: string) => value.replace(/\/+$/, "");
+
+export const getProviderScopedModelId = (model: string, providerId: string) => {
+  const prefix = `${providerId}/`;
+
+  if (model.startsWith(prefix)) {
+    return model.slice(prefix.length);
   }
 
   return model;
 };
 
-export const normalizeOpenRouterModel = (value: string) => {
-  const model = value.trim();
+export const normalizeOpenCodeModelForProvider = (model: string, providerId: string) => {
+  const trimmed = model.trim();
 
-  if (!model) {
-    return DEFAULT_OPENCODE_MODEL;
+  if (!trimmed) {
+    throw new Error("Provider model is required.");
   }
 
-  if (model.startsWith("openrouter/")) {
-    return model;
+  const prefix = `${providerId}/`;
+
+  if (trimmed.startsWith(prefix)) {
+    return trimmed;
   }
 
-  // This app only provisions the OpenRouter provider for OpenCode, so any
-  // provider-scoped model id like "openai/gpt-5.4-nano" still needs the
-  // "openrouter/" prefix to resolve correctly inside OpenCode.
-  return `openrouter/${model}`;
+  return `${providerId}/${trimmed}`;
 };
 
-export const getConfiguredOpenCodeModel = () =>
-  normalizeOpenRouterModel(env.OPENCODE_MODEL?.trim() || DEFAULT_OPENCODE_MODEL);
+export const resolveOpenCodeConfig = (input: {
+  model?: string | null;
+  provider: SavedOpenCodeProvider;
+}): OpenCodeConfig => {
+  const providerId = trimToNull(input.provider.providerId);
+  const baseUrl = trimToNull(input.provider.providerBaseUrl);
+  const model = trimToNull(input.model ?? input.provider.providerModel);
+  const apiKey = trimToNull(input.provider.providerApiKey);
+  const selectedProviderId = trimToNull(input.provider.id);
 
-export const ensureOpenCodeConfig = (): OpenCodeConfig => {
-  if (!env.OPENROUTER_API_KEY) {
-    throw new Error("OPENROUTER_API_KEY is not configured.");
+  if (!providerId || !baseUrl || !model || !apiKey || !selectedProviderId) {
+    throw new Error(
+      "Selected provider is incomplete. Set Provider ID, API Base URL, Model, and API Key before starting a task.",
+    );
   }
 
   return {
-    apiKey: env.OPENROUTER_API_KEY,
-    model: getConfiguredOpenCodeModel(),
+    apiKey,
+    apiKeyEnvVar: CUSTOM_OPENCODE_API_KEY_ENV_VAR,
+    baseUrl: normalizeBaseUrl(baseUrl),
+    model: normalizeOpenCodeModelForProvider(model, providerId),
+    providerId,
+    providerName: trimToNull(input.provider.name) || providerId,
+    selectedProviderId,
   };
 };
 
-export const buildOpenCodeConfigContent = (model: string) => {
-  const providerScopedModelId = getProviderScopedModelId(model);
+export const buildOpenCodeConfigContent = (config: OpenCodeConfig) => {
+  const providerScopedModelId = getProviderScopedModelId(config.model, config.providerId);
 
-  const config: Record<string, unknown> = {
+  const output: Record<string, unknown> = {
     $schema: "https://opencode.ai/config.json",
-    model,
+    model: config.model,
     permission: {
       bash: {
         "*": "allow",
       },
       edit: "allow",
+      skill: "allow",
       webfetch: "allow",
     },
     provider: {
-      openrouter: {
+      [config.providerId]: {
         models: {
           [providerScopedModelId]: {},
         },
-        options: {},
+        name: config.providerName,
+        npm: CUSTOM_OPENCODE_PROVIDER_PACKAGE,
+        options: {
+          apiKey: `{env:${config.apiKeyEnvVar}}`,
+          baseURL: config.baseUrl,
+        },
       },
     },
   };
 
-  return JSON.stringify(config);
+  return JSON.stringify(output);
 };
+
+export const getOpenCodeChatCompletionsEndpoint = (config: OpenCodeConfig) =>
+  `${normalizeBaseUrl(config.baseUrl)}/chat/completions`;

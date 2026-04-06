@@ -59,6 +59,9 @@ const wrapSandbox = (sandbox: Awaited<ReturnType<Daytona["create"]>>): Sandbox.S
   async stop(timeoutSeconds = 120) {
     await sandbox.stop(timeoutSeconds);
   },
+  async uploadFile(localPath: string, remotePath: string, timeoutSeconds = 180) {
+    await sandbox.fs.uploadFile(localPath, remotePath, timeoutSeconds);
+  },
 });
 
 export const getSandboxProvider = (): Sandbox.Provider => {

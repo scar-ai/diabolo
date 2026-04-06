@@ -26,8 +26,8 @@ const AGENT_BROWSER_PACKAGE_JSON = JSON.stringify(
   2,
 );
 
-const AGENT_BROWSER_TOOL_CONTENT = String.raw`import { execFile } from "node:child_process";
-import { mkdirSync } from "node:fs";
+const AGENT_BROWSER_TOOL_CONTENT = String.raw`import { execFile, execFileSync } from "node:child_process";
+import { existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -36,7 +36,7 @@ import { tool } from "@opencode-ai/plugin";
 const execFileAsync = promisify(execFile);
 const TOOL_DIRECTORY = path.dirname(fileURLToPath(import.meta.url));
 const TOOL_ROOT = path.resolve(TOOL_DIRECTORY, "..");
-const AGENT_BROWSER_BIN = path.join(
+const LOCAL_AGENT_BROWSER_BIN = path.join(
   TOOL_ROOT,
   "node_modules",
   ".bin",
@@ -44,6 +44,33 @@ const AGENT_BROWSER_BIN = path.join(
 );
 
 const toErrorMessage = (error) => (error instanceof Error ? error.message : String(error));
+const resolveAgentBrowserBin = () => {
+  if (process.env.AGENT_BROWSER_BIN?.trim()) {
+    return process.env.AGENT_BROWSER_BIN.trim();
+  }
+
+  if (existsSync(LOCAL_AGENT_BROWSER_BIN)) {
+    return LOCAL_AGENT_BROWSER_BIN;
+  }
+
+  try {
+    const command = process.platform === "win32" ? "where" : "which";
+    const resolved = execFileSync(command, ["agent-browser"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    })
+      .split(/\r?\n/)
+      .map((value) => value.trim())
+      .find(Boolean);
+
+    if (resolved) {
+      return resolved;
+    }
+  } catch {}
+
+  return "agent-browser";
+};
+
 const resolveUrl = (value) => {
   if (/^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//.test(value)) {
     return value;
@@ -94,9 +121,10 @@ const parseJsonOutput = (rawOutput) => {
 
 const runAgentBrowser = async (args, options = {}) => {
   const finalArgs = options.json ? [...args, "--json"] : [...args];
+  const agentBrowserBin = resolveAgentBrowserBin();
 
   try {
-    const result = await execFileAsync(AGENT_BROWSER_BIN, finalArgs, {
+    const result = await execFileAsync(agentBrowserBin, finalArgs, {
       env: process.env,
       maxBuffer: 10 * 1024 * 1024,
       timeout: options.timeoutMs ?? 30000,
