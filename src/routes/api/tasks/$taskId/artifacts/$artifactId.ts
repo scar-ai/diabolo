@@ -1,20 +1,16 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-import { auth } from "@/lib/auth/auth";
+import { badRequest, requireApiUser } from "@/lib/api-helpers";
 import { findTask, findUserTask } from "@/lib/project/data";
 import { Sandbox } from "@/lib/sandbox";
 import { findTaskArtifact } from "@/lib/sandbox/store";
 import { isTaskScreenshotMetadata, TASK_SCREENSHOT_ARTIFACT_TYPE } from "@/lib/task-artifacts";
 
-const badRequest = (error: string, status = 400) => Response.json({ error }, { status });
-
 export const Route = createFileRoute("/api/tasks/$taskId/artifacts/$artifactId")({
   server: {
     handlers: {
       GET: async ({ params, request }) => {
-        const session = await auth.api.getSession({ headers: request.headers });
-        const user = session?.user;
-
+        const user = await requireApiUser(request);
         if (!user) {
           return badRequest("Unauthorized", 401);
         }

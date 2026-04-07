@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 
 import { createFileRoute } from "@tanstack/react-router";
 
-import { auth } from "@/lib/auth/auth";
+import { badRequest, requireApiUser } from "@/lib/api-helpers";
 import { findUserTask } from "@/lib/project/data";
 import { listTaskArtifacts } from "@/lib/sandbox/store";
 import {
@@ -11,15 +11,11 @@ import {
   TASK_ATTACHMENT_ARTIFACT_TYPE,
 } from "@/lib/task-attachments";
 
-const badRequest = (error: string, status = 400) => Response.json({ error }, { status });
-
 export const Route = createFileRoute("/api/tasks/$taskId/attachments")({
   server: {
     handlers: {
       GET: async ({ params, request }) => {
-        const session = await auth.api.getSession({ headers: request.headers });
-        const user = session?.user;
-
+        const user = await requireApiUser(request);
         if (!user) {
           return badRequest("Unauthorized", 401);
         }
