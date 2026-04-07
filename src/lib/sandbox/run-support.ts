@@ -7,6 +7,7 @@ import type { JsonObject } from "@/lib/json";
 import { buildOpenCodeConfigContent } from "@/lib/opencode/config";
 import { Sandbox } from "@/lib/sandbox";
 import { SandboxEvents } from "@/lib/sandbox/events";
+import { CODEX_LOCAL_PROXY_BASE_URL, CODEX_LOCAL_PROXY_SCRIPT } from "@/lib/sandbox/opencode";
 import { SandboxRuntimeState } from "@/lib/sandbox/runtime-state";
 import {
   appendTaskAgentMessage,
@@ -420,6 +421,7 @@ export const buildOpenCodeEnvironment = (input: {
   defaultBranch: string;
   githubToken: string;
   model: string;
+  providerKind: "codex" | "manual";
   providerId: string;
   providerName: string;
   projectEnvVars?: Record<string, string>;
@@ -436,6 +438,7 @@ export const buildOpenCodeEnvironment = (input: {
       baseUrl: input.baseUrl,
       model: input.model,
       providerId: input.providerId,
+      providerKind: "manual",
       providerName: input.providerName,
       selectedProviderId: input.providerId,
     }),
@@ -447,6 +450,18 @@ export const buildOpenCodeEnvironment = (input: {
   OPENCODE_GIT_AUTHOR_EMAIL: input.viewer.email,
   OPENCODE_GIT_AUTHOR_NAME: input.viewer.name,
   OPENCODE_REPO_PATH: input.sandboxPath,
+  ...(input.providerKind === "codex"
+    ? {
+        OPENCODE_CODEX_PROVIDER_ID: input.providerId,
+        OPENCODE_CODEX_PROXY_BASE_URL: CODEX_LOCAL_PROXY_BASE_URL,
+        OPENCODE_CODEX_PROXY_HEALTH_URL: `${CODEX_LOCAL_PROXY_BASE_URL}/health`,
+        OPENCODE_CODEX_PROXY_PORT: new URL(CODEX_LOCAL_PROXY_BASE_URL).port || "80",
+        OPENCODE_CODEX_PROXY_SCRIPT_B64: Buffer.from(CODEX_LOCAL_PROXY_SCRIPT, "utf8").toString(
+          "base64",
+        ),
+        OPENCODE_CODEX_USE_LOCAL_PROXY: "1",
+      }
+    : {}),
   ...(input.projectEnvVars ?? {}),
   ...Sandbox.getSpawnTaskEnvironment(input.taskId),
 });

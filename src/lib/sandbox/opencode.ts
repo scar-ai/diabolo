@@ -5,6 +5,323 @@ import { buildSpawnTaskOpenCodeSetupCommand } from "@/lib/opencode/spawn-task";
 const SANDBOX_TOOL_PATH_EXPORT =
   'export PATH="$HOME/.local/bin:$HOME/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/bin:$(npm config get prefix)/bin:$PATH"';
 
+export const CODEX_LOCAL_PROXY_BASE_URL = "http://127.0.0.1:4312";
+
+export const CODEX_LOCAL_PROXY_SCRIPT = String.raw`import http from "node:http";
+
+const port = Number(process.env.OPENCODE_CODEX_PROXY_PORT || "4312");
+const providerId = (process.env.OPENCODE_CODEX_PROVIDER_ID || "codex").trim() || "codex";
+const endpoint = "https://chatgpt.com/backend-api/responses";
+
+const readJson = async (response) => {
+  const contentType = response.headers.get("content-type") || "";
+
+  if (!contentType.includes("application/json")) {
+    return null;
+  }
+
+  try {
+    return await response.json();
+  } catch {
+    return null;
+  }
+};
+
+const getResponseErrorMessage = async (response) => {
+  const payload = await readJson(response);
+
+  if (typeof payload?.error === "string" && payload.error) {
+    return payload.error;
+  }
+
+  if (typeof payload?.error_description === "string" && payload.error_description) {
+    return payload.error_description;
+  }
+
+  if (typeof payload?.message === "string" && payload.message) {
+    return payload.message;
+  }
+
+  if (typeof payload?.detail === "string" && payload.detail) {
+    return payload.detail;
+  }
+
+  if (
+    payload?.error &&
+    typeof payload.error === "object" &&
+    typeof payload.error.message === "string" &&
+    payload.error.message
+  ) {
+    return payload.error.message;
+  }
+
+  const text = (await response.text().catch(() => "")).trim();
+  return text || "Codex request failed.";
+};
+
+const extractMessageText = (message) => {
+  if (!message) {
+    return "";
+  }
+
+  if (typeof message.content === "string") {
+    return message.content.trim();
+  }
+
+  if (!Array.isArray(message.content)) {
+    return "";
+  }
+
+  return message.content
+    .map((part) => {
+      if (part?.type === "text" && typeof part.text === "string") {
+        return part.text;
+      }
+
+      return "";
+    })
+    .join("\n")
+    .trim();
+};
+
+const normalizeRole = (role) => {
+  if (role === "assistant" || role === "developer") {
+    return role;
+  }
+
+  if (role === "system") {
+    return "developer";
+  }
+
+  return "user";
+};
+
+const buildResponsesBody = (payload, model) => {
+  const input = (payload.messages ?? [])
+    .map((message) => {
+      const text = extractMessageText(message);
+
+      if (!text) {
+        return null;
+      }
+
+      return {
+        type: "message",
+        role: normalizeRole(message.role),
+        content: message?.role === "system" ? text : [{ type: "input_text", text }],
+      };
+    })
+    .filter(Boolean);
+
+  return {
+    input,
+    model,
+    store: false,
+    stream: false,
+    temperature: payload.temperature,
+  };
+};
+
+const getBackendModel = (model) => {
+  const normalized = typeof model === "string" ? model.trim() : "";
+  const prefix = providerId + "/";
+
+  if (!normalized) {
+    return "codex-mini-latest";
+  }
+
+  return normalized.startsWith(prefix) ? normalized.slice(prefix.length) : normalized;
+};
+
+const extractOutputText = (payload) => {
+  if (!payload || typeof payload !== "object") {
+    return "";
+  }
+
+  if (typeof payload.output_text === "string" && payload.output_text.trim()) {
+    return payload.output_text.trim();
+  }
+
+  const output = payload.output;
+
+  if (!Array.isArray(output)) {
+    return "";
+  }
+
+  return output
+    .flatMap((entry) => {
+      if (!entry || typeof entry !== "object" || !Array.isArray(entry.content)) {
+        return [];
+      }
+
+      return entry.content.flatMap((part) => {
+        if (
+          part &&
+          typeof part === "object" &&
+          part.type === "output_text" &&
+          typeof part.text === "string"
+        ) {
+          return [part.text];
+        }
+
+        return [];
+      });
+    })
+    .join("\n")
+    .trim();
+};
+
+const createChatCompletion = ({ content, id, model }) => ({
+  id: typeof id === "string" && id ? id : "chatcmpl-" + crypto.randomUUID(),
+  object: "chat.completion",
+  created: Math.floor(Date.now() / 1000),
+  model,
+  choices: [
+    {
+      index: 0,
+      finish_reason: "stop",
+      message: {
+        role: "assistant",
+        content,
+      },
+    },
+  ],
+});
+
+const sendJson = (response, status, payload) => {
+  response.writeHead(status, { "content-type": "application/json; charset=utf-8" });
+  response.end(JSON.stringify(payload));
+};
+
+const sendStream = (response, payload) => {
+  const id = typeof payload.id === "string" && payload.id ? payload.id : "chatcmpl-" + crypto.randomUUID();
+  const created = Math.floor(Date.now() / 1000);
+
+  response.writeHead(200, {
+    "cache-control": "no-cache",
+    connection: "keep-alive",
+    "content-type": "text/event-stream; charset=utf-8",
+  });
+  response.write(
+    "data: " +
+      JSON.stringify({
+        id,
+        object: "chat.completion.chunk",
+        created,
+        model: payload.model,
+        choices: [
+          {
+            index: 0,
+            delta: {
+              role: "assistant",
+              content: payload.content,
+            },
+            finish_reason: "stop",
+          },
+        ],
+      }) +
+      "\n\n",
+  );
+  response.write("data: [DONE]\n\n");
+  response.end();
+};
+
+const server = http.createServer(async (request, response) => {
+  if (!request.url) {
+    sendJson(response, 404, { error: "Not found" });
+    return;
+  }
+
+  if (request.method === "GET" && request.url === "/health") {
+    response.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
+    response.end("ok");
+    return;
+  }
+
+  if (request.method !== "POST" || request.url !== "/chat/completions") {
+    sendJson(response, 404, { error: "Not found" });
+    return;
+  }
+
+  const authorization = request.headers.authorization || "";
+
+  if (!authorization.trim()) {
+    sendJson(response, 401, { error: "Missing Authorization header." });
+    return;
+  }
+
+  const chunks = [];
+
+  try {
+    for await (const chunk of request) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    }
+
+    const rawBody = Buffer.concat(chunks).toString("utf8");
+    const payload = rawBody ? JSON.parse(rawBody) : {};
+    const model = getBackendModel(payload.model);
+    const upstream = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        authorization,
+        "content-type": "application/json",
+        origin: "https://chatgpt.com",
+        referer: "https://chatgpt.com/",
+        "user-agent": "OpenAI/Codex",
+      },
+      body: JSON.stringify(buildResponsesBody(payload, model)),
+    });
+
+    if (!upstream.ok) {
+      sendJson(response, upstream.status, { error: await getResponseErrorMessage(upstream) });
+      return;
+    }
+
+    const upstreamPayload = await upstream.json();
+    const content = extractOutputText(upstreamPayload);
+
+    if (!content) {
+      sendJson(response, 502, { error: "Codex returned an empty response." });
+      return;
+    }
+
+    if (payload.stream) {
+      sendStream(response, {
+        content,
+        id: upstreamPayload.id,
+        model,
+      });
+      return;
+    }
+
+    sendJson(
+      response,
+      200,
+      createChatCompletion({
+        content,
+        id: upstreamPayload.id,
+        model,
+      }),
+    );
+  } catch (error) {
+    sendJson(response, 500, {
+      error: error instanceof Error ? error.message : "Failed to proxy Codex request.",
+    });
+  }
+});
+
+server.listen(port, "127.0.0.1", () => {
+  process.stdout.write("codex-proxy:ready\n");
+});
+
+const shutdown = () => {
+  server.close(() => process.exit(0));
+};
+
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);
+`;
+
 const escapeForSingleQuotedShell = (value: string) => value.replace(/'/g, `'\\''`);
 
 const writeGeneratedConfigCommand = [
@@ -28,53 +345,97 @@ const buildOpenCodeRunnerCommand = () =>
     "import subprocess",
     "import sys",
     "import time",
+    "import urllib.error",
+    "import urllib.request",
     "",
     "artifacts_dir = pathlib.Path(os.getcwd()) / '.opencode' / 'artifacts'",
     "artifacts_dir.mkdir(parents=True, exist_ok=True)",
     "log_path = artifacts_dir / 'opencode-run.log'",
+    "proxy_path = pathlib.Path(os.getcwd()) / '.diabolo' / 'codex-openai-proxy.mjs'",
+    "proxy_log_path = artifacts_dir / 'codex-proxy.log'",
     "",
     "model = os.environ['OPENCODE_RUN_MODEL']",
     "prompt = base64.b64decode(os.environ['OPENCODE_RUN_PROMPT_B64']).decode('utf-8')",
     "attachments = json.loads(base64.b64decode(os.environ['OPENCODE_RUN_ATTACHMENTS_B64']).decode('utf-8'))",
     "",
+    "proxy_process = None",
+    "proxy_log_file = None",
+    "if os.environ.get('OPENCODE_CODEX_USE_LOCAL_PROXY') == '1':",
+    "    proxy_path.parent.mkdir(parents=True, exist_ok=True)",
+    "    proxy_path.write_text(base64.b64decode(os.environ['OPENCODE_CODEX_PROXY_SCRIPT_B64']).decode('utf-8'))",
+    "    proxy_log_file = open(proxy_log_path, 'wb')",
+    "    proxy_process = subprocess.Popen(",
+    "        ['node', str(proxy_path)],",
+    "        cwd=os.getcwd(),",
+    "        env=os.environ.copy(),",
+    "        stdout=proxy_log_file,",
+    "        stderr=subprocess.STDOUT,",
+    "        stdin=subprocess.DEVNULL,",
+    "    )",
+    "    proxy_health_url = os.environ.get('OPENCODE_CODEX_PROXY_HEALTH_URL', 'http://127.0.0.1:4312/health')",
+    "    proxy_ready = False",
+    "    for _ in range(50):",
+    "        if proxy_process.poll() is not None:",
+    "            break",
+    "        try:",
+    "            with urllib.request.urlopen(proxy_health_url, timeout=1) as health_response:",
+    "                if health_response.status == 200:",
+    "                    proxy_ready = True",
+    "                    break",
+    "        except Exception:",
+    "            time.sleep(0.2)",
+    "    if not proxy_ready:",
+    "        raise RuntimeError('Codex sandbox proxy failed to start.')",
+    "",
     "args = ['opencode', 'run', '--format', 'json', '--model', model, prompt]",
     "for attachment in attachments:",
     "    args.extend(['--file', attachment])",
     "",
-    "with open(log_path, 'wb') as log_file:",
-    "    process = subprocess.Popen(",
-    "        args,",
-    "        cwd=os.getcwd(),",
-    "        env=os.environ.copy(),",
-    "        stdout=log_file,",
-    "        stderr=subprocess.STDOUT,",
-    "        stdin=subprocess.DEVNULL,",
-    "    )",
-    "",
+    "return_code = 1",
     "last_offset = 0",
-    "while True:",
+    "try:",
+    "    with open(log_path, 'wb') as log_file:",
+    "        process = subprocess.Popen(",
+    "            args,",
+    "            cwd=os.getcwd(),",
+    "            env=os.environ.copy(),",
+    "            stdout=log_file,",
+    "            stderr=subprocess.STDOUT,",
+    "            stdin=subprocess.DEVNULL,",
+    "        )",
+    "",
+    "        while True:",
+    "            if log_path.exists():",
+    "                with open(log_path, 'rb') as reader:",
+    "                    reader.seek(last_offset)",
+    "                    chunk = reader.read()",
+    "                    if chunk:",
+    "                        sys.stdout.buffer.write(chunk)",
+    "                        sys.stdout.buffer.flush()",
+    "                        last_offset = reader.tell()",
+    "",
+    "            return_code = process.poll()",
+    "            if return_code is not None:",
+    "                break",
+    "",
+    "            time.sleep(0.2)",
+    "",
     "    if log_path.exists():",
     "        with open(log_path, 'rb') as reader:",
     "            reader.seek(last_offset)",
-    "            chunk = reader.read()",
-    "            if chunk:",
-    "                sys.stdout.buffer.write(chunk)",
+    "            tail = reader.read()",
+    "            if tail:",
+    "                sys.stdout.buffer.write(tail)",
     "                sys.stdout.buffer.flush()",
-    "                last_offset = reader.tell()",
-    "",
-    "    return_code = process.poll()",
-    "    if return_code is not None:",
-    "        break",
-    "",
-    "    time.sleep(0.2)",
-    "",
-    "if log_path.exists():",
-    "    with open(log_path, 'rb') as reader:",
-    "        reader.seek(last_offset)",
-    "        tail = reader.read()",
-    "        if tail:",
-    "            sys.stdout.buffer.write(tail)",
-    "            sys.stdout.buffer.flush()",
+    "finally:",
+    "    if proxy_process is not None and proxy_process.poll() is None:",
+    "        proxy_process.terminate()",
+    "        try:",
+    "            proxy_process.wait(timeout=5)",
+    "        except subprocess.TimeoutExpired:",
+    "            proxy_process.kill()",
+    "    if proxy_log_file is not None:",
+    "        proxy_log_file.close()",
     "",
     "sys.exit(return_code)",
     "PY",

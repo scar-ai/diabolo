@@ -43,6 +43,21 @@ const PROJECT_SKILLS_MANIFEST_PATH = ".diabolo/project-skills.json";
 
 const escapeForSingleQuotedShell = (value: string) => value.replace(/'/g, `'\\''`);
 
+export const buildSandboxGitExcludeCommand = () =>
+  [
+    "node - <<'JS'",
+    "const fs = require('fs');",
+    "const path = require('path');",
+    "const excludePath = path.join('.git', 'info', 'exclude');",
+    "const entries = ['.diabolo/', '.opencode/'];",
+    "const existing = fs.existsSync(excludePath) ? fs.readFileSync(excludePath, 'utf8') : '';",
+    "const lines = new Set(existing.split(/\\r?\\n/).map((line) => line.trim()).filter(Boolean));",
+    "for (const entry of entries) lines.add(entry);",
+    "fs.mkdirSync(path.dirname(excludePath), { recursive: true });",
+    "fs.writeFileSync(excludePath, Array.from(lines).join('\\n') + '\\n');",
+    "JS",
+  ].join("\n");
+
 const buildProjectEnvSyncCommand = (envVars?: Record<string, string>) => {
   const projectEnvBlock = envVars ? formatProjectEnvVarsForDotEnv(envVars) : "";
   const block = projectEnvBlock
@@ -231,6 +246,7 @@ export namespace SandboxWorkspace {
         `git remote set-url origin '${input.authenticatedRemoteUrl.replace(/'/g, `'\\''`)}'`,
         `git config user.name '${input.viewer.name.replace(/'/g, `'\\''`)}'`,
         `git config user.email '${input.viewer.email.replace(/'/g, `'\\''`)}'`,
+        buildSandboxGitExcludeCommand(),
         opencodeInstallCommand,
       ];
 

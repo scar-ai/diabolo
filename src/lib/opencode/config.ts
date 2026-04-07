@@ -1,14 +1,31 @@
 import "@tanstack/react-start/server-only";
+import { ensureCodexAccessToken, isCodexProvider } from "./codex";
 
 const CUSTOM_OPENCODE_PROVIDER_PACKAGE = "@ai-sdk/openai-compatible";
 const CUSTOM_OPENCODE_API_KEY_ENV_VAR = "OPENCODE_PROVIDER_API_KEY";
+const CODEX_LOCAL_PROXY_BASE_URL = "http://127.0.0.1:4312";
+export const OPENAI_CODEX_RESPONSES_PROVIDER_ID = "openai-codex-responses";
 const OPENROUTER_BASE_URL_PATTERN = /^https?:\/\/(?:www\.)?openrouter\.ai\/api(?:\/v\d+)?\/?$/i;
 
 export type SavedOpenCodeProvider = {
+  oauthAccessToken?: string | null;
+  oauthAccessTokenExpiresAt?: Date | null;
+  oauthAuthenticatedAt?: Date | null;
+  oauthDeviceCode?: string | null;
+  oauthDeviceCodeExpiresAt?: Date | null;
+  oauthError?: string | null;
+  oauthPollingIntervalSeconds?: string | null;
+  oauthRefreshToken?: string | null;
+  oauthRefreshTokenExpiresAt?: Date | null;
+  oauthScope?: string | null;
+  oauthUserCode?: string | null;
+  oauthVerificationUri?: string | null;
+  oauthVerificationUriComplete?: string | null;
   id?: string | null;
   name?: string | null;
   providerApiKey?: string | null;
   providerBaseUrl?: string | null;
+  providerKind?: string | null;
   providerId?: string | null;
   providerModel?: string | null;
 };
@@ -19,7 +36,10 @@ export type OpenCodeConfig = {
   baseUrl: string;
   model: string;
   providerId: string;
+  providerKind: "codex" | "manual";
   providerName: string;
+  runtimeApiKey?: string;
+  runtimeBaseUrl?: string;
   selectedProviderId: string;
 };
 
@@ -76,19 +96,54 @@ export const normalizeOpenCodeModelForProvider = (model: string, providerId: str
   return `${providerId}/${trimmed}`;
 };
 
-export const resolveOpenCodeConfig = (input: {
+export const resolveOpenCodeConfig = async (input: {
   model?: string | null;
   provider: SavedOpenCodeProvider;
-}): OpenCodeConfig => {
+}): Promise<OpenCodeConfig> => {
   const providerId = trimToNull(input.provider.providerId);
-  const baseUrl = trimToNull(input.provider.providerBaseUrl);
   const model = trimToNull(input.model ?? input.provider.providerModel);
-  const apiKey = normalizeProviderApiKey(input.provider.providerApiKey);
   const selectedProviderId = trimToNull(input.provider.id);
+  const providerKind = isCodexProvider(input.provider) ? "codex" : "manual";
 
-  if (!providerId || !baseUrl || !model || !apiKey || !selectedProviderId) {
+  if (!providerId || !model || !selectedProviderId) {
     throw new Error(
-      "Selected provider is incomplete. Set Provider ID, API Base URL, Model, and API Key before starting a task.",
+      "Selected provider is incomplete. Set Provider ID and Model before starting a task.",
+    );
+  }
+
+  if (providerKind === "codex") {
+    const codexProviderId = OPENAI_CODEX_RESPONSES_PROVIDER_ID;
+    const apiKey = await ensureCodexAccessToken({
+      id: selectedProviderId,
+      oauthAccessToken: input.provider.oauthAccessToken ?? null,
+      oauthAccessTokenExpiresAt: input.provider.oauthAccessTokenExpiresAt ?? null,
+      oauthRefreshToken: input.provider.oauthRefreshToken ?? null,
+      oauthRefreshTokenExpiresAt: input.provider.oauthRefreshTokenExpiresAt ?? null,
+      oauthScope: input.provider.oauthScope ?? null,
+      providerKind: "codex",
+    });
+    const runtimeBaseUrl = CODEX_LOCAL_PROXY_BASE_URL;
+
+    return {
+      apiKey,
+      apiKeyEnvVar: CUSTOM_OPENCODE_API_KEY_ENV_VAR,
+      baseUrl: runtimeBaseUrl,
+      model: normalizeOpenCodeModelForProvider(model, codexProviderId),
+      providerId: codexProviderId,
+      providerKind,
+      providerName: trimToNull(input.provider.name) || codexProviderId,
+      runtimeApiKey: apiKey,
+      runtimeBaseUrl,
+      selectedProviderId,
+    };
+  }
+
+  const baseUrl = trimToNull(input.provider.providerBaseUrl);
+  const apiKey = normalizeProviderApiKey(input.provider.providerApiKey);
+
+  if (!baseUrl || !apiKey) {
+    throw new Error(
+      "Selected provider is incomplete. Set API Base URL and API Key before starting a task.",
     );
   }
 
@@ -104,6 +159,7 @@ export const resolveOpenCodeConfig = (input: {
     baseUrl: normalizeBaseUrl(baseUrl),
     model: normalizeOpenCodeModelForProvider(model, providerId),
     providerId,
+    providerKind,
     providerName: trimToNull(input.provider.name) || providerId,
     selectedProviderId,
   };

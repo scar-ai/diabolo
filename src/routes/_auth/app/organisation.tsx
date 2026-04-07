@@ -228,13 +228,17 @@ function OrganisationPage() {
       return [
         ...source,
         {
+          authStatus: "connected",
           canManage: true,
+          codexAuthenticatedAt: null,
+          codexAuthError: null,
           id: crypto.randomUUID(),
           isDefault: false,
           name: `Organisation provider ${source.length + 1}`,
           providerApiKey: "",
           providerBaseUrl: "https://api.openai.com/v1",
           providerId: "openai",
+          providerKind: "manual",
           providerModel: "",
           scope: "organisation",
         },

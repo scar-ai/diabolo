@@ -181,7 +181,7 @@ export namespace Project {
       }
 
       try {
-        return okAsync(
+        return fromPromise(
           resolveOpenCodeConfig({
             model,
             provider: resolvedProvider,

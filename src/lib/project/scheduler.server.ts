@@ -118,7 +118,7 @@ const processDueScheduledTasks = async () => {
         continue;
       }
 
-      const openCodeConfig = resolveOpenCodeConfig({ provider: openCodeProvider });
+      const openCodeConfig = await resolveOpenCodeConfig({ provider: openCodeProvider });
       const draft = await Sandbox.startTask(
         {
           envVars: serializeProjectEnvEntries(parseStoredProjectEnvEntries(project.envVars)),

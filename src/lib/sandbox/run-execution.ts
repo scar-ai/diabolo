@@ -14,6 +14,7 @@ import {
   updateTaskRecord,
 } from "@/lib/sandbox/store";
 import { SandboxWorkspace } from "@/lib/sandbox/workspace";
+import { buildSandboxGitExcludeCommand } from "@/lib/sandbox/workspace";
 import {
   isTaskAttachmentMetadata,
   resolveTaskAttachmentPath,
@@ -164,7 +165,7 @@ const runOpenCodeMessage = async (input: {
   llmProvider: NonNullable<Awaited<ReturnType<typeof findUserLlmProvider>>>;
   messagePrompt: string;
 }) => {
-  const openCode = resolveOpenCodeConfig({
+  const openCode = await resolveOpenCodeConfig({
     model: input.taskRecord?.opencodeModel?.trim() || null,
     provider: input.llmProvider,
   });
@@ -179,6 +180,15 @@ const runOpenCodeMessage = async (input: {
     envVarKeys: Object.keys(input.taskProjectEnvVars),
     sandboxId: input.prepared.sandbox.id,
   });
+  await runSandboxCommand(
+    input.prepared.sandbox,
+    input.taskId,
+    input.messageId,
+    buildSandboxGitExcludeCommand(),
+    input.prepared.sandboxPath,
+    undefined,
+    60,
+  );
   const response = await runSandboxCommand(
     input.prepared.sandbox,
     input.taskId,
@@ -186,13 +196,14 @@ const runOpenCodeMessage = async (input: {
     buildOpenCodeRunCommand(model, prompt, attachments),
     input.prepared.sandboxPath,
     buildOpenCodeEnvironment({
-      apiKey: openCode.apiKey,
+      apiKey: openCode.runtimeApiKey ?? openCode.apiKey,
       apiKeyEnvVar: openCode.apiKeyEnvVar,
-      baseUrl: openCode.baseUrl,
+      baseUrl: openCode.runtimeBaseUrl ?? openCode.baseUrl,
       defaultBranch: input.repo.defaultBranch,
       githubToken: input.githubAccessToken,
       model,
       providerId: openCode.providerId,
+      providerKind: openCode.providerKind,
       providerName: openCode.providerName,
       projectEnvVars: input.taskProjectEnvVars,
       repoFullName: input.repo.fullName,

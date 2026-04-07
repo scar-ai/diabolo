@@ -1,4 +1,5 @@
 import "@tanstack/react-start/server-only";
+import { runCodexChatCompletion } from "./codex";
 import {
   getOpenCodeChatCompletionsEndpoint,
   getProviderScopedModelId,
@@ -113,65 +114,84 @@ export const generateGitMetadata = async (
   const timeout = setTimeout(() => controller.abort(), GIT_METADATA_TIMEOUT_MS);
 
   try {
-    const response = await fetch(getOpenCodeChatCompletionsEndpoint(config), {
-      method: "POST",
-      signal: controller.signal,
-      headers: {
-        Authorization: `Bearer ${config.apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        messages: [
-          {
-            role: "system",
-            content: [
-              "You generate Git metadata for an automated coding task.",
-              "Return strict JSON only.",
-              "The JSON must include string fields: branchName, commitTitle, prTitle, prBody, prComment.",
-              "branchName must be lowercase and use only letters, numbers, slashes, and hyphens.",
-              "commitTitle must be a concise imperative git commit title under 72 characters.",
-              "prTitle must be concise and descriptive under 80 characters.",
-              "prBody must be valid markdown with a short summary and key changes.",
-              "prComment must be a custom PR thread comment in markdown, concise and specific to the request.",
-              "Do not mention that you are an AI or include code fences.",
-            ].join(" "),
-          },
-          {
-            role: "user",
-            content: [
-              `Repository: ${context.repoFullName}`,
-              `Base branch: ${context.baseBranch}`,
-              "",
-              "User request:",
-              context.userPrompt.trim(),
-              "",
-              "Diff summary:",
-              context.diffSummary.trim() || "No diff summary available.",
-              "",
-              "Changed files:",
-              context.changedFiles.trim() || "No changed files listed.",
-            ].join("\n"),
-          },
-        ],
-        model: getProviderScopedModelId(config.model, config.providerId),
-        temperature: 0.4,
-      }),
-    });
+    const payload = {
+      messages: [
+        {
+          role: "system",
+          content: [
+            "You generate Git metadata for an automated coding task.",
+            "Return strict JSON only.",
+            "The JSON must include string fields: branchName, commitTitle, prTitle, prBody, prComment.",
+            "branchName must be lowercase and use only letters, numbers, slashes, and hyphens.",
+            "commitTitle must be a concise imperative git commit title under 72 characters.",
+            "prTitle must be concise and descriptive under 80 characters.",
+            "prBody must be valid markdown with a short summary and key changes.",
+            "prComment must be a custom PR thread comment in markdown, concise and specific to the request.",
+            "Do not mention that you are an AI or include code fences.",
+          ].join(" "),
+        },
+        {
+          role: "user",
+          content: [
+            `Repository: ${context.repoFullName}`,
+            `Base branch: ${context.baseBranch}`,
+            "",
+            "User request:",
+            context.userPrompt.trim(),
+            "",
+            "Diff summary:",
+            context.diffSummary.trim() || "No diff summary available.",
+            "",
+            "Changed files:",
+            context.changedFiles.trim() || "No changed files listed.",
+          ].join("\n"),
+        },
+      ],
+      model: getProviderScopedModelId(config.model, config.providerId),
+      temperature: 0.4,
+    };
+    const data = (
+      config.providerKind === "codex"
+        ? await runCodexChatCompletion({
+            accessToken: config.apiKey,
+            model: getProviderScopedModelId(config.model, config.providerId),
+            payload,
+          })
+        : await fetch(getOpenCodeChatCompletionsEndpoint(config), {
+            method: "POST",
+            signal: controller.signal,
+            headers: {
+              Authorization: `Bearer ${config.apiKey}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(payload),
+          }).then(async (response) => {
+            if (!response.ok) {
+              return null;
+            }
 
-    if (!response.ok) {
-      return fallback;
-    }
-
-    const data = (await response.json()) as {
+            return (await response.json()) as {
+              choices?: Array<{
+                message?: {
+                  content?: string;
+                };
+              }>;
+            };
+          })
+    ) as {
       choices?: Array<{
         message?: {
           content?: string;
         };
       }>;
-    };
+    } | null;
+
+    if (!data) {
+      return fallback;
+    }
+
     const content = data.choices?.[0]?.message?.content;
     const parsed = content ? tryParseJsonObject(content) : null;
-
     if (!parsed) {
       return fallback;
     }

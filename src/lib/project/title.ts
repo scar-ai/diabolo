@@ -1,4 +1,5 @@
 import "@tanstack/react-start/server-only";
+import { runCodexChatCompletion } from "@/lib/opencode/codex";
 import {
   type OpenCodeConfig,
   getOpenCodeChatCompletionsEndpoint,
@@ -33,46 +34,65 @@ export const generateTaskTitle = async (prompt: string, openCodeConfig: OpenCode
     const timeout = setTimeout(() => controller.abort(), TASK_TITLE_TIMEOUT_MS);
 
     try {
-      const response = await fetch(getOpenCodeChatCompletionsEndpoint(config), {
-        method: "POST",
-        signal: controller.signal,
-        headers: {
-          Authorization: `Bearer ${config.apiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          messages: [
-            {
-              role: "system",
-              content: [
-                "You write short titles for coding work sessions.",
-                "Return only the title text, with no quotes or markdown.",
-                "Make it explicit and descriptive, based on the user's initial prompt.",
-                "Keep it under 48 characters and 2 to 6 words when possible.",
-                "Avoid vague filler like task, help, update, fix this, or miscellaneous.",
-              ].join(" "),
-            },
-            {
-              role: "user",
-              content: prompt.trim(),
-            },
-          ],
-          model: getProviderScopedModelId(config.model, config.providerId),
-          temperature: 0.3,
-        }),
-      });
+      const payload = {
+        messages: [
+          {
+            role: "system",
+            content: [
+              "You write short titles for coding work sessions.",
+              "Return only the title text, with no quotes or markdown.",
+              "Make it explicit and descriptive, based on the user's initial prompt.",
+              "Keep it under 48 characters and 2 to 6 words when possible.",
+              "Avoid vague filler like task, help, update, fix this, or miscellaneous.",
+            ].join(" "),
+          },
+          {
+            role: "user",
+            content: prompt.trim(),
+          },
+        ],
+        model: getProviderScopedModelId(config.model, config.providerId),
+        temperature: 0.3,
+      };
+      const data = (
+        config.providerKind === "codex"
+          ? await runCodexChatCompletion({
+              accessToken: config.apiKey,
+              model: getProviderScopedModelId(config.model, config.providerId),
+              payload,
+            })
+          : await fetch(getOpenCodeChatCompletionsEndpoint(config), {
+              method: "POST",
+              signal: controller.signal,
+              headers: {
+                Authorization: `Bearer ${config.apiKey}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify(payload),
+            }).then(async (response) => {
+              if (!response.ok) {
+                return null;
+              }
 
-      if (!response.ok) {
-        return fallbackTitle;
-      }
-
-      const data = (await response.json()) as {
+              return (await response.json()) as {
+                choices?: Array<{
+                  message?: {
+                    content?: string;
+                  };
+                }>;
+              };
+            })
+      ) as {
         choices?: Array<{
           message?: {
             content?: string;
           };
         }>;
-      };
+      } | null;
+
+      if (!data) {
+        return fallbackTitle;
+      }
 
       return (
         normalizeGeneratedTaskTitle(data.choices?.[0]?.message?.content || "") || fallbackTitle
