@@ -11,7 +11,7 @@ export const CODEX_LOCAL_PROXY_SCRIPT = String.raw`import http from "node:http";
 
 const port = Number(process.env.OPENCODE_CODEX_PROXY_PORT || "4312");
 const providerId = (process.env.OPENCODE_CODEX_PROVIDER_ID || "codex").trim() || "codex";
-const endpoint = "https://chatgpt.com/backend-api/responses";
+const endpoint = "https://chatgpt.com/backend-api/codex/responses";
 
 const readJson = async (response) => {
   const contentType = response.headers.get("content-type") || "";
@@ -96,29 +96,124 @@ const normalizeRole = (role) => {
   return "user";
 };
 
-const buildResponsesBody = (payload, model) => {
-  const input = (payload.messages ?? [])
-    .map((message) => {
-      const text = extractMessageText(message);
+const normalizeToolCallId = (value) => {
+  const trimmed = typeof value === "string" ? value.trim() : "";
+  return trimmed || "call_" + crypto.randomUUID();
+};
 
-      if (!text) {
-        return null;
+const normalizeToolChoice = (toolChoice) => {
+  if (toolChoice === "auto" || toolChoice === "none" || toolChoice === "required") {
+    return toolChoice;
+  }
+
+  const functionName =
+    toolChoice?.type === "function" && typeof toolChoice?.function?.name === "string"
+      ? toolChoice.function.name.trim()
+      : "";
+
+  return functionName ? { name: functionName, type: "function" } : undefined;
+};
+
+const mapTools = (tools) =>
+  (tools ?? [])
+    .flatMap((tool) => {
+      const name = typeof tool?.function?.name === "string" ? tool.function.name.trim() : "";
+
+      if (tool?.type !== "function" || !name) {
+        return [];
       }
 
-      return {
-        type: "message",
-        role: normalizeRole(message.role),
-        content: message?.role === "system" ? text : [{ type: "input_text", text }],
-      };
+      return [
+        {
+          description:
+            typeof tool.function?.description === "string" && tool.function.description.trim()
+              ? tool.function.description.trim()
+              : undefined,
+          name,
+          parameters:
+            tool.function?.parameters && typeof tool.function.parameters === "object"
+              ? tool.function.parameters
+              : undefined,
+          strict: typeof tool.function?.strict === "boolean" ? tool.function.strict : undefined,
+          type: "function",
+        },
+      ];
     })
     .filter(Boolean);
 
+const buildResponsesBody = (payload, model) => {
+  const instructions =
+    (payload.messages ?? [])
+      .filter((message) => message?.role === "system")
+      .map((message) => extractMessageText(message))
+      .filter(Boolean)
+      .join("\n\n") || "You are a helpful assistant.";
+
+  const input = (payload.messages ?? []).flatMap((message) => {
+    const text = extractMessageText(message);
+
+    if (message?.role === "tool") {
+      const callId =
+        typeof message.tool_call_id === "string" ? normalizeToolCallId(message.tool_call_id) : "";
+
+      return callId
+        ? [
+            {
+              type: "function_call_output",
+              call_id: callId,
+              output: text || "",
+            },
+          ]
+        : [];
+    }
+
+    const output = [];
+
+    if (text) {
+      output.push({
+        type: "message",
+        role: normalizeRole(message.role),
+        content: message?.role === "system" ? text : [{ type: "input_text", text }],
+      });
+    }
+
+    if (message?.role === "assistant" && Array.isArray(message.tool_calls)) {
+      for (const toolCall of message.tool_calls) {
+        const name = typeof toolCall?.function?.name === "string" ? toolCall.function.name.trim() : "";
+        const callId = typeof toolCall?.id === "string" ? normalizeToolCallId(toolCall.id) : "";
+
+        if (!name || !callId || toolCall?.type !== "function") {
+          continue;
+        }
+
+        output.push({
+          type: "function_call",
+          arguments:
+            typeof toolCall.function?.arguments === "string" && toolCall.function.arguments.trim()
+              ? toolCall.function.arguments
+              : "{}",
+          call_id: callId,
+          name,
+        });
+      }
+    }
+
+    return output;
+  });
+
+  const tools = mapTools(payload.tools);
+
   return {
+    instructions,
     input,
     model,
+    parallel_tool_calls:
+      typeof payload.parallel_tool_calls === "boolean" ? payload.parallel_tool_calls : undefined,
     store: false,
-    stream: false,
+    stream: true,
     temperature: payload.temperature,
+    tool_choice: normalizeToolChoice(payload.tool_choice),
+    tools: tools.length > 0 ? tools : undefined,
   };
 };
 
@@ -171,7 +266,163 @@ const extractOutputText = (payload) => {
     .trim();
 };
 
-const createChatCompletion = ({ content, id, model }) => ({
+const extractToolCalls = (payload) => {
+  if (!payload || typeof payload !== "object" || !Array.isArray(payload.output)) {
+    return [];
+  }
+
+  return payload.output.flatMap((item) => {
+    if (!item || typeof item !== "object") {
+      return [];
+    }
+
+    if (
+      item.type !== "function_call" ||
+      typeof item.name !== "string" ||
+      typeof item.call_id !== "string"
+    ) {
+      return [];
+    }
+
+    return [
+      {
+        id: item.call_id,
+        type: "function",
+        function: {
+          name: item.name,
+          arguments:
+            typeof item.arguments === "string" && item.arguments.trim() ? item.arguments : "{}",
+        },
+      },
+    ];
+  });
+};
+
+const getFinishReason = (payload) => {
+  if ((payload.toolCalls ?? []).length > 0) {
+    return "tool_calls";
+  }
+
+  return payload.content ? "stop" : "length";
+};
+
+const parseSsePayload = async (response) => {
+  const reader = response.body?.getReader();
+  const decoder = new TextDecoder();
+  let dataBuffer = "";
+  let lineBuffer = "";
+  let completedResponse = null;
+  const outputItems = new Map();
+  let responseId = null;
+  const outputTextParts = [];
+  let sawDone = false;
+
+  const flushEvent = () => {
+    const trimmed = dataBuffer.trim();
+    dataBuffer = "";
+
+    if (!trimmed || trimmed === "[DONE]") {
+      return;
+    }
+
+    try {
+      const event = JSON.parse(trimmed);
+      const type = typeof event?.type === "string" ? event.type : "";
+
+      if (!responseId && typeof event?.response_id === "string") {
+        responseId = event.response_id;
+      }
+
+      if (
+        (type === "response.output_text.delta" || type === "response.output_text.added") &&
+        typeof event?.delta === "string"
+      ) {
+        outputTextParts.push(event.delta);
+      }
+
+      if (type === "response.output_item.added" && event?.item && typeof event.item === "object") {
+        const itemId = typeof event.item?.id === "string" ? event.item.id : null;
+
+        if (itemId) {
+          outputItems.set(itemId, { ...event.item });
+        }
+      }
+
+      if (type === "response.output_item.done" && event?.item && typeof event.item === "object") {
+        const itemId = typeof event.item?.id === "string" ? event.item.id : null;
+
+        if (itemId) {
+          outputItems.set(itemId, { ...(outputItems.get(itemId) ?? {}), ...event.item });
+        }
+      }
+
+      if (type === "response.completed" && event?.response && typeof event.response === "object") {
+        completedResponse = event.response;
+        if (
+          outputItems.size > 0 &&
+          (!Array.isArray(completedResponse?.output) || completedResponse.output.length === 0)
+        ) {
+          completedResponse.output = Array.from(outputItems.values());
+        }
+        if (typeof completedResponse?.id === "string") {
+          responseId = completedResponse.id;
+        }
+        sawDone = true;
+      }
+    } catch {}
+  };
+
+  const processTextChunk = (text) => {
+    lineBuffer += text;
+
+    while (true) {
+      const newlineIndex = lineBuffer.indexOf("\n");
+
+      if (newlineIndex === -1) {
+        break;
+      }
+
+      const line = lineBuffer.slice(0, newlineIndex).replace(/\r$/, "");
+      lineBuffer = lineBuffer.slice(newlineIndex + 1);
+
+      if (line.startsWith("data:")) {
+        dataBuffer += line.slice(5).trim() + "\n";
+        continue;
+      }
+
+      if (!line.trim()) {
+        flushEvent();
+      }
+    }
+  };
+
+  if (reader) {
+    while (!sawDone) {
+      const { done, value } = await reader.read();
+
+      if (done) {
+        break;
+      }
+
+      processTextChunk(decoder.decode(value, { stream: true }));
+    }
+
+    processTextChunk(decoder.decode());
+    flushEvent();
+    await reader.cancel().catch(() => {});
+  } else {
+    processTextChunk(await response.text());
+    flushEvent();
+  }
+
+  if (completedResponse) {
+    return completedResponse;
+  }
+
+  return outputTextParts.length > 0 ? { id: responseId, output_text: outputTextParts.join("") } : null;
+};
+
+const createChatCompletion = ({ content, id, model, toolCalls }) => ({
   id: typeof id === "string" && id ? id : "chatcmpl-" + crypto.randomUUID(),
   object: "chat.completion",
   created: Math.floor(Date.now() / 1000),
@@ -179,10 +430,11 @@ const createChatCompletion = ({ content, id, model }) => ({
   choices: [
     {
       index: 0,
-      finish_reason: "stop",
+      finish_reason: getFinishReason({ content, toolCalls }),
       message: {
         role: "assistant",
-        content,
+        content: content || null,
+        ...(toolCalls?.length ? { tool_calls: toolCalls } : {}),
       },
     },
   ],
@@ -214,9 +466,71 @@ const sendStream = (response, payload) => {
             index: 0,
             delta: {
               role: "assistant",
-              content: payload.content,
             },
-            finish_reason: "stop",
+          },
+        ],
+      }) +
+      "\n\n",
+  );
+  if (payload.content) {
+    response.write(
+      "data: " +
+        JSON.stringify({
+          id,
+          object: "chat.completion.chunk",
+          created,
+          model: payload.model,
+          choices: [
+            {
+              index: 0,
+              delta: {
+                content: payload.content,
+              },
+            },
+          ],
+        }) +
+        "\n\n",
+    );
+  }
+  for (const [index, toolCall] of (payload.toolCalls ?? []).entries()) {
+    response.write(
+      "data: " +
+        JSON.stringify({
+          id,
+          object: "chat.completion.chunk",
+          created,
+          model: payload.model,
+          choices: [
+            {
+              index: 0,
+              delta: {
+                tool_calls: [
+                  {
+                    index,
+                    id: toolCall.id,
+                    type: "function",
+                    function: toolCall.function,
+                  },
+                ],
+              },
+            },
+          ],
+        }) +
+        "\n\n",
+    );
+  }
+  response.write(
+    "data: " +
+      JSON.stringify({
+        id,
+        object: "chat.completion.chunk",
+        created,
+        model: payload.model,
+        choices: [
+          {
+            index: 0,
+            delta: {},
+            finish_reason: getFinishReason(payload),
           },
         ],
       }) +
@@ -277,10 +591,11 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
-    const upstreamPayload = await upstream.json();
+    const upstreamPayload = await parseSsePayload(upstream);
     const content = extractOutputText(upstreamPayload);
+    const toolCalls = extractToolCalls(upstreamPayload);
 
-    if (!content) {
+    if (!content && toolCalls.length === 0) {
       sendJson(response, 502, { error: "Codex returned an empty response." });
       return;
     }
@@ -290,6 +605,7 @@ const server = http.createServer(async (request, response) => {
         content,
         id: upstreamPayload.id,
         model,
+        toolCalls,
       });
       return;
     }
@@ -301,6 +617,7 @@ const server = http.createServer(async (request, response) => {
         content,
         id: upstreamPayload.id,
         model,
+        toolCalls,
       }),
     );
   } catch (error) {
