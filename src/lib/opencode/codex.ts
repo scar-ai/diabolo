@@ -1,7 +1,8 @@
 import "@tanstack/react-start/server-only";
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import * as http from "node:http";
 
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 
 import { env } from "@/env/server";
 import { db } from "@/lib/db";
@@ -27,6 +28,22 @@ type CodexProviderAccessRecord = Pick<
   | "oauthRefreshTokenExpiresAt"
   | "oauthScope"
   | "providerKind"
+>;
+type CodexSharedAuthState = Pick<
+  CodexProviderRecord,
+  | "oauthAccessToken"
+  | "oauthAccessTokenExpiresAt"
+  | "oauthAuthenticatedAt"
+  | "oauthDeviceCode"
+  | "oauthDeviceCodeExpiresAt"
+  | "oauthError"
+  | "oauthPollingIntervalSeconds"
+  | "oauthRefreshToken"
+  | "oauthRefreshTokenExpiresAt"
+  | "oauthScope"
+  | "oauthUserCode"
+  | "oauthVerificationUri"
+  | "oauthVerificationUriComplete"
 >;
 
 type OpenAiChatCompletionRequest = {
@@ -777,6 +794,104 @@ const createTokenRequestBody = (values: Record<string, string>) => {
   return body;
 };
 
+const hasSharedCodexAuthState = (provider: Partial<CodexSharedAuthState>) =>
+  Boolean(
+    provider.oauthAccessToken ||
+    provider.oauthRefreshToken ||
+    provider.oauthDeviceCode ||
+    provider.oauthUserCode ||
+    provider.oauthVerificationUri ||
+    provider.oauthVerificationUriComplete ||
+    provider.oauthAuthenticatedAt ||
+    provider.oauthError,
+  );
+
+const listUserCodexProviders = async (userId: string) =>
+  db.query.userLlmProvider.findMany({
+    where: and(
+      eq(userLlmProvider.userId, userId),
+      eq(userLlmProvider.providerKind, CODEX_PROVIDER_KIND),
+    ),
+  });
+
+const pickSharedCodexAuthState = (
+  providers: CodexProviderRecord[],
+  preferredProviderId?: string,
+): CodexSharedAuthState | null => {
+  const sortedProviders = [...providers].sort((left, right) => {
+    const leftScore =
+      (left.id === preferredProviderId ? 8 : 0) +
+      (left.oauthRefreshToken ? 4 : 0) +
+      (left.oauthAccessToken ? 2 : 0) +
+      (left.oauthDeviceCode ? 1 : 0);
+    const rightScore =
+      (right.id === preferredProviderId ? 8 : 0) +
+      (right.oauthRefreshToken ? 4 : 0) +
+      (right.oauthAccessToken ? 2 : 0) +
+      (right.oauthDeviceCode ? 1 : 0);
+
+    if (leftScore !== rightScore) {
+      return rightScore - leftScore;
+    }
+
+    const leftAuthenticatedAt = left.oauthAuthenticatedAt?.getTime() ?? 0;
+    const rightAuthenticatedAt = right.oauthAuthenticatedAt?.getTime() ?? 0;
+
+    if (leftAuthenticatedAt !== rightAuthenticatedAt) {
+      return rightAuthenticatedAt - leftAuthenticatedAt;
+    }
+
+    const leftUpdatedAt = left.updatedAt.getTime();
+    const rightUpdatedAt = right.updatedAt.getTime();
+    return rightUpdatedAt - leftUpdatedAt;
+  });
+
+  const provider = sortedProviders.find(hasSharedCodexAuthState);
+
+  if (!provider) {
+    return null;
+  }
+
+  return {
+    oauthAccessToken: provider.oauthAccessToken,
+    oauthAccessTokenExpiresAt: provider.oauthAccessTokenExpiresAt,
+    oauthAuthenticatedAt: provider.oauthAuthenticatedAt,
+    oauthDeviceCode: provider.oauthDeviceCode,
+    oauthDeviceCodeExpiresAt: provider.oauthDeviceCodeExpiresAt,
+    oauthError: provider.oauthError,
+    oauthPollingIntervalSeconds: provider.oauthPollingIntervalSeconds,
+    oauthRefreshToken: provider.oauthRefreshToken,
+    oauthRefreshTokenExpiresAt: provider.oauthRefreshTokenExpiresAt,
+    oauthScope: provider.oauthScope,
+    oauthUserCode: provider.oauthUserCode,
+    oauthVerificationUri: provider.oauthVerificationUri,
+    oauthVerificationUriComplete: provider.oauthVerificationUriComplete,
+  };
+};
+
+const updateSharedCodexAuthState = async (
+  userId: string,
+  values: Partial<CodexSharedAuthState>,
+) => {
+  await db
+    .update(userLlmProvider)
+    .set(values)
+    .where(
+      and(
+        eq(userLlmProvider.userId, userId),
+        eq(userLlmProvider.providerKind, CODEX_PROVIDER_KIND),
+      ),
+    );
+};
+
+export const getUserSharedCodexAuthState = async (
+  userId: string,
+  preferredProviderId?: string,
+): Promise<CodexSharedAuthState | null> => {
+  const providers = await listUserCodexProviders(userId);
+  return pickSharedCodexAuthState(providers, preferredProviderId);
+};
+
 export const startCodexLogin = async (provider: CodexProviderRecord) => {
   const codeVerifier = makePkceVerifier();
   const codeChallenge = makePkceChallenge(codeVerifier);
@@ -794,24 +909,25 @@ export const startCodexLogin = async (provider: CodexProviderRecord) => {
   authorizeUrl.searchParams.set("id_token_add_organizations", "true");
   authorizeUrl.searchParams.set("codex_cli_simplified_flow", "true");
 
-  await db
-    .update(userLlmProvider)
-    .set({
-      oauthAccessToken: null,
-      oauthAccessTokenExpiresAt: null,
-      oauthAuthenticatedAt: null,
-      oauthDeviceCode: state,
-      oauthDeviceCodeExpiresAt: expiresAt,
-      oauthError: null,
-      oauthPollingIntervalSeconds: null,
-      oauthRefreshToken: null,
-      oauthRefreshTokenExpiresAt: null,
-      oauthScope: CODEX_SCOPE,
-      oauthUserCode: codeVerifier,
-      oauthVerificationUri: CODEX_LOGIN_REDIRECT_URI,
-      oauthVerificationUriComplete: authorizeUrl.toString(),
-    })
-    .where(eq(userLlmProvider.id, provider.id));
+  if (!provider.userId) {
+    throw new Error("Codex login requires a personal provider.");
+  }
+
+  await updateSharedCodexAuthState(provider.userId, {
+    oauthAccessToken: null,
+    oauthAccessTokenExpiresAt: null,
+    oauthAuthenticatedAt: null,
+    oauthDeviceCode: state,
+    oauthDeviceCodeExpiresAt: expiresAt,
+    oauthError: null,
+    oauthPollingIntervalSeconds: null,
+    oauthRefreshToken: null,
+    oauthRefreshTokenExpiresAt: null,
+    oauthScope: CODEX_SCOPE,
+    oauthUserCode: codeVerifier,
+    oauthVerificationUri: CODEX_LOGIN_REDIRECT_URI,
+    oauthVerificationUriComplete: authorizeUrl.toString(),
+  });
 
   return {
     expiresAt: expiresAt.toISOString(),
@@ -878,6 +994,10 @@ const parseCallbackInput = (value: string) => {
 };
 
 export const completeCodexLogin = async (provider: CodexProviderRecord, callbackUrl: string) => {
+  if (!provider.userId) {
+    throw new Error("Codex login requires a personal provider.");
+  }
+
   if (!provider.oauthDeviceCode || !provider.oauthUserCode || !provider.oauthDeviceCodeExpiresAt) {
     throw new Error("Start Codex login before completing it.");
   }
@@ -927,12 +1047,9 @@ export const completeCodexLogin = async (provider: CodexProviderRecord, callback
 
   if (!response.ok) {
     const message = await getResponseErrorMessage(response);
-    await db
-      .update(userLlmProvider)
-      .set({
-        oauthError: message,
-      })
-      .where(eq(userLlmProvider.id, provider.id));
+    await updateSharedCodexAuthState(provider.userId, {
+      oauthError: message,
+    });
     throw new Error(message);
   }
 
@@ -947,23 +1064,20 @@ export const completeCodexLogin = async (provider: CodexProviderRecord, callback
       : null;
   const authenticatedAt = new Date();
 
-  await db
-    .update(userLlmProvider)
-    .set({
-      oauthAccessToken: payload.access_token,
-      oauthAccessTokenExpiresAt: accessTokenExpiresAt,
-      oauthAuthenticatedAt: authenticatedAt,
-      oauthDeviceCode: null,
-      oauthDeviceCodeExpiresAt: null,
-      oauthError: null,
-      oauthRefreshToken: payload.refresh_token,
-      oauthRefreshTokenExpiresAt: refreshTokenExpiresAt,
-      oauthScope: typeof payload.scope === "string" ? payload.scope : CODEX_SCOPE,
-      oauthUserCode: null,
-      oauthVerificationUri: null,
-      oauthVerificationUriComplete: null,
-    })
-    .where(eq(userLlmProvider.id, provider.id));
+  await updateSharedCodexAuthState(provider.userId, {
+    oauthAccessToken: payload.access_token,
+    oauthAccessTokenExpiresAt: accessTokenExpiresAt,
+    oauthAuthenticatedAt: authenticatedAt,
+    oauthDeviceCode: null,
+    oauthDeviceCodeExpiresAt: null,
+    oauthError: null,
+    oauthRefreshToken: payload.refresh_token,
+    oauthRefreshTokenExpiresAt: refreshTokenExpiresAt,
+    oauthScope: typeof payload.scope === "string" ? payload.scope : CODEX_SCOPE,
+    oauthUserCode: null,
+    oauthVerificationUri: null,
+    oauthVerificationUriComplete: null,
+  });
 
   return {
     accessTokenExpiresAt: accessTokenExpiresAt.toISOString(),
@@ -973,23 +1087,198 @@ export const completeCodexLogin = async (provider: CodexProviderRecord, callback
 };
 
 export const disconnectCodexProvider = async (providerId: string) => {
-  await db
-    .update(userLlmProvider)
-    .set({
-      oauthAccessToken: null,
-      oauthAccessTokenExpiresAt: null,
-      oauthAuthenticatedAt: null,
-      oauthDeviceCode: null,
-      oauthDeviceCodeExpiresAt: null,
-      oauthError: null,
-      oauthRefreshToken: null,
-      oauthRefreshTokenExpiresAt: null,
-      oauthScope: null,
-      oauthUserCode: null,
-      oauthVerificationUri: null,
-      oauthVerificationUriComplete: null,
-    })
-    .where(eq(userLlmProvider.id, providerId));
+  const provider = await db.query.userLlmProvider.findFirst({
+    where: eq(userLlmProvider.id, providerId),
+  });
+
+  if (!provider?.userId || provider.providerKind !== CODEX_PROVIDER_KIND) {
+    return;
+  }
+
+  await updateSharedCodexAuthState(provider.userId, {
+    oauthAccessToken: null,
+    oauthAccessTokenExpiresAt: null,
+    oauthAuthenticatedAt: null,
+    oauthDeviceCode: null,
+    oauthDeviceCodeExpiresAt: null,
+    oauthError: null,
+    oauthRefreshToken: null,
+    oauthRefreshTokenExpiresAt: null,
+    oauthScope: null,
+    oauthUserCode: null,
+    oauthVerificationUri: null,
+    oauthVerificationUriComplete: null,
+  });
+};
+
+const callbackPageShell = (head: string, body: string) => `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+  ${head}
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { height: 100%; }
+    body {
+      min-height: 100%;
+      background: #151515;
+      color: rgba(255,255,255,0.936);
+      font-family: "DM Sans", system-ui, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+    .card {
+      width: 100%;
+      max-width: 440px;
+      background: #1c1c1c;
+      border: 1px solid #282828;
+      border-radius: 16px;
+      padding: 40px 36px;
+      text-align: center;
+    }
+    .icon-wrap {
+      width: 56px;
+      height: 56px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 20px;
+    }
+    h1 { font-size: 20px; font-weight: 600; letter-spacing: -0.01em; margin-bottom: 10px; }
+    p { font-size: 14px; color: rgba(255,255,255,0.62); line-height: 1.6; }
+    .divider { height: 1px; background: #282828; margin: 24px 0; }
+    a {
+      color: #9dbefe;
+      text-decoration: none;
+      font-weight: 500;
+      font-size: 14px;
+    }
+    a:hover { text-decoration: underline; }
+    .wordmark {
+      font-size: 13px;
+      color: rgba(255,255,255,0.3);
+      margin-top: 28px;
+      letter-spacing: 0.02em;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    ${body}
+  </div>
+  <p class="wordmark">diabolo</p>
+</body>
+</html>`;
+
+const callbackSuccessHtml = (appUrl: string) =>
+  callbackPageShell(
+    `<title>Codex Connected</title>`,
+    `<div class="icon-wrap" style="background:rgba(18,201,5,0.12)">
+      <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#12c905" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M20 6 9 17l-5-5"/>
+      </svg>
+    </div>
+    <h1>Connected!</h1>
+    <p>Your Codex provider is now connected.<br>Redirecting you back to the app&hellip;</p>
+    <div class="divider"></div>
+    <a href="${appUrl}/app/settings" id="link">Go to Settings</a>
+    <script>
+      var t = 3;
+      var link = document.getElementById('link');
+      var timer = setInterval(function() {
+        t--;
+        if (t <= 0) { clearInterval(timer); location.href = '${appUrl}/app/settings'; }
+        else { link.textContent = 'Go to Settings (' + t + ')'; }
+      }, 1000);
+      link.textContent = 'Go to Settings (' + t + ')';
+    </script>`,
+  );
+
+const callbackErrorHtml = (message: string, appUrl: string) =>
+  callbackPageShell(
+    `<title>Codex Login Failed</title>`,
+    `<div class="icon-wrap" style="background:rgba(252,83,58,0.12)">
+      <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#fc533a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M18 6 6 18M6 6l12 12"/>
+      </svg>
+    </div>
+    <h1>Login failed</h1>
+    <p>${message.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</p>
+    <div class="divider"></div>
+    <a href="${appUrl}/app/settings">Return to Settings</a>`,
+  );
+
+const activeCallbackServers = new Map<string, http.Server>();
+
+export const startCodexCallbackServer = (providerId: string): Promise<boolean> => {
+  return new Promise((resolve) => {
+    const existing = activeCallbackServers.get(providerId);
+
+    if (existing) {
+      existing.close();
+      activeCallbackServers.delete(providerId);
+    }
+
+    const appUrl = env.VITE_BASE_URL.replace(/\/$/, "");
+
+    const server = http.createServer(async (req, res) => {
+      try {
+        const url = new URL(req.url ?? "/", "http://localhost:1455");
+
+        if (url.pathname !== "/auth/callback") {
+          res.writeHead(404);
+          res.end("Not found");
+          return;
+        }
+
+        const callbackUrl = `http://localhost:1455${req.url}`;
+
+        server.close();
+        activeCallbackServers.delete(providerId);
+
+        const provider = await db.query.userLlmProvider.findFirst({
+          where: eq(userLlmProvider.id, providerId),
+        });
+
+        if (!provider) {
+          res.writeHead(400, { "Content-Type": "text/html; charset=utf-8" });
+          res.end(callbackErrorHtml("Provider not found.", appUrl));
+          return;
+        }
+
+        await completeCodexLogin(provider, callbackUrl);
+
+        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+        res.end(callbackSuccessHtml(appUrl));
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Unknown error";
+        res.writeHead(400, { "Content-Type": "text/html; charset=utf-8" });
+        res.end(callbackErrorHtml(message, appUrl));
+      }
+    });
+
+    server.listen(1455, "127.0.0.1", () => {
+      activeCallbackServers.set(providerId, server);
+      setTimeout(() => {
+        if (activeCallbackServers.get(providerId) === server) {
+          server.close();
+          activeCallbackServers.delete(providerId);
+        }
+      }, CODEX_LOGIN_EXPIRY_MS + 5_000);
+      resolve(true);
+    });
+
+    server.on("error", () => {
+      resolve(false);
+    });
+  });
 };
 
 export const ensureCodexAccessToken = async (provider: CodexProviderAccessRecord) => {
@@ -997,16 +1286,27 @@ export const ensureCodexAccessToken = async (provider: CodexProviderAccessRecord
     throw new Error("Provider is not a Codex provider.");
   }
 
-  const accessTokenStillValid =
-    provider.oauthAccessToken &&
-    provider.oauthAccessTokenExpiresAt &&
-    provider.oauthAccessTokenExpiresAt.getTime() > Date.now() + ACCESS_TOKEN_REFRESH_BUFFER_MS;
+  const fullProvider = await db.query.userLlmProvider.findFirst({
+    where: eq(userLlmProvider.id, provider.id),
+  });
 
-  if (accessTokenStillValid && provider.oauthAccessToken) {
-    return provider.oauthAccessToken;
+  if (!fullProvider?.userId || fullProvider.providerKind !== CODEX_PROVIDER_KIND) {
+    throw new Error("Codex provider not found.");
   }
 
-  if (!provider.oauthRefreshToken) {
+  const sharedState =
+    (await getUserSharedCodexAuthState(fullProvider.userId, provider.id)) ?? fullProvider;
+
+  const accessTokenStillValid =
+    sharedState.oauthAccessToken &&
+    sharedState.oauthAccessTokenExpiresAt &&
+    sharedState.oauthAccessTokenExpiresAt.getTime() > Date.now() + ACCESS_TOKEN_REFRESH_BUFFER_MS;
+
+  if (accessTokenStillValid && sharedState.oauthAccessToken) {
+    return sharedState.oauthAccessToken;
+  }
+
+  if (!sharedState.oauthRefreshToken) {
     throw new Error("Connect your Codex provider before starting a task.");
   }
 
@@ -1018,22 +1318,19 @@ export const ensureCodexAccessToken = async (provider: CodexProviderAccessRecord
     body: createTokenRequestBody({
       client_id: CODEX_CLIENT_ID,
       grant_type: "refresh_token",
-      refresh_token: provider.oauthRefreshToken,
+      refresh_token: sharedState.oauthRefreshToken,
     }),
   });
 
   if (!response.ok) {
     const message = await getResponseErrorMessage(response);
 
-    await db
-      .update(userLlmProvider)
-      .set({
-        oauthAccessToken: null,
-        oauthAccessTokenExpiresAt: null,
-        oauthAuthenticatedAt: null,
-        oauthError: message,
-      })
-      .where(eq(userLlmProvider.id, provider.id));
+    await updateSharedCodexAuthState(fullProvider.userId, {
+      oauthAccessToken: null,
+      oauthAccessTokenExpiresAt: null,
+      oauthAuthenticatedAt: null,
+      oauthError: message,
+    });
 
     throw new Error("Codex login expired. Reconnect this provider in Settings.");
   }
@@ -1054,20 +1351,17 @@ export const ensureCodexAccessToken = async (provider: CodexProviderAccessRecord
   const refreshTokenExpiresAt =
     typeof payload.refresh_token_expires_in === "number"
       ? new Date(Date.now() + payload.refresh_token_expires_in * 1000)
-      : provider.oauthRefreshTokenExpiresAt;
+      : sharedState.oauthRefreshTokenExpiresAt;
 
-  await db
-    .update(userLlmProvider)
-    .set({
-      oauthAccessToken: payload.access_token,
-      oauthAccessTokenExpiresAt: accessTokenExpiresAt,
-      oauthAuthenticatedAt: new Date(),
-      oauthError: null,
-      oauthRefreshToken: payload.refresh_token ?? provider.oauthRefreshToken,
-      oauthRefreshTokenExpiresAt: refreshTokenExpiresAt,
-      oauthScope: payload.scope ?? provider.oauthScope,
-    })
-    .where(eq(userLlmProvider.id, provider.id));
+  await updateSharedCodexAuthState(fullProvider.userId, {
+    oauthAccessToken: payload.access_token,
+    oauthAccessTokenExpiresAt: accessTokenExpiresAt,
+    oauthAuthenticatedAt: new Date(),
+    oauthError: null,
+    oauthRefreshToken: payload.refresh_token ?? sharedState.oauthRefreshToken,
+    oauthRefreshTokenExpiresAt: refreshTokenExpiresAt,
+    oauthScope: payload.scope ?? sharedState.oauthScope,
+  });
 
   return payload.access_token;
 };

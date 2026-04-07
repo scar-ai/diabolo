@@ -54,6 +54,61 @@ export const Route = createFileRoute("/_auth/app/organisation")({
   component: OrganisationPage,
 });
 
+type OrganisationProviderDraft = {
+  authStatus?: "connected" | "disconnected" | "pending";
+  canManage?: boolean;
+  codexAuthenticatedAt?: string | null;
+  codexAuthError?: string | null;
+  id: string;
+  isDefault: boolean;
+  name: string;
+  providerApiKey: string;
+  providerBaseUrl: string;
+  providerId: string;
+  providerKind: "codex" | "manual";
+  providerModel: string;
+  scope: "organisation";
+};
+
+type OrganisationProviderSaveInput = {
+  authStatus?: "connected" | "disconnected" | "pending";
+  codexAuthenticatedAt?: string | null;
+  codexAuthError?: string | null;
+  id: string;
+  isDefault: boolean;
+  name: string;
+  providerApiKey: string;
+  providerBaseUrl: string;
+  providerId: string;
+  providerKind: "codex" | "manual";
+  providerModel: string;
+  scope: "organisation";
+};
+
+const toOrganisationProviderSaveInput = (
+  provider: OrganisationProviderDraft,
+): OrganisationProviderSaveInput => ({
+  authStatus: provider.authStatus,
+  codexAuthenticatedAt: provider.codexAuthenticatedAt ?? null,
+  codexAuthError: provider.codexAuthError ?? null,
+  id: provider.id,
+  isDefault: provider.isDefault,
+  name: provider.name,
+  providerApiKey: provider.providerApiKey,
+  providerBaseUrl: provider.providerBaseUrl,
+  providerId: provider.providerId,
+  providerKind: provider.providerKind,
+  providerModel: provider.providerModel,
+  scope: "organisation" as const,
+});
+
+const toSerializableOrganisationProviders = (
+  providers: OrganisationProviderDraft[],
+): OrganisationProviderSaveInput[] =>
+  JSON.parse(
+    JSON.stringify(providers.map(toOrganisationProviderSaveInput)),
+  ) as OrganisationProviderSaveInput[];
+
 function OrganisationPage() {
   const { user } = Route.useRouteContext();
   const queryClient = useQueryClient();
@@ -79,13 +134,13 @@ function OrganisationPage() {
   const projectInvites = projectInvitesQuery.data ?? [];
   const organisationProviders = (providersQuery.data ?? []).filter(
     (provider) => provider.scope === "organisation",
-  );
+  ) as OrganisationProviderDraft[];
   const isProvidersLoading = providersQuery.isPending && !providersQuery.isFetched;
 
   const [createOrgName, setCreateOrgName] = useState("");
   const [inviteUsername, setInviteUsername] = useState("");
-  const [draftProviders, setDraftProviders] = useState<typeof organisationProviders | null>(null);
-  const providerDrafts = draftProviders ?? organisationProviders;
+  const [draftProviders, setDraftProviders] = useState<OrganisationProviderDraft[] | null>(null);
+  const providerDrafts = (draftProviders ?? organisationProviders) as OrganisationProviderDraft[];
 
   const createOrgMutation = useMutation({
     mutationFn: () => createOrg({ data: { name: createOrgName.trim() } }),
@@ -195,10 +250,7 @@ function OrganisationPage() {
     mutationFn: () =>
       saveProviders({
         data: {
-          providers: providerDrafts.map((provider) => ({
-            ...provider,
-            scope: "organisation" as const,
-          })),
+          providers: toSerializableOrganisationProviders(providerDrafts),
         },
       }),
     onSuccess: async () => {
@@ -215,7 +267,7 @@ function OrganisationPage() {
 
   const updateProvider = (providerId: string, patch: Partial<(typeof providerDrafts)[number]>) => {
     setDraftProviders((current) => {
-      const source = current ?? organisationProviders;
+      const source = (current ?? organisationProviders) as OrganisationProviderDraft[];
       return source.map((provider) =>
         provider.id === providerId ? { ...provider, ...patch } : provider,
       );
@@ -224,7 +276,7 @@ function OrganisationPage() {
 
   const addProvider = () => {
     setDraftProviders((current) => {
-      const source = current ?? organisationProviders;
+      const source = (current ?? organisationProviders) as OrganisationProviderDraft[];
       return [
         ...source,
         {
@@ -248,7 +300,7 @@ function OrganisationPage() {
 
   const removeProvider = (providerId: string) => {
     setDraftProviders((current) => {
-      const source = current ?? organisationProviders;
+      const source = (current ?? organisationProviders) as OrganisationProviderDraft[];
       return source.filter((provider) => provider.id !== providerId);
     });
   };

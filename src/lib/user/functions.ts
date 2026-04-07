@@ -5,7 +5,13 @@ import * as z from "zod";
 import { authMiddleware } from "@/lib/auth/middleware";
 import { db } from "@/lib/db";
 import { userLlmProvider } from "@/lib/db/schema/schema";
-import { completeCodexLogin, disconnectCodexProvider, startCodexLogin } from "@/lib/opencode/codex";
+import {
+  completeCodexLogin,
+  disconnectCodexProvider,
+  getUserSharedCodexAuthState,
+  startCodexCallbackServer,
+  startCodexLogin,
+} from "@/lib/opencode/codex";
 import { OPENAI_CODEX_RESPONSES_PROVIDER_ID, normalizeProviderApiKey } from "@/lib/opencode/config";
 import { Org } from "@/lib/org";
 import { unwrap } from "@/lib/result";
@@ -17,31 +23,46 @@ import {
 
 const providerIdPattern = /^[a-z0-9]+(?:[-_][a-z0-9]+)*$/;
 
-const userLlmProviderSchema = z.object({
-  authStatus: z.enum(["connected", "disconnected", "pending"]).optional(),
-  codexAuthenticatedAt: z.string().nullable().optional(),
-  codexAuthError: z.string().nullable().optional(),
-  id: z.string().min(1),
-  isDefault: z.boolean(),
-  name: z.string().trim().min(1),
-  providerApiKey: z.string().optional().default(""),
-  providerBaseUrl: z.string().optional().default(""),
-  providerKind: z.enum(["codex", "manual"]).default("manual"),
-  providerId: z
-    .string()
-    .trim()
-    .min(1)
-    .regex(
-      providerIdPattern,
-      "Provider ID must use lowercase letters, numbers, hyphens, or underscores.",
-    ),
-  providerModel: z.string().trim().min(1),
-  scope: z.enum(["personal", "organisation"]).default("personal"),
-});
+const userLlmProviderSchema = z
+  .object({
+    authStatus: z.enum(["connected", "disconnected", "pending"]).optional(),
+    codexAuthenticatedAt: z.string().nullable().optional(),
+    codexAuthError: z.string().nullable().optional(),
+    id: z.string().min(1),
+    isDefault: z.boolean(),
+    name: z.string().trim().min(1),
+    providerApiKey: z.string().optional().default(""),
+    providerBaseUrl: z.string().optional().default(""),
+    providerKind: z.enum(["codex", "manual"]).default("manual"),
+    providerId: z.string().trim().min(1),
+    providerModel: z.string().trim().min(1),
+    scope: z.enum(["personal", "organisation"]).default("personal"),
+  })
+  .superRefine((provider, ctx) => {
+    if (provider.providerKind === "codex") {
+      return;
+    }
+
+    if (!providerIdPattern.test(provider.providerId)) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Provider ID must use lowercase letters, numbers, hyphens, or underscores.",
+        path: ["providerId"],
+      });
+    }
+  });
 
 const saveUserLlmProvidersInputSchema = z.object({
   providers: z.array(userLlmProviderSchema),
 });
+
+const toSerializableError = (error: unknown, fallbackMessage: string) => {
+  if (error instanceof Error && error.message.trim()) {
+    return new Error(error.message);
+  }
+
+  return new Error(fallbackMessage);
+};
 
 const normalizeProviders = (
   providers: Array<z.infer<typeof userLlmProviderSchema>>,
@@ -56,6 +77,43 @@ const normalizeProviders = (
   const existingProviderById = new Map(
     existingProviders.map((provider) => [provider.id, provider]),
   );
+  const sharedCodexAuthState = existingProviders
+    .filter(
+      (provider) =>
+        provider.providerKind === "codex" &&
+        provider.userId === input.userId &&
+        (provider.oauthAccessToken ||
+          provider.oauthRefreshToken ||
+          provider.oauthDeviceCode ||
+          provider.oauthUserCode ||
+          provider.oauthVerificationUri ||
+          provider.oauthVerificationUriComplete ||
+          provider.oauthAuthenticatedAt ||
+          provider.oauthError),
+    )
+    .sort((left, right) => {
+      const leftScore =
+        (left.oauthRefreshToken ? 4 : 0) +
+        (left.oauthAccessToken ? 2 : 0) +
+        (left.oauthDeviceCode ? 1 : 0);
+      const rightScore =
+        (right.oauthRefreshToken ? 4 : 0) +
+        (right.oauthAccessToken ? 2 : 0) +
+        (right.oauthDeviceCode ? 1 : 0);
+
+      if (leftScore !== rightScore) {
+        return rightScore - leftScore;
+      }
+
+      const leftAuthenticatedAt = left.oauthAuthenticatedAt?.getTime() ?? 0;
+      const rightAuthenticatedAt = right.oauthAuthenticatedAt?.getTime() ?? 0;
+
+      if (leftAuthenticatedAt !== rightAuthenticatedAt) {
+        return rightAuthenticatedAt - leftAuthenticatedAt;
+      }
+
+      return right.updatedAt.getTime() - left.updatedAt.getTime();
+    })[0];
 
   const normalized = providers.map((provider) => {
     if (seenIds.has(provider.id)) {
@@ -83,23 +141,25 @@ const normalizeProviders = (
     const existingProvider = existingProviderById.get(provider.id);
 
     if (provider.providerKind === "codex") {
+      const sourceProvider = existingProvider ?? sharedCodexAuthState;
+
       return {
         id: provider.id,
         isDefault: provider.scope === "personal" ? provider.isDefault : false,
         name: provider.name.trim(),
-        oauthAccessToken: existingProvider?.oauthAccessToken ?? null,
-        oauthAccessTokenExpiresAt: existingProvider?.oauthAccessTokenExpiresAt ?? null,
-        oauthAuthenticatedAt: existingProvider?.oauthAuthenticatedAt ?? null,
-        oauthDeviceCode: existingProvider?.oauthDeviceCode ?? null,
-        oauthDeviceCodeExpiresAt: existingProvider?.oauthDeviceCodeExpiresAt ?? null,
-        oauthError: existingProvider?.oauthError ?? null,
-        oauthPollingIntervalSeconds: existingProvider?.oauthPollingIntervalSeconds ?? null,
-        oauthRefreshToken: existingProvider?.oauthRefreshToken ?? null,
-        oauthRefreshTokenExpiresAt: existingProvider?.oauthRefreshTokenExpiresAt ?? null,
-        oauthScope: existingProvider?.oauthScope ?? null,
-        oauthUserCode: existingProvider?.oauthUserCode ?? null,
-        oauthVerificationUri: existingProvider?.oauthVerificationUri ?? null,
-        oauthVerificationUriComplete: existingProvider?.oauthVerificationUriComplete ?? null,
+        oauthAccessToken: sourceProvider?.oauthAccessToken ?? null,
+        oauthAccessTokenExpiresAt: sourceProvider?.oauthAccessTokenExpiresAt ?? null,
+        oauthAuthenticatedAt: sourceProvider?.oauthAuthenticatedAt ?? null,
+        oauthDeviceCode: sourceProvider?.oauthDeviceCode ?? null,
+        oauthDeviceCodeExpiresAt: sourceProvider?.oauthDeviceCodeExpiresAt ?? null,
+        oauthError: sourceProvider?.oauthError ?? null,
+        oauthPollingIntervalSeconds: sourceProvider?.oauthPollingIntervalSeconds ?? null,
+        oauthRefreshToken: sourceProvider?.oauthRefreshToken ?? null,
+        oauthRefreshTokenExpiresAt: sourceProvider?.oauthRefreshTokenExpiresAt ?? null,
+        oauthScope: sourceProvider?.oauthScope ?? null,
+        oauthUserCode: sourceProvider?.oauthUserCode ?? null,
+        oauthVerificationUri: sourceProvider?.oauthVerificationUri ?? null,
+        oauthVerificationUriComplete: sourceProvider?.oauthVerificationUriComplete ?? null,
         orgId: null,
         providerApiKey: null,
         providerBaseUrl: null,
@@ -202,114 +262,123 @@ export const $saveUserLlmProviders = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .inputValidator((data) => saveUserLlmProvidersInputSchema.parse(data))
   .handler(async ({ context, data }) => {
-    const membership = await unwrap(Org.getMembershipForUser(context.user.id));
-    const isOrgOwner = membership?.role === "owner";
-    const hasCodexSchema = await supportsCodexProviderSchema();
+    try {
+      const membership = await unwrap(Org.getMembershipForUser(context.user.id));
+      const isOrgOwner = membership?.role === "owner";
+      const hasCodexSchema = await supportsCodexProviderSchema();
 
-    if (!isOrgOwner && data.providers.some((provider) => provider.scope === "organisation")) {
-      throw new Error("Only organisation owners can manage organisation providers.");
-    }
-
-    if (!hasCodexSchema && data.providers.some((provider) => provider.providerKind === "codex")) {
-      throw new Error(
-        "Codex providers require the latest database migration. Run `pnpm db migrate`.",
-      );
-    }
-
-    const existingPersonalProviders = hasCodexSchema
-      ? await db.query.userLlmProvider.findMany({
-          where: eq(userLlmProvider.userId, context.user.id),
-        })
-      : (await listUserLlmProviders(context.user.id)).filter(
-          (provider) => provider.userId === context.user.id,
-        );
-    const existingOrganisationProviders =
-      isOrgOwner && membership?.orgId
-        ? hasCodexSchema
-          ? await db.query.userLlmProvider.findMany({
-              where: eq(userLlmProvider.orgId, membership.orgId),
-            })
-          : (await listUserLlmProviders(context.user.id)).filter(
-              (provider) => provider.orgId === membership.orgId,
-            )
-        : [];
-    const existingProviders = [...existingPersonalProviders, ...existingOrganisationProviders];
-    const providers = normalizeProviders(data.providers, existingProviders, {
-      orgId: membership?.orgId ?? null,
-      userId: context.user.id,
-    });
-    const personalProviders = providers.filter((provider) => provider.scope === "personal");
-    const organisationProviders = providers.filter((provider) => provider.scope === "organisation");
-
-    await db.transaction(async (tx) => {
-      const syncProviders = async (
-        nextProviders: typeof personalProviders,
-        existingProviders: typeof existingPersonalProviders,
-      ) => {
-        const nextProviderIds = new Set(nextProviders.map((provider) => provider.id));
-        const existingProviderIds = new Set(existingProviders.map((provider) => provider.id));
-
-        for (const provider of nextProviders) {
-          const values = hasCodexSchema
-            ? {
-                isDefault: provider.isDefault,
-                name: provider.name,
-                orgId: provider.orgId,
-                oauthAccessToken: provider.oauthAccessToken,
-                oauthAccessTokenExpiresAt: provider.oauthAccessTokenExpiresAt,
-                oauthAuthenticatedAt: provider.oauthAuthenticatedAt,
-                oauthDeviceCode: provider.oauthDeviceCode,
-                oauthDeviceCodeExpiresAt: provider.oauthDeviceCodeExpiresAt,
-                oauthError: provider.oauthError,
-                oauthPollingIntervalSeconds: provider.oauthPollingIntervalSeconds,
-                oauthRefreshToken: provider.oauthRefreshToken,
-                oauthRefreshTokenExpiresAt: provider.oauthRefreshTokenExpiresAt,
-                oauthScope: provider.oauthScope,
-                oauthUserCode: provider.oauthUserCode,
-                oauthVerificationUri: provider.oauthVerificationUri,
-                oauthVerificationUriComplete: provider.oauthVerificationUriComplete,
-                providerApiKey: provider.providerApiKey,
-                providerBaseUrl: provider.providerBaseUrl,
-                providerId: provider.providerId,
-                providerKind: provider.providerKind,
-                providerModel: provider.providerModel,
-                userId: provider.userId,
-              }
-            : {
-                isDefault: provider.isDefault,
-                name: provider.name,
-                orgId: provider.orgId,
-                providerApiKey: provider.providerApiKey,
-                providerBaseUrl: provider.providerBaseUrl,
-                providerId: provider.providerId,
-                providerModel: provider.providerModel,
-                userId: provider.userId,
-              };
-
-          if (existingProviderIds.has(provider.id)) {
-            await tx.update(userLlmProvider).set(values).where(eq(userLlmProvider.id, provider.id));
-            continue;
-          }
-
-          await tx.insert(userLlmProvider).values({
-            id: provider.id,
-            ...values,
-          });
-        }
-
-        for (const provider of existingProviders) {
-          if (!nextProviderIds.has(provider.id)) {
-            await tx.delete(userLlmProvider).where(eq(userLlmProvider.id, provider.id));
-          }
-        }
-      };
-
-      await syncProviders(personalProviders, existingPersonalProviders);
-
-      if (isOrgOwner && membership?.orgId) {
-        await syncProviders(organisationProviders, existingOrganisationProviders);
+      if (!isOrgOwner && data.providers.some((provider) => provider.scope === "organisation")) {
+        throw new Error("Only organisation owners can manage organisation providers.");
       }
-    });
+
+      if (!hasCodexSchema && data.providers.some((provider) => provider.providerKind === "codex")) {
+        throw new Error(
+          "Codex providers require the latest database migration. Run `pnpm db migrate`.",
+        );
+      }
+
+      const existingPersonalProviders = hasCodexSchema
+        ? await db.query.userLlmProvider.findMany({
+            where: eq(userLlmProvider.userId, context.user.id),
+          })
+        : (await listUserLlmProviders(context.user.id)).filter(
+            (provider) => provider.userId === context.user.id,
+          );
+      const existingOrganisationProviders =
+        isOrgOwner && membership?.orgId
+          ? hasCodexSchema
+            ? await db.query.userLlmProvider.findMany({
+                where: eq(userLlmProvider.orgId, membership.orgId),
+              })
+            : (await listUserLlmProviders(context.user.id)).filter(
+                (provider) => provider.orgId === membership.orgId,
+              )
+          : [];
+      const existingProviders = [...existingPersonalProviders, ...existingOrganisationProviders];
+      const providers = normalizeProviders(data.providers, existingProviders, {
+        orgId: membership?.orgId ?? null,
+        userId: context.user.id,
+      });
+      const personalProviders = providers.filter((provider) => provider.scope === "personal");
+      const organisationProviders = providers.filter(
+        (provider) => provider.scope === "organisation",
+      );
+
+      await db.transaction(async (tx) => {
+        const syncProviders = async (
+          nextProviders: typeof personalProviders,
+          existingProviders: typeof existingPersonalProviders,
+        ) => {
+          const nextProviderIds = new Set(nextProviders.map((provider) => provider.id));
+          const existingProviderIds = new Set(existingProviders.map((provider) => provider.id));
+
+          for (const provider of nextProviders) {
+            const values = hasCodexSchema
+              ? {
+                  isDefault: provider.isDefault,
+                  name: provider.name,
+                  orgId: provider.orgId,
+                  oauthAccessToken: provider.oauthAccessToken,
+                  oauthAccessTokenExpiresAt: provider.oauthAccessTokenExpiresAt,
+                  oauthAuthenticatedAt: provider.oauthAuthenticatedAt,
+                  oauthDeviceCode: provider.oauthDeviceCode,
+                  oauthDeviceCodeExpiresAt: provider.oauthDeviceCodeExpiresAt,
+                  oauthError: provider.oauthError,
+                  oauthPollingIntervalSeconds: provider.oauthPollingIntervalSeconds,
+                  oauthRefreshToken: provider.oauthRefreshToken,
+                  oauthRefreshTokenExpiresAt: provider.oauthRefreshTokenExpiresAt,
+                  oauthScope: provider.oauthScope,
+                  oauthUserCode: provider.oauthUserCode,
+                  oauthVerificationUri: provider.oauthVerificationUri,
+                  oauthVerificationUriComplete: provider.oauthVerificationUriComplete,
+                  providerApiKey: provider.providerApiKey,
+                  providerBaseUrl: provider.providerBaseUrl,
+                  providerId: provider.providerId,
+                  providerKind: provider.providerKind,
+                  providerModel: provider.providerModel,
+                  userId: provider.userId,
+                }
+              : {
+                  isDefault: provider.isDefault,
+                  name: provider.name,
+                  orgId: provider.orgId,
+                  providerApiKey: provider.providerApiKey,
+                  providerBaseUrl: provider.providerBaseUrl,
+                  providerId: provider.providerId,
+                  providerModel: provider.providerModel,
+                  userId: provider.userId,
+                };
+
+            if (existingProviderIds.has(provider.id)) {
+              await tx
+                .update(userLlmProvider)
+                .set(values)
+                .where(eq(userLlmProvider.id, provider.id));
+              continue;
+            }
+
+            await tx.insert(userLlmProvider).values({
+              id: provider.id,
+              ...values,
+            });
+          }
+
+          for (const provider of existingProviders) {
+            if (!nextProviderIds.has(provider.id)) {
+              await tx.delete(userLlmProvider).where(eq(userLlmProvider.id, provider.id));
+            }
+          }
+        };
+
+        await syncProviders(personalProviders, existingPersonalProviders);
+
+        if (isOrgOwner && membership?.orgId) {
+          await syncProviders(organisationProviders, existingOrganisationProviders);
+        }
+      });
+    } catch (error) {
+      throw toSerializableError(error, "Failed to save providers.");
+    }
   });
 
 const codexProviderInputSchema = z.object({
@@ -317,7 +386,7 @@ const codexProviderInputSchema = z.object({
 });
 
 const loadOwnedCodexProvider = async (userId: string, providerId: string) => {
-  const provider = await findUserLlmProvider(userId, providerId);
+  let provider = await findUserLlmProvider(userId, providerId);
 
   if (!provider) {
     throw new Error("Provider not found.");
@@ -331,6 +400,17 @@ const loadOwnedCodexProvider = async (userId: string, providerId: string) => {
     throw new Error("Selected provider is not a Codex provider.");
   }
 
+  const sharedAuthState = provider.userId
+    ? await getUserSharedCodexAuthState(provider.userId, provider.id)
+    : null;
+
+  if (sharedAuthState) {
+    provider = {
+      ...provider,
+      ...sharedAuthState,
+    };
+  }
+
   return provider;
 };
 
@@ -338,8 +418,14 @@ export const $startCodexDeviceAuthorization = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .inputValidator((data) => codexProviderInputSchema.parse(data))
   .handler(async ({ context, data }) => {
-    const provider = await loadOwnedCodexProvider(context.user.id, data.providerId);
-    return startCodexLogin(provider);
+    try {
+      const provider = await loadOwnedCodexProvider(context.user.id, data.providerId);
+      const result = await startCodexLogin(provider);
+      const callbackServerStarted = await startCodexCallbackServer(data.providerId);
+      return { ...result, callbackServerStarted };
+    } catch (error) {
+      throw toSerializableError(error, "Failed to start Codex login.");
+    }
   });
 
 const completeCodexLoginInputSchema = z.object({
@@ -351,14 +437,22 @@ export const $completeCodexLogin = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .inputValidator((data) => completeCodexLoginInputSchema.parse(data))
   .handler(async ({ context, data }) => {
-    const provider = await loadOwnedCodexProvider(context.user.id, data.providerId);
-    return completeCodexLogin(provider, data.callbackUrl);
+    try {
+      const provider = await loadOwnedCodexProvider(context.user.id, data.providerId);
+      return completeCodexLogin(provider, data.callbackUrl);
+    } catch (error) {
+      throw toSerializableError(error, "Failed to complete Codex login.");
+    }
   });
 
 export const $disconnectCodexProvider = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .inputValidator((data) => codexProviderInputSchema.parse(data))
   .handler(async ({ context, data }) => {
-    const provider = await loadOwnedCodexProvider(context.user.id, data.providerId);
-    await disconnectCodexProvider(provider.id);
+    try {
+      const provider = await loadOwnedCodexProvider(context.user.id, data.providerId);
+      await disconnectCodexProvider(provider.id);
+    } catch (error) {
+      throw toSerializableError(error, "Failed to disconnect Codex provider.");
+    }
   });

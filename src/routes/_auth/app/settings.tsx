@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { PlusIcon, StarIcon, Trash2Icon } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -39,9 +39,43 @@ type ProviderDraft = {
 
 type DeviceAuthState = {
   authorizeUrl: string;
+  callbackServerStarted: boolean;
   expiresAt: string;
   redirectUri: string;
 };
+
+type SaveProviderInput = {
+  authStatus?: "connected" | "disconnected" | "pending";
+  codexAuthenticatedAt?: string | null;
+  codexAuthError?: string | null;
+  id: string;
+  isDefault: boolean;
+  name: string;
+  providerApiKey: string;
+  providerBaseUrl: string;
+  providerId: string;
+  providerKind: "codex" | "manual";
+  providerModel: string;
+  scope: "personal";
+};
+
+const toSaveProviderInput = (provider: ProviderDraft): SaveProviderInput => ({
+  authStatus: provider.authStatus,
+  codexAuthenticatedAt: provider.codexAuthenticatedAt ?? null,
+  codexAuthError: provider.codexAuthError ?? null,
+  id: provider.id,
+  isDefault: provider.isDefault,
+  name: provider.name,
+  providerApiKey: provider.providerApiKey,
+  providerBaseUrl: provider.providerBaseUrl,
+  providerId: provider.providerId,
+  providerKind: provider.providerKind,
+  providerModel: provider.providerModel,
+  scope: "personal" as const,
+});
+
+const toSerializableProviders = (providers: ProviderDraft[]): SaveProviderInput[] =>
+  JSON.parse(JSON.stringify(providers.map(toSaveProviderInput))) as SaveProviderInput[];
 
 const createProviderDraft = (overrides?: Partial<ProviderDraft>): ProviderDraft => ({
   authStatus: "connected",
@@ -61,9 +95,14 @@ const createProviderDraft = (overrides?: Partial<ProviderDraft>): ProviderDraft 
 function SettingsPage() {
   const queryClient = useQueryClient();
 
-  const providersQuery = useQuery(userLlmProvidersQueryOptions());
   const [draftProviders, setDraftProviders] = useState<ProviderDraft[] | null>(null);
   const [pendingDeviceAuth, setPendingDeviceAuth] = useState<Record<string, DeviceAuthState>>({});
+  const hasPendingAuth = Object.keys(pendingDeviceAuth).length > 0;
+
+  const providersQuery = useQuery({
+    ...userLlmProvidersQueryOptions(),
+    refetchInterval: hasPendingAuth ? 2000 : false,
+  });
   const isProvidersLoading = providersQuery.isPending && !providersQuery.isFetched;
 
   const allProviders = providersQuery.data ?? [];
@@ -81,10 +120,7 @@ function SettingsPage() {
     mutationFn: () =>
       saveFn({
         data: {
-          providers: providers.map((provider) => ({
-            ...provider,
-            scope: "personal" as const,
-          })),
+          providers: toSerializableProviders(providers),
         },
       }),
     onSuccess: async () => {
@@ -136,7 +172,7 @@ function SettingsPage() {
         return next;
       });
       await queryClient.invalidateQueries(userLlmProvidersQueryOptions());
-      toast.success("Codex provider connected.");
+      toast.success("Codex login connected for all Codex providers.");
     },
     onError: (error) => {
       toast.error(error instanceof Error ? error.message : "Failed to complete Codex login.");
@@ -152,12 +188,35 @@ function SettingsPage() {
         return next;
       });
       await queryClient.invalidateQueries(userLlmProvidersQueryOptions());
-      toast.success("Codex provider disconnected.");
+      toast.success("Codex login disconnected for all Codex providers.");
     },
     onError: (error) => {
       toast.error(error instanceof Error ? error.message : "Failed to disconnect Codex provider.");
     },
   });
+
+  // Auto-detect when the callback server completes the login in the background
+  useEffect(() => {
+    if (!hasPendingAuth || !providersQuery.data) return;
+
+    for (const providerId of Object.keys(pendingDeviceAuth)) {
+      const provider = providersQuery.data.find((p) => p.id === providerId);
+
+      if (provider?.authStatus === "connected") {
+        setPendingDeviceAuth((current) => {
+          const next = { ...current };
+          delete next[providerId];
+          return next;
+        });
+        setCallbackUrlDrafts((current) => {
+          const next = { ...current };
+          delete next[providerId];
+          return next;
+        });
+        toast.success("Codex login connected for all Codex providers.");
+      }
+    }
+  }, [providersQuery.data, hasPendingAuth, pendingDeviceAuth]);
 
   const sortedProviders = [...providers].sort((a, b) => {
     if (a.isDefault !== b.isDefault) {
@@ -272,8 +331,9 @@ function SettingsPage() {
             <div>
               <h1 className="text-2xl font-semibold">Providers</h1>
               <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-                Add OpenAI-compatible providers or connect Codex with device login. Tasks store the
-                selected provider and use its configured model as the default.
+                Add OpenAI-compatible providers or connect Codex once and share that login across
+                all Codex providers. Tasks store the selected provider and use its configured model
+                as the default.
               </p>
             </div>
             <div className="flex gap-2">
@@ -332,7 +392,7 @@ function SettingsPage() {
                       </div>
                       <p className="mt-1 text-sm text-muted-foreground">
                         {isCodexProvider
-                          ? "Codex providers use the official ChatGPT PKCE login flow and run through the OpenCode proxy."
+                          ? "Codex providers use the official ChatGPT PKCE login flow, share one login across your Codex providers, and run through the OpenCode proxy."
                           : "Manual providers use an OpenAI-compatible base URL and API key."}
                       </p>
                     </div>
@@ -473,65 +533,110 @@ function SettingsPage() {
                         {deviceAuthState ? (
                           <div className="mt-4 rounded-xl border border-border/60 bg-background px-4 py-4">
                             <p className="text-sm font-medium">Browser login</p>
-                            <p className="mt-2 text-sm text-muted-foreground">
-                              A browser tab should have opened. After approving access, your browser
-                              will be redirected to:
-                            </p>
-                            <p className="mt-2 font-mono text-xs break-all text-foreground">
-                              {deviceAuthState.redirectUri}
-                            </p>
-                            <p className="mt-2 text-xs text-muted-foreground">
-                              If the localhost page fails to load, copy the full URL from the
-                              browser address bar and paste it here before{" "}
-                              {new Date(deviceAuthState.expiresAt).toLocaleTimeString()}.
-                            </p>
-                            <div className="mt-3 flex flex-col gap-3">
-                              <Button
-                                type="button"
-                                variant="outline"
-                                onClick={() =>
-                                  window.open(
-                                    deviceAuthState.authorizeUrl,
-                                    "_blank",
-                                    "noopener,noreferrer",
-                                  )
-                                }
-                              >
-                                Open ChatGPT login again
-                              </Button>
-                              <div className="flex flex-col gap-1.5">
-                                <Label htmlFor={`codex-callback-url-${provider.id}`}>
-                                  Callback URL
-                                </Label>
-                                <Input
-                                  id={`codex-callback-url-${provider.id}`}
-                                  value={callbackUrlDraft}
-                                  onChange={(event) =>
-                                    setCallbackUrlDrafts((current) => ({
-                                      ...current,
-                                      [provider.id]: event.target.value,
-                                    }))
-                                  }
-                                  placeholder="http://localhost:1455/auth/callback?code=..."
-                                />
-                              </div>
-                              <Button
-                                type="button"
-                                variant="outline"
-                                disabled={
-                                  completeCodexAuthMutation.isPending ||
-                                  callbackUrlDraft.trim().length === 0
-                                }
-                                onClick={() =>
-                                  completeCodexAuthMutation.mutate({
-                                    callbackUrl: callbackUrlDraft.trim(),
-                                    providerId: provider.id,
-                                  })
-                                }
-                              >
-                                Complete login
-                              </Button>
-                            </div>
+                            {deviceAuthState.callbackServerStarted ? (
+                              <>
+                                <p className="mt-2 text-sm text-muted-foreground">
+                                  A browser tab has opened. Complete the login there — this page
+                                  will update automatically once you approve access.
+                                </p>
+                                <div className="mt-3 flex items-center gap-2 text-sm text-muted-foreground">
+                                  <svg
+                                    className="size-4 shrink-0 animate-spin"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                  >
+                                    <circle
+                                      cx="12"
+                                      cy="12"
+                                      r="10"
+                                      stroke="currentColor"
+                                      strokeWidth="3"
+                                      strokeDasharray="31.4"
+                                      strokeDashoffset="10"
+                                    />
+                                  </svg>
+                                  Waiting for authorization&hellip; (expires{" "}
+                                  {new Date(deviceAuthState.expiresAt).toLocaleTimeString()})
+                                </div>
+                                <div className="mt-3">
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    onClick={() =>
+                                      window.open(
+                                        deviceAuthState.authorizeUrl,
+                                        "_blank",
+                                        "noopener,noreferrer",
+                                      )
+                                    }
+                                  >
+                                    Open ChatGPT login again
+                                  </Button>
+                                </div>
+                              </>
+                            ) : (
+                              <>
+                                <p className="mt-2 text-sm text-muted-foreground">
+                                  A browser tab should have opened. After approving access, your
+                                  browser will be redirected to:
+                                </p>
+                                <p className="mt-2 font-mono text-xs break-all text-foreground">
+                                  {deviceAuthState.redirectUri}
+                                </p>
+                                <p className="mt-2 text-xs text-muted-foreground">
+                                  Port 1455 is unavailable — copy the full URL from the browser
+                                  address bar and paste it here before{" "}
+                                  {new Date(deviceAuthState.expiresAt).toLocaleTimeString()}.
+                                </p>
+                                <div className="mt-3 flex flex-col gap-3">
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    onClick={() =>
+                                      window.open(
+                                        deviceAuthState.authorizeUrl,
+                                        "_blank",
+                                        "noopener,noreferrer",
+                                      )
+                                    }
+                                  >
+                                    Open ChatGPT login again
+                                  </Button>
+                                  <div className="flex flex-col gap-1.5">
+                                    <Label htmlFor={`codex-callback-url-${provider.id}`}>
+                                      Callback URL
+                                    </Label>
+                                    <Input
+                                      id={`codex-callback-url-${provider.id}`}
+                                      value={callbackUrlDraft}
+                                      onChange={(event) =>
+                                        setCallbackUrlDrafts((current) => ({
+                                          ...current,
+                                          [provider.id]: event.target.value,
+                                        }))
+                                      }
+                                      placeholder="http://localhost:1455/auth/callback?code=..."
+                                    />
+                                  </div>
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    disabled={
+                                      completeCodexAuthMutation.isPending ||
+                                      callbackUrlDraft.trim().length === 0
+                                    }
+                                    onClick={() =>
+                                      completeCodexAuthMutation.mutate({
+                                        callbackUrl: callbackUrlDraft.trim(),
+                                        providerId: provider.id,
+                                      })
+                                    }
+                                  >
+                                    Complete login
+                                  </Button>
+                                </div>
+                              </>
+                            )}
                           </div>
                         ) : null}
                       </div>
