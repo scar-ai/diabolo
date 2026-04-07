@@ -3,6 +3,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import type { JsonObject } from "@/lib/json";
+import { SandboxEvents } from "@/lib/sandbox/events";
 
 const ATTACHMENT_STORAGE_ROOT = path.join(process.cwd(), ".data", "task-attachments");
 const INVALID_FILE_CHARS = /[^a-zA-Z0-9._-]+/g;
@@ -106,4 +107,24 @@ export const createTaskAttachmentMetadata = async (input: {
     size: input.file.size,
     storageKey,
   };
+};
+
+export const uploadTaskAttachments = async (
+  formData: FormData,
+  taskId: string,
+  messageId: string,
+) => {
+  const files = collectTaskAttachmentFiles(formData);
+  validateTaskAttachmentFiles(files);
+  const usedNames = new Set<string>();
+  for (const file of files) {
+    const metadata = await createTaskAttachmentMetadata({ file, messageId, taskId, usedNames });
+    await SandboxEvents.publishArtifact({
+      messageId,
+      metadata,
+      taskId,
+      type: TASK_ATTACHMENT_ARTIFACT_TYPE,
+      url: `/api/tasks/${taskId}/attachments?storageKey=${encodeURIComponent(metadata.storageKey)}`,
+    });
+  }
 };
