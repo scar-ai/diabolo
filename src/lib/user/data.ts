@@ -1,7 +1,8 @@
-import { and, asc, desc, eq, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, ne, or, sql } from "drizzle-orm";
 
 import { db } from "@/lib/db";
 import { organisationMember, userLlmProvider } from "@/lib/db/schema";
+import { CODEX_SHARED_AUTH_PROVIDER_PREFIX } from "@/lib/opencode/codex";
 
 type UserLlmProviderRecord = typeof userLlmProvider.$inferSelect;
 
@@ -109,9 +110,12 @@ export const listUserLlmProviders = async (userId: string) => {
 
   return db.query.userLlmProvider.findMany({
     orderBy: [desc(userLlmProvider.isDefault), asc(userLlmProvider.name), asc(userLlmProvider.id)],
-    where: or(
-      eq(userLlmProvider.userId, userId),
-      membership ? eq(userLlmProvider.orgId, membership.orgId) : undefined,
+    where: and(
+      ne(userLlmProvider.id, `${CODEX_SHARED_AUTH_PROVIDER_PREFIX}${userId}`),
+      or(
+        eq(userLlmProvider.userId, userId),
+        membership ? eq(userLlmProvider.orgId, membership.orgId) : undefined,
+      ),
     ),
   });
 };

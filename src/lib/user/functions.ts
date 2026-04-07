@@ -7,19 +7,19 @@ import { db } from "@/lib/db";
 import { userLlmProvider } from "@/lib/db/schema/schema";
 import {
   completeCodexLogin,
+  ensureCodexSharedAuthProvider,
   disconnectCodexProvider,
   getUserSharedCodexAuthState,
+  getCodexSharedAuthProviderId,
+  isCodexProvider,
+  listAvailableCodexModels,
   startCodexCallbackServer,
   startCodexLogin,
 } from "@/lib/opencode/codex";
 import { OPENAI_CODEX_RESPONSES_PROVIDER_ID, normalizeProviderApiKey } from "@/lib/opencode/config";
 import { Org } from "@/lib/org";
 import { unwrap } from "@/lib/result";
-import {
-  findUserLlmProvider,
-  listUserLlmProviders,
-  supportsCodexProviderSchema,
-} from "@/lib/user/data";
+import { listUserLlmProviders, supportsCodexProviderSchema } from "@/lib/user/data";
 
 const providerIdPattern = /^[a-z0-9]+(?:[-_][a-z0-9]+)*$/;
 
@@ -258,6 +258,34 @@ export const $listUserLlmProviders = createServerFn({ method: "GET" })
     }));
   });
 
+export const $getCodexSharedLoginStatus = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    const provider = await ensureCodexSharedAuthProvider(context.user.id);
+    const sharedState =
+      (await getUserSharedCodexAuthState(context.user.id, provider.id)) ?? provider;
+
+    return {
+      authStatus:
+        isCodexProvider(provider) &&
+        sharedState.oauthAccessToken &&
+        sharedState.oauthAuthenticatedAt
+          ? "connected"
+          : sharedState.oauthDeviceCode
+            ? "pending"
+            : "disconnected",
+      codexAuthenticatedAt: sharedState.oauthAuthenticatedAt?.toISOString() ?? null,
+      codexAuthError: sharedState.oauthError ?? null,
+    } as const;
+  });
+
+export const $listAvailableCodexModels = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    const provider = await ensureCodexSharedAuthProvider(context.user.id);
+    return listAvailableCodexModels(provider);
+  });
+
 export const $saveUserLlmProviders = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .inputValidator((data) => saveUserLlmProvidersInputSchema.parse(data))
@@ -294,6 +322,10 @@ export const $saveUserLlmProviders = createServerFn({ method: "POST" })
                 (provider) => provider.orgId === membership.orgId,
               )
           : [];
+      const hiddenCodexSharedProviderId = getCodexSharedAuthProviderId(context.user.id);
+      const visibleExistingPersonalProviders = existingPersonalProviders.filter(
+        (provider) => provider.id !== hiddenCodexSharedProviderId,
+      );
       const existingProviders = [...existingPersonalProviders, ...existingOrganisationProviders];
       const providers = normalizeProviders(data.providers, existingProviders, {
         orgId: membership?.orgId ?? null,
@@ -370,7 +402,7 @@ export const $saveUserLlmProviders = createServerFn({ method: "POST" })
           }
         };
 
-        await syncProviders(personalProviders, existingPersonalProviders);
+        await syncProviders(personalProviders, visibleExistingPersonalProviders);
 
         if (isOrgOwner && membership?.orgId) {
           await syncProviders(organisationProviders, existingOrganisationProviders);
@@ -381,47 +413,13 @@ export const $saveUserLlmProviders = createServerFn({ method: "POST" })
     }
   });
 
-const codexProviderInputSchema = z.object({
-  providerId: z.string().min(1),
-});
-
-const loadOwnedCodexProvider = async (userId: string, providerId: string) => {
-  let provider = await findUserLlmProvider(userId, providerId);
-
-  if (!provider) {
-    throw new Error("Provider not found.");
-  }
-
-  if (provider.userId !== userId) {
-    throw new Error("Only personal Codex providers can be managed here.");
-  }
-
-  if (provider.providerKind !== "codex") {
-    throw new Error("Selected provider is not a Codex provider.");
-  }
-
-  const sharedAuthState = provider.userId
-    ? await getUserSharedCodexAuthState(provider.userId, provider.id)
-    : null;
-
-  if (sharedAuthState) {
-    provider = {
-      ...provider,
-      ...sharedAuthState,
-    };
-  }
-
-  return provider;
-};
-
 export const $startCodexDeviceAuthorization = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .inputValidator((data) => codexProviderInputSchema.parse(data))
-  .handler(async ({ context, data }) => {
+  .handler(async ({ context }) => {
     try {
-      const provider = await loadOwnedCodexProvider(context.user.id, data.providerId);
+      const provider = await ensureCodexSharedAuthProvider(context.user.id);
       const result = await startCodexLogin(provider);
-      const callbackServerStarted = await startCodexCallbackServer(data.providerId);
+      const callbackServerStarted = await startCodexCallbackServer(provider.id);
       return { ...result, callbackServerStarted };
     } catch (error) {
       throw toSerializableError(error, "Failed to start Codex login.");
@@ -430,7 +428,6 @@ export const $startCodexDeviceAuthorization = createServerFn({ method: "POST" })
 
 const completeCodexLoginInputSchema = z.object({
   callbackUrl: z.string().min(1),
-  providerId: z.string().min(1),
 });
 
 export const $completeCodexLogin = createServerFn({ method: "POST" })
@@ -438,7 +435,7 @@ export const $completeCodexLogin = createServerFn({ method: "POST" })
   .inputValidator((data) => completeCodexLoginInputSchema.parse(data))
   .handler(async ({ context, data }) => {
     try {
-      const provider = await loadOwnedCodexProvider(context.user.id, data.providerId);
+      const provider = await ensureCodexSharedAuthProvider(context.user.id);
       return completeCodexLogin(provider, data.callbackUrl);
     } catch (error) {
       throw toSerializableError(error, "Failed to complete Codex login.");
@@ -447,10 +444,9 @@ export const $completeCodexLogin = createServerFn({ method: "POST" })
 
 export const $disconnectCodexProvider = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .inputValidator((data) => codexProviderInputSchema.parse(data))
-  .handler(async ({ context, data }) => {
+  .handler(async ({ context }) => {
     try {
-      const provider = await loadOwnedCodexProvider(context.user.id, data.providerId);
+      const provider = await ensureCodexSharedAuthProvider(context.user.id);
       await disconnectCodexProvider(provider.id);
     } catch (error) {
       throw toSerializableError(error, "Failed to disconnect Codex provider.");

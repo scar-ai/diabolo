@@ -7,6 +7,7 @@ import { and, eq } from "drizzle-orm";
 import { env } from "@/env/server";
 import { db } from "@/lib/db";
 import { userLlmProvider } from "@/lib/db/schema";
+import { OPENAI_CODEX_RESPONSES_PROVIDER_ID } from "@/lib/opencode/config";
 
 const CODEX_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
 const CODEX_SCOPE = "openid profile email offline_access";
@@ -17,6 +18,7 @@ const CODEX_PROVIDER_KIND = "codex";
 const ACCESS_TOKEN_REFRESH_BUFFER_MS = 60_000;
 const CODEX_LOGIN_REDIRECT_URI = "http://localhost:1455/auth/callback";
 const CODEX_LOGIN_EXPIRY_MS = 15 * 60 * 1000;
+export const CODEX_SHARED_AUTH_PROVIDER_PREFIX = "__codex-shared-auth__:";
 
 type CodexProviderRecord = typeof userLlmProvider.$inferSelect;
 type CodexProviderAccessRecord = Pick<
@@ -806,6 +808,12 @@ const hasSharedCodexAuthState = (provider: Partial<CodexSharedAuthState>) =>
     provider.oauthError,
   );
 
+export const getCodexSharedAuthProviderId = (userId: string) =>
+  `${CODEX_SHARED_AUTH_PROVIDER_PREFIX}${userId}`;
+
+export const isCodexSharedAuthProviderId = (providerId: string) =>
+  providerId.startsWith(CODEX_SHARED_AUTH_PROVIDER_PREFIX);
+
 const listUserCodexProviders = async (userId: string) =>
   db.query.userLlmProvider.findMany({
     where: and(
@@ -813,6 +821,40 @@ const listUserCodexProviders = async (userId: string) =>
       eq(userLlmProvider.providerKind, CODEX_PROVIDER_KIND),
     ),
   });
+
+export const ensureCodexSharedAuthProvider = async (userId: string) => {
+  const providerId = getCodexSharedAuthProviderId(userId);
+  const existing = await db.query.userLlmProvider.findFirst({
+    where: eq(userLlmProvider.id, providerId),
+  });
+
+  if (existing) {
+    return existing;
+  }
+
+  await db.insert(userLlmProvider).values({
+    id: providerId,
+    isDefault: false,
+    name: "Codex Shared Login",
+    orgId: null,
+    providerApiKey: null,
+    providerBaseUrl: null,
+    providerId: OPENAI_CODEX_RESPONSES_PROVIDER_ID,
+    providerKind: CODEX_PROVIDER_KIND,
+    providerModel: "gpt-5-codex",
+    userId,
+  });
+
+  const created = await db.query.userLlmProvider.findFirst({
+    where: eq(userLlmProvider.id, providerId),
+  });
+
+  if (!created) {
+    throw new Error("Failed to create shared Codex auth provider.");
+  }
+
+  return created;
+};
 
 const pickSharedCodexAuthState = (
   providers: CodexProviderRecord[],
@@ -1365,6 +1407,19 @@ export const ensureCodexAccessToken = async (provider: CodexProviderAccessRecord
 
   return payload.access_token;
 };
+
+export const CODEX_MODEL_OPTIONS = [
+  "gpt-5.1-codex-mini",
+  "gpt-5.1-codex-max",
+  "gpt-5.2",
+  "gpt-5.2-codex",
+  "gpt-5.3-codex",
+  "gpt-5.4",
+  "gpt-5.4-mini",
+] as const;
+export const listAvailableCodexModels = async (_provider: CodexProviderAccessRecord) => [
+  ...CODEX_MODEL_OPTIONS,
+];
 
 const requestCodexResponse = async (input: {
   accessToken: string;
