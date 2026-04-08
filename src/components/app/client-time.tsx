@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from "react";
+import { useEffect, useState } from "react";
 
 type ClientTimeTextProps = {
   options?: Intl.DateTimeFormatOptions;
@@ -6,11 +6,7 @@ type ClientTimeTextProps = {
 };
 
 export function ClientTimeText({ options, value }: ClientTimeTextProps) {
-  const isHydrated = useSyncExternalStore(
-    () => () => {},
-    () => true,
-    () => false,
-  );
+  const isHydrated = useClientHydrated();
 
   if (!isHydrated) {
     return null;
@@ -20,12 +16,35 @@ export function ClientTimeText({ options, value }: ClientTimeTextProps) {
 }
 
 export function useClientNow(intervalMs = 60_000) {
-  return useSyncExternalStore(
-    (onStoreChange) => {
-      const interval = window.setInterval(onStoreChange, intervalMs);
-      return () => window.clearInterval(interval);
-    },
-    () => new Date(),
-    () => null,
-  );
+  const [now, setNow] = useState<Date | null>(null);
+
+  useEffect(() => {
+    const updateNow = () => {
+      setNow(new Date());
+    };
+
+    const timeout = window.setTimeout(updateNow, 0);
+    const interval = window.setInterval(updateNow, intervalMs);
+
+    return () => {
+      window.clearTimeout(timeout);
+      window.clearInterval(interval);
+    };
+  }, [intervalMs]);
+
+  return now;
+}
+
+function useClientHydrated() {
+  const [isHydrated, setIsHydrated] = useState(false);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      setIsHydrated(true);
+    }, 0);
+
+    return () => window.clearTimeout(timeout);
+  }, []);
+
+  return isHydrated;
 }
