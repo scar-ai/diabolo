@@ -1,5 +1,6 @@
 import { Link } from "@tanstack/react-router";
 
+import { ClientTimeText } from "@/components/app/client-time";
 import { TaskStatusBadge } from "@/components/app/task-status-badge";
 
 type ChildTask = {
@@ -36,10 +37,13 @@ export function TaskChildList({ projectId, tasks }: { projectId: string; tasks: 
               </div>
               <div className="text-xs text-muted-foreground/65">
                 {child.sandboxStatus} · {child.stage} ·{" "}
-                {new Date(child.updatedAt).toLocaleTimeString([], {
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })}
+                <ClientTimeText
+                  value={child.updatedAt}
+                  options={{
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  }}
+                />
               </div>
             </div>
             <TaskStatusBadge status={child.status} className="shrink-0" />

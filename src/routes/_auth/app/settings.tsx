@@ -15,6 +15,7 @@ import {
 import { useState } from "react";
 import { toast } from "sonner";
 
+import { ProviderUsageChart } from "@/components/app/provider-usage-chart";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -36,6 +37,7 @@ import {
 import {
   codexModelsQueryOptions,
   codexSharedLoginStatusQueryOptions,
+  userProviderUsageSummaryQueryOptions,
   userLlmProvidersQueryOptions,
 } from "@/lib/user/queries";
 import { cn } from "@/lib/utils";
@@ -227,6 +229,7 @@ function SettingsPage() {
   const sharedCodexAuthenticatedAt = codexSharedLoginQuery.data?.codexAuthenticatedAt ?? null;
   const sharedCodexAuthError = codexSharedLoginQuery.data?.codexAuthError ?? null;
   const availableCodexModels = codexModelsQuery.data ?? [];
+  const userProviderUsageQuery = useQuery(userProviderUsageSummaryQueryOptions());
 
   const { mutate: saveProviders, isPending: isSaving } = useMutation({
     mutationFn: () =>
@@ -585,6 +588,12 @@ function SettingsPage() {
               ) : null}
             </div>
           </section>
+
+          <ProviderUsageChart
+            title="Provider usage"
+            description="Daily token consumption for your personal providers."
+            usage={userProviderUsageQuery.data}
+          />
 
           {/* ── Section: Providers ──────────────────────────────────────────── */}
           <section>

@@ -456,6 +456,7 @@ export namespace Project {
         fromPromise(
           insertScheduledTask({
             branchName: input.branchName ?? null,
+            consecutiveFailures: 0,
             createdByUserId: input.userId,
             id: crypto.randomUUID(),
             instructions: input.instructions,
@@ -501,7 +502,13 @@ export namespace Project {
         fromPromise(
           updateScheduledTask(input.scheduledTaskId, {
             branchName: input.branchName ?? null,
+            consecutiveFailures: 0,
             instructions: input.instructions,
+            lastAlertedAt: null,
+            lastEnqueuedAt: null,
+            lastError: null,
+            lastFailureAt: null,
+            lastRunAt: null,
             name: input.name,
             providerId: input.providerId ?? null,
             runOnce: input.runOnce ? 1 : 0,

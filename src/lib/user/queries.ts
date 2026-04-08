@@ -2,6 +2,7 @@ import { queryOptions } from "@tanstack/react-query";
 
 import {
   $getCodexSharedLoginStatus,
+  $getUserProviderUsageSummary,
   $listAvailableCodexModels,
   $listUserLlmProviders,
 } from "./functions";
@@ -25,4 +26,11 @@ export const codexModelsQueryOptions = () =>
     queryKey: ["codex-models"],
     queryFn: () => $listAvailableCodexModels(),
     staleTime: 5 * 60_000,
+  });
+
+export const userProviderUsageSummaryQueryOptions = () =>
+  queryOptions({
+    queryKey: ["user-provider-usage-summary"],
+    queryFn: () => $getUserProviderUsageSummary(),
+    staleTime: 30_000,
   });

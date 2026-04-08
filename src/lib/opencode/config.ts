@@ -3,7 +3,7 @@ import { ensureCodexAccessToken, isCodexProvider } from "./codex";
 
 const CUSTOM_OPENCODE_PROVIDER_PACKAGE = "@ai-sdk/openai-compatible";
 const CUSTOM_OPENCODE_API_KEY_ENV_VAR = "OPENCODE_PROVIDER_API_KEY";
-const CODEX_LOCAL_PROXY_BASE_URL = "http://127.0.0.1:4312";
+const OPENCODE_LOCAL_PROXY_BASE_URL = "http://127.0.0.1:4312";
 export const OPENAI_CODEX_RESPONSES_PROVIDER_ID = "openai-codex-responses";
 const OPENROUTER_BASE_URL_PATTERN = /^https?:\/\/(?:www\.)?openrouter\.ai\/api(?:\/v\d+)?\/?$/i;
 
@@ -122,7 +122,7 @@ export const resolveOpenCodeConfig = async (input: {
       oauthScope: input.provider.oauthScope ?? null,
       providerKind: "codex",
     });
-    const runtimeBaseUrl = CODEX_LOCAL_PROXY_BASE_URL;
+    const runtimeBaseUrl = OPENCODE_LOCAL_PROXY_BASE_URL;
 
     return {
       apiKey,
@@ -161,6 +161,7 @@ export const resolveOpenCodeConfig = async (input: {
     providerId,
     providerKind,
     providerName: trimToNull(input.provider.name) || providerId,
+    runtimeBaseUrl: OPENCODE_LOCAL_PROXY_BASE_URL,
     selectedProviderId,
   };
 };
@@ -188,7 +189,7 @@ export const buildOpenCodeConfigContent = (config: OpenCodeConfig) => {
         npm: CUSTOM_OPENCODE_PROVIDER_PACKAGE,
         options: {
           apiKey: `{env:${config.apiKeyEnvVar}}`,
-          baseURL: config.baseUrl,
+          baseURL: config.runtimeBaseUrl ?? config.baseUrl,
         },
       },
     },

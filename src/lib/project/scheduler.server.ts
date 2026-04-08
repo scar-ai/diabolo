@@ -4,9 +4,14 @@ import { CronExpressionParser } from "cron-parser";
 import { Log } from "@/lib/log";
 import { resolveOpenCodeConfig } from "@/lib/opencode/config";
 import {
+  claimNextScheduledTaskJob,
+  insertScheduledTaskJobs,
   insertTask,
   listEnabledScheduledTasksWithProjects,
-  listScheduledTaskRuns,
+  markScheduledTaskJobFailed,
+  markScheduledTaskJobRetrying,
+  markScheduledTaskJobSucceeded,
+  releaseStaleScheduledTaskJobs,
   updateScheduledTask,
 } from "@/lib/project/data";
 import { parseStoredProjectEnvEntries, serializeProjectEnvEntries } from "@/lib/project/env";
@@ -17,202 +22,318 @@ import { generateTaskTitle } from "./title";
 
 const log = Log.create({ ns: "project.scheduler" });
 
-const SCHEDULE_POLL_MS = 5_000;
-const SCHEDULE_GRACE_MS = 90_000;
+const WORKER_POLL_MS = 5_000;
+const JOB_LOCK_STALE_MS = 10 * 60 * 1000;
+const MAX_CATCH_UP_RUNS = 100;
+const MAX_JOB_ATTEMPTS = 3;
+const BASE_RETRY_DELAY_MS = 15_000;
+const MAX_RETRY_DELAY_MS = 15 * 60 * 1000;
 
 declare global {
-  var __diaboloScheduledTaskSchedulerStarted: boolean | undefined;
-  var __diaboloScheduledTaskSchedulerRunning: Promise<void> | null | undefined;
+  var __diaboloScheduledTaskWorkerStarted: boolean | undefined;
+  var __diaboloScheduledTaskWorkerRunning: Promise<void> | null | undefined;
+  var __diaboloScheduledTaskWorkerId: string | undefined;
 }
 
-const getLatestRunMap = async (scheduledTaskIds: string[]) => {
-  const runs = await listScheduledTaskRuns(scheduledTaskIds);
-  const latestRuns = new Map<string, (typeof runs)[number]>();
-
-  for (const run of runs) {
-    if (!run.scheduledTaskId || latestRuns.has(run.scheduledTaskId)) {
-      continue;
-    }
-
-    latestRuns.set(run.scheduledTaskId, run);
+const getWorkerId = () => {
+  if (!globalThis.__diaboloScheduledTaskWorkerId) {
+    globalThis.__diaboloScheduledTaskWorkerId = `worker-${crypto.randomUUID()}`;
   }
 
-  return latestRuns;
+  return globalThis.__diaboloScheduledTaskWorkerId;
 };
 
-const getMostRecentScheduledAt = (scheduleCron: string, scheduleTimezone: string, now: Date) => {
-  try {
-    const expression = CronExpressionParser.parse(scheduleCron, {
-      currentDate: now,
-      tz: scheduleTimezone,
-    });
-    const previous = expression.prev();
-    const previousIso = previous.toISOString();
+const getRetryDelayMs = (attempts: number) =>
+  Math.min(BASE_RETRY_DELAY_MS * 2 ** Math.max(0, attempts - 1), MAX_RETRY_DELAY_MS);
 
-    return previousIso ? new Date(previousIso) : null;
+const buildCatchUpDueDates = (input: {
+  createdAt: Date;
+  lastEnqueuedAt?: Date | null;
+  now: Date;
+  scheduleCron: string;
+  scheduleTimezone: string;
+}) => {
+  const cursor = input.lastEnqueuedAt ?? input.createdAt;
+
+  try {
+    const expression = CronExpressionParser.parse(input.scheduleCron, {
+      currentDate: cursor,
+      tz: input.scheduleTimezone,
+    });
+    const dueDates: Date[] = [];
+
+    while (dueDates.length < MAX_CATCH_UP_RUNS) {
+      const next = expression.next();
+      const dueAt = next.toDate();
+
+      if (dueAt.getTime() > input.now.getTime()) {
+        break;
+      }
+
+      dueDates.push(dueAt);
+    }
+
+    return { dueDates, truncated: dueDates.length === MAX_CATCH_UP_RUNS };
   } catch (error) {
     log.warn("invalid scheduled task expression", {
       error: error instanceof Error ? error.message : String(error),
-      scheduleCron,
-      scheduleTimezone,
+      scheduleCron: input.scheduleCron,
+      scheduleTimezone: input.scheduleTimezone,
     });
-    return null;
+
+    return { dueDates: [], truncated: false };
   }
 };
 
-const processDueScheduledTasks = async () => {
+const dispatchDueScheduledTaskJobs = async () => {
   const schedules = await listEnabledScheduledTasksWithProjects();
 
   if (schedules.length === 0) {
     return;
   }
 
-  const latestRuns = await getLatestRunMap(schedules.map((entry) => entry.scheduledTask.id));
   const now = new Date();
 
   for (const entry of schedules) {
     const { project, scheduledTask } = entry;
-    const dueAt = getMostRecentScheduledAt(
-      scheduledTask.scheduleCron,
-      scheduledTask.scheduleTimezone,
+    const { dueDates, truncated } = buildCatchUpDueDates({
+      createdAt: scheduledTask.createdAt,
+      lastEnqueuedAt: scheduledTask.lastEnqueuedAt,
       now,
+      scheduleCron: scheduledTask.scheduleCron,
+      scheduleTimezone: scheduledTask.scheduleTimezone,
+    });
+
+    if (dueDates.length === 0) {
+      continue;
+    }
+
+    await insertScheduledTaskJobs(
+      dueDates.map((dueAt) => ({
+        dueAt,
+        id: crypto.randomUUID(),
+        maxAttempts: MAX_JOB_ATTEMPTS,
+        projectId: project.id,
+        scheduledTaskId: scheduledTask.id,
+      })),
     );
 
-    if (!dueAt) {
-      continue;
+    await updateScheduledTask(scheduledTask.id, {
+      lastEnqueuedAt: dueDates.at(-1) ?? scheduledTask.lastEnqueuedAt ?? null,
+      ...(truncated
+        ? {
+            lastAlertedAt: now,
+            lastError: `Scheduled task catch-up reached the ${MAX_CATCH_UP_RUNS} run cap.`,
+          }
+        : {}),
+    });
+
+    log.info("scheduled task jobs dispatched", {
+      dueCount: dueDates.length,
+      lastDueAt: dueDates.at(-1)?.toISOString() ?? null,
+      projectId: project.id,
+      scheduledTaskId: scheduledTask.id,
+      truncated,
+    });
+  }
+};
+
+const queueScheduledTaskRun = async (input: {
+  dueAt: Date;
+  project: Awaited<ReturnType<typeof listEnabledScheduledTasksWithProjects>>[number]["project"];
+  scheduledTask: Awaited<
+    ReturnType<typeof listEnabledScheduledTasksWithProjects>
+  >[number]["scheduledTask"];
+  scheduledTaskJobId: string;
+}) => {
+  const executionUserId = input.scheduledTask.createdByUserId ?? input.project.userId;
+  const [selectedProvider, providers] = await Promise.all([
+    input.scheduledTask.providerId
+      ? findUserLlmProvider(executionUserId, input.scheduledTask.providerId)
+      : Promise.resolve(null),
+    listUserLlmProviders(executionUserId),
+  ]);
+  const openCodeProvider =
+    selectedProvider ?? providers.find((provider) => provider.isDefault) ?? providers[0];
+
+  if (input.scheduledTask.providerId && !selectedProvider) {
+    throw new Error("The configured provider for this scheduled task no longer exists.");
+  }
+
+  if (!openCodeProvider) {
+    throw new Error("No saved provider is available for this scheduled task.");
+  }
+
+  const openCodeConfig = await resolveOpenCodeConfig({ provider: openCodeProvider });
+  const draft = await Sandbox.startTask(
+    {
+      envVars: serializeProjectEnvEntries(parseStoredProjectEnvEntries(input.project.envVars)),
+      openCodeConfig,
+      prompt: input.scheduledTask.instructions,
+      repoId: input.project.repoId,
+      sourceBranch: input.scheduledTask.branchName ?? "",
+    },
+    executionUserId,
+  ).match(
+    (value) => value,
+    (error) => {
+      throw error;
+    },
+  );
+
+  const title = await generateTaskTitle(draft.prompt, openCodeConfig);
+  const createdTask = await insertTask({
+    branchName: draft.sourceBranch,
+    createdByUserId: executionUserId,
+    envVars: draft.envVars ? JSON.stringify(draft.envVars) : null,
+    id: draft.id,
+    opencodeModel: openCodeConfig.model,
+    opencodeProviderId: openCodeConfig.selectedProviderId,
+    projectId: input.project.id,
+    prompt: draft.prompt,
+    repoId: draft.repoId,
+    scheduledTaskId: input.scheduledTask.id,
+    sandboxStatus: "pending",
+    spawnSource: "scheduled",
+    stage: `Queued scheduled task: ${input.scheduledTask.name}`,
+    startedAt: new Date(draft.startedAt),
+    status: draft.status,
+    title,
+  });
+
+  await Sandbox.enqueueTaskMessage(createdTask.id, draft.prompt, "initial", executionUserId).match(
+    () => undefined,
+    (error) => {
+      throw error;
+    },
+  );
+
+  await markScheduledTaskJobSucceeded({
+    createdTaskId: createdTask.id,
+    dueAt: input.dueAt,
+    jobId: input.scheduledTaskJobId,
+    now: new Date(),
+    scheduledTaskId: input.scheduledTask.id,
+  });
+
+  if (input.scheduledTask.runOnce) {
+    await updateScheduledTask(input.scheduledTask.id, { enabled: 0 });
+  }
+
+  log.info("scheduled task job queued", {
+    dueAt: input.dueAt.toISOString(),
+    projectId: input.project.id,
+    scheduledTaskId: input.scheduledTask.id,
+    scheduledTaskJobId: input.scheduledTaskJobId,
+    taskId: createdTask.id,
+  });
+};
+
+const processScheduledTaskJobs = async () => {
+  const now = new Date();
+  const staleBefore = new Date(now.getTime() - JOB_LOCK_STALE_MS);
+
+  await releaseStaleScheduledTaskJobs(staleBefore);
+
+  for (;;) {
+    const claimed = await claimNextScheduledTaskJob({
+      now: new Date(),
+      staleBefore,
+      workerId: getWorkerId(),
+    });
+
+    if (!claimed) {
+      break;
     }
-
-    if (now.getTime() - dueAt.getTime() > SCHEDULE_GRACE_MS) {
-      continue;
-    }
-
-    const latestRun = latestRuns.get(scheduledTask.id);
-
-    if (latestRun && new Date(latestRun.startedAt).getTime() >= dueAt.getTime()) {
-      continue;
-    }
-
-    const executionUserId = scheduledTask.createdByUserId ?? project.userId;
 
     try {
-      const [selectedProvider, providers] = await Promise.all([
-        scheduledTask.providerId
-          ? findUserLlmProvider(executionUserId, scheduledTask.providerId)
-          : Promise.resolve(null),
-        listUserLlmProviders(executionUserId),
-      ]);
-      const openCodeProvider =
-        selectedProvider ?? providers.find((provider) => provider.isDefault) ?? providers[0];
+      await queueScheduledTaskRun({
+        dueAt: claimed.scheduledTaskJob.dueAt,
+        project: claimed.project,
+        scheduledTask: claimed.scheduledTask,
+        scheduledTaskJobId: claimed.scheduledTaskJob.id,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
 
-      if (scheduledTask.providerId && !selectedProvider) {
-        log.warn("scheduled task provider missing", {
-          executionUserId,
-          projectId: project.id,
-          providerId: scheduledTask.providerId,
-          scheduledTaskId: scheduledTask.id,
+      if (claimed.scheduledTaskJob.attempts >= claimed.scheduledTaskJob.maxAttempts) {
+        await markScheduledTaskJobFailed({
+          error: message,
+          jobId: claimed.scheduledTaskJob.id,
+          now: new Date(),
+          scheduledTaskId: claimed.scheduledTask.id,
+        });
+
+        log.error("scheduled task job exhausted retries", {
+          error: message,
+          projectId: claimed.project.id,
+          scheduledTaskId: claimed.scheduledTask.id,
+          scheduledTaskJobId: claimed.scheduledTaskJob.id,
         });
         continue;
       }
 
-      if (!openCodeProvider) {
-        continue;
-      }
-
-      const openCodeConfig = await resolveOpenCodeConfig({ provider: openCodeProvider });
-      const draft = await Sandbox.startTask(
-        {
-          envVars: serializeProjectEnvEntries(parseStoredProjectEnvEntries(project.envVars)),
-          openCodeConfig,
-          prompt: scheduledTask.instructions,
-          repoId: project.repoId,
-          sourceBranch: scheduledTask.branchName ?? "",
-        },
-        executionUserId,
-      ).match(
-        (value) => value,
-        (error) => {
-          throw error;
-        },
+      const nextAvailableAt = new Date(
+        Date.now() + getRetryDelayMs(claimed.scheduledTaskJob.attempts),
       );
 
-      const title = await generateTaskTitle(draft.prompt, openCodeConfig);
-      const createdTask = await insertTask({
-        branchName: draft.sourceBranch,
-        createdByUserId: executionUserId,
-        envVars: draft.envVars ? JSON.stringify(draft.envVars) : null,
-        id: draft.id,
-        opencodeModel: openCodeConfig.model,
-        opencodeProviderId: openCodeConfig.selectedProviderId,
-        projectId: project.id,
-        prompt: draft.prompt,
-        repoId: draft.repoId,
-        scheduledTaskId: scheduledTask.id,
-        sandboxStatus: "pending",
-        spawnSource: "scheduled",
-        stage: `Queued scheduled task: ${scheduledTask.name}`,
-        startedAt: new Date(draft.startedAt),
-        status: draft.status,
-        title,
+      await markScheduledTaskJobRetrying({
+        error: message,
+        jobId: claimed.scheduledTaskJob.id,
+        nextAvailableAt,
       });
 
-      await Sandbox.enqueueTaskMessage(
-        createdTask.id,
-        draft.prompt,
-        "initial",
-        executionUserId,
-      ).match(
-        () => undefined,
-        (error) => {
-          throw error;
-        },
-      );
-
-      if (scheduledTask.runOnce) {
-        await updateScheduledTask(scheduledTask.id, { enabled: 0 });
-      }
-
-      log.info("scheduled task queued", {
-        dueAt: dueAt.toISOString(),
-        projectId: project.id,
-        scheduledTaskId: scheduledTask.id,
-        taskId: createdTask.id,
-      });
-    } catch (error) {
-      log.error("scheduled task failed to queue", {
-        error: error instanceof Error ? error.message : String(error),
-        projectId: project.id,
-        scheduledTaskId: scheduledTask.id,
+      log.warn("scheduled task job retry scheduled", {
+        attempts: claimed.scheduledTaskJob.attempts,
+        error: message,
+        nextAvailableAt: nextAvailableAt.toISOString(),
+        projectId: claimed.project.id,
+        scheduledTaskId: claimed.scheduledTask.id,
+        scheduledTaskJobId: claimed.scheduledTaskJob.id,
       });
     }
   }
 };
 
-const runSchedulerTick = async () => {
-  if (globalThis.__diaboloScheduledTaskSchedulerRunning) {
-    return globalThis.__diaboloScheduledTaskSchedulerRunning;
+export const runScheduledTaskWorkerTick = async () => {
+  await dispatchDueScheduledTaskJobs();
+  await processScheduledTaskJobs();
+};
+
+const runWorkerTickSafely = async () => {
+  if (globalThis.__diaboloScheduledTaskWorkerRunning) {
+    return globalThis.__diaboloScheduledTaskWorkerRunning;
   }
 
-  globalThis.__diaboloScheduledTaskSchedulerRunning = processDueScheduledTasks().finally(() => {
-    globalThis.__diaboloScheduledTaskSchedulerRunning = null;
-  });
+  globalThis.__diaboloScheduledTaskWorkerRunning = runScheduledTaskWorkerTick()
+    .catch((error) => {
+      log.error("scheduled task worker tick failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    })
+    .finally(() => {
+      globalThis.__diaboloScheduledTaskWorkerRunning = null;
+    });
 
-  return globalThis.__diaboloScheduledTaskSchedulerRunning;
+  return globalThis.__diaboloScheduledTaskWorkerRunning;
 };
 
 export const ensureScheduledTaskScheduler = () => {
-  if (globalThis.__diaboloScheduledTaskSchedulerStarted) {
+  if (globalThis.__diaboloScheduledTaskWorkerStarted) {
     return;
   }
 
-  globalThis.__diaboloScheduledTaskSchedulerStarted = true;
+  globalThis.__diaboloScheduledTaskWorkerStarted = true;
 
-  void runSchedulerTick();
+  void runWorkerTickSafely();
   setInterval(() => {
-    void runSchedulerTick();
-  }, SCHEDULE_POLL_MS);
+    void runWorkerTickSafely();
+  }, WORKER_POLL_MS);
 
-  log.info("scheduled task scheduler started", {
-    graceMs: SCHEDULE_GRACE_MS,
-    pollMs: SCHEDULE_POLL_MS,
+  log.info("scheduled task worker started", {
+    lockStaleMs: JOB_LOCK_STALE_MS,
+    maxCatchUpRuns: MAX_CATCH_UP_RUNS,
+    pollMs: WORKER_POLL_MS,
+    workerId: getWorkerId(),
   });
 };

@@ -1,5 +1,13 @@
 import { relations } from "drizzle-orm";
-import { index, integer, pgTable, primaryKey, text, timestamp } from "drizzle-orm/pg-core";
+import {
+  index,
+  integer,
+  pgTable,
+  primaryKey,
+  text,
+  timestamp,
+  uniqueIndex,
+} from "drizzle-orm/pg-core";
 
 import { user } from "@/lib/db/schema";
 import { organisation } from "@/lib/org/org.sql";
@@ -140,6 +148,12 @@ export const scheduledTask = pgTable(
     branchName: text("branch_name"),
     enabled: integer().notNull().default(1),
     runOnce: integer("run_once").notNull().default(0),
+    lastEnqueuedAt: timestamp("last_enqueued_at"),
+    lastRunAt: timestamp("last_run_at"),
+    lastFailureAt: timestamp("last_failure_at"),
+    lastAlertedAt: timestamp("last_alerted_at"),
+    lastError: text("last_error"),
+    consecutiveFailures: integer("consecutive_failures").notNull().default(0),
     createdByUserId: text("created_by_user_id").references(() => user.id, {
       onDelete: "set null",
     }),
@@ -153,6 +167,44 @@ export const scheduledTask = pgTable(
     index("scheduled_task_projectId_idx").on(table.projectId),
     index("scheduled_task_createdByUserId_idx").on(table.createdByUserId),
     index("scheduled_task_enabled_idx").on(table.enabled),
+  ],
+);
+
+export const scheduledTaskJob = pgTable(
+  "scheduled_task_job",
+  {
+    id: text().primaryKey(),
+    scheduledTaskId: text("scheduled_task_id")
+      .notNull()
+      .references(() => scheduledTask.id, { onDelete: "cascade" }),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => project.id, { onDelete: "cascade" }),
+    dueAt: timestamp("due_at").notNull(),
+    availableAt: timestamp("available_at").defaultNow().notNull(),
+    status: text().notNull().default("pending"),
+    attempts: integer().notNull().default(0),
+    maxAttempts: integer("max_attempts").notNull().default(3),
+    lockedAt: timestamp("locked_at"),
+    lockedBy: text("locked_by"),
+    lastError: text("last_error"),
+    createdTaskId: text("created_task_id").references(() => task.id, { onDelete: "set null" }),
+    completedAt: timestamp("completed_at"),
+    createdAt: timestamp().defaultNow().notNull(),
+    updatedAt: timestamp()
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    index("scheduled_task_job_scheduledTaskId_idx").on(table.scheduledTaskId),
+    index("scheduled_task_job_projectId_idx").on(table.projectId),
+    index("scheduled_task_job_status_availableAt_idx").on(table.status, table.availableAt),
+    index("scheduled_task_job_lockedAt_idx").on(table.lockedAt),
+    uniqueIndex("scheduled_task_job_scheduledTaskId_dueAt_idx").on(
+      table.scheduledTaskId,
+      table.dueAt,
+    ),
   ],
 );
 
@@ -245,6 +297,7 @@ export const taskEventSequence = pgTable(
 export const projectRelations = relations(project, ({ many, one }) => ({
   tasks: many(task),
   scheduledTasks: many(scheduledTask),
+  scheduledTaskJobs: many(scheduledTaskJob),
   members: many(projectMember),
   invites: many(projectInvite),
   owner: one(user, { fields: [project.userId], references: [user.id] }),
@@ -292,6 +345,21 @@ export const scheduledTaskRelations = relations(scheduledTask, ({ one }) => ({
   createdBy: one(user, {
     fields: [scheduledTask.createdByUserId],
     references: [user.id],
+  }),
+}));
+
+export const scheduledTaskJobRelations = relations(scheduledTaskJob, ({ one }) => ({
+  project: one(project, {
+    fields: [scheduledTaskJob.projectId],
+    references: [project.id],
+  }),
+  scheduledTask: one(scheduledTask, {
+    fields: [scheduledTaskJob.scheduledTaskId],
+    references: [scheduledTask.id],
+  }),
+  task: one(task, {
+    fields: [scheduledTaskJob.createdTaskId],
+    references: [task.id],
   }),
 }));
 

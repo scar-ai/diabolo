@@ -21,7 +21,9 @@ import {
   TASK_ATTACHMENT_ARTIFACT_TYPE,
 } from "@/lib/task-attachments";
 import { findUserLlmProvider, listUserLlmProviders } from "@/lib/user/data";
+import { parseProviderUsageLog, recordProviderUsageEvents } from "@/lib/user/provider-usage";
 
+import { OPENCODE_USAGE_LOG_PATH } from "./opencode";
 import {
   assertTaskNotCancelled,
   buildOpenCodeEnvironment,
@@ -213,6 +215,31 @@ const runOpenCodeMessage = async (input: {
     }),
     3600,
   );
+
+  const usageLog = await runSandboxCommand(
+    input.prepared.sandbox,
+    input.taskId,
+    input.messageId,
+    `if [ -f '${OPENCODE_USAGE_LOG_PATH}' ]; then cat '${OPENCODE_USAGE_LOG_PATH}'; fi`,
+    input.prepared.sandboxPath,
+    undefined,
+    30,
+  );
+  const usageEvents = parseProviderUsageLog(usageLog.output);
+
+  await recordProviderUsageEvents({
+    messageId: input.messageId,
+    model,
+    provider: {
+      id: input.llmProvider.id,
+      name: input.llmProvider.name,
+      orgId: input.llmProvider.orgId,
+      providerKind: input.llmProvider.providerKind,
+      userId: input.llmProvider.userId,
+    },
+    taskId: input.taskId,
+    usageEvents,
+  });
 
   await parseAgentOutput(input.taskId, input.messageId, response.output);
   await assertTaskNotCancelled(input.taskId);

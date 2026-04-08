@@ -1,3 +1,4 @@
+import { ClientTimeText } from "@/components/app/client-time";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 
 export type UserInfo = {
@@ -35,7 +36,7 @@ export function UserBubble({
       </div>
       {timestamp ? (
         <span className="text-[11px] text-muted-foreground/50">
-          {new Date(timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+          <ClientTimeText value={timestamp} options={{ hour: "2-digit", minute: "2-digit" }} />
         </span>
       ) : null}
     </div>

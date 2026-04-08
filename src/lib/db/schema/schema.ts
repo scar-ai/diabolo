@@ -1,5 +1,5 @@
 import { relations } from "drizzle-orm";
-import { pgTable, text, timestamp, boolean, index } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, boolean, index, integer } from "drizzle-orm/pg-core";
 
 import { organisation } from "@/lib/org/org.sql";
 import { scheduledTask } from "@/lib/project/project.sql";
@@ -129,11 +129,43 @@ export const userLlmProvider = pgTable(
   ],
 );
 
+export const providerTokenUsage = pgTable(
+  "provider_token_usage",
+  {
+    id: text("id").primaryKey(),
+    providerId: text("provider_id").notNull(),
+    providerKind: text("provider_kind").notNull(),
+    providerModel: text("provider_model").notNull(),
+    providerName: text("provider_name").notNull(),
+    providerScope: text("provider_scope").notNull(),
+    userId: text("user_id").references(() => user.id, { onDelete: "cascade" }),
+    orgId: text("org_id").references(() => organisation.id, { onDelete: "cascade" }),
+    taskId: text("task_id"),
+    messageId: text("message_id"),
+    inputTokens: integer("input_tokens").notNull().default(0),
+    outputTokens: integer("output_tokens").notNull().default(0),
+    cacheCreationTokens: integer("cache_creation_tokens").notNull().default(0),
+    cacheReadTokens: integer("cache_read_tokens").notNull().default(0),
+    reasoningTokens: integer("reasoning_tokens").notNull().default(0),
+    totalTokens: integer("total_tokens").notNull().default(0),
+    source: text("source").notNull().default("sandbox_proxy"),
+    occurredAt: timestamp("occurred_at").defaultNow().notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("provider_token_usage_provider_id_idx").on(table.providerId),
+    index("provider_token_usage_user_id_idx").on(table.userId),
+    index("provider_token_usage_org_id_idx").on(table.orgId),
+    index("provider_token_usage_occurred_at_idx").on(table.occurredAt),
+  ],
+);
+
 export const userRelations = relations(user, ({ many }) => ({
   sessions: many(session),
   accounts: many(account),
   scheduledTasks: many(scheduledTask),
   llmProviders: many(userLlmProvider),
+  providerTokenUsage: many(providerTokenUsage),
   providerSettings: many(userProviderSettings),
 }));
 
@@ -165,6 +197,17 @@ export const userLlmProviderRelations = relations(userLlmProvider, ({ one }) => 
   }),
   user: one(user, {
     fields: [userLlmProvider.userId],
+    references: [user.id],
+  }),
+}));
+
+export const providerTokenUsageRelations = relations(providerTokenUsage, ({ one }) => ({
+  org: one(organisation, {
+    fields: [providerTokenUsage.orgId],
+    references: [organisation.id],
+  }),
+  user: one(user, {
+    fields: [providerTokenUsage.userId],
     references: [user.id],
   }),
 }));

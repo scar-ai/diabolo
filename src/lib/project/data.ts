@@ -1,10 +1,17 @@
-import { and, desc, eq, inArray, isNotNull, or } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, lte, or, sql } from "drizzle-orm";
 import { getTableColumns } from "drizzle-orm";
 
 import { db } from "@/lib/db";
 import { organisationMember } from "@/lib/org/org.sql";
 
-import { project, projectInvite, projectMember, scheduledTask, task } from "./project.sql";
+import {
+  project,
+  projectInvite,
+  projectMember,
+  scheduledTask,
+  scheduledTaskJob,
+  task,
+} from "./project.sql";
 import { taskSummarySelection } from "./shared";
 
 export type ProjectRecord = typeof project.$inferSelect;
@@ -12,6 +19,7 @@ export type TaskRecord = typeof task.$inferSelect;
 export type ScheduledTaskRecord = typeof scheduledTask.$inferSelect;
 export type ProjectMemberRecord = typeof projectMember.$inferSelect;
 export type ProjectInviteRecord = typeof projectInvite.$inferSelect;
+export type ScheduledTaskJobRecord = typeof scheduledTaskJob.$inferSelect;
 export type TaskForUserRecord = {
   project: ProjectRecord;
   task: TaskRecord;
@@ -19,6 +27,11 @@ export type TaskForUserRecord = {
 export type ScheduledTaskWithProjectRecord = {
   project: ProjectRecord;
   scheduledTask: ScheduledTaskRecord;
+};
+export type ScheduledTaskJobWithProjectRecord = {
+  project: ProjectRecord;
+  scheduledTask: ScheduledTaskRecord;
+  scheduledTaskJob: ScheduledTaskJobRecord;
 };
 
 // ─── Project queries ──────────────────────────────────────────────────────────
@@ -251,6 +264,7 @@ export const updateTask = (taskId: string, values: Partial<TaskRecord>) =>
 
 export const insertScheduledTask = (input: {
   branchName?: string | null;
+  consecutiveFailures?: number;
   createdByUserId?: string | null;
   id: string;
   instructions: string;
@@ -316,6 +330,189 @@ export const updateScheduledTask = (
     .where(eq(scheduledTask.id, scheduledTaskId))
     .returning()
     .then((rows) => rows[0]);
+
+export const insertScheduledTaskJobs = (
+  input: Array<{
+    availableAt?: Date;
+    dueAt: Date;
+    id: string;
+    maxAttempts?: number;
+    projectId: string;
+    scheduledTaskId: string;
+  }>,
+) =>
+  input.length === 0
+    ? Promise.resolve([])
+    : db
+        .insert(scheduledTaskJob)
+        .values(
+          input.map((entry) => ({
+            availableAt: entry.availableAt ?? entry.dueAt,
+            dueAt: entry.dueAt,
+            id: entry.id,
+            maxAttempts: entry.maxAttempts ?? 3,
+            projectId: entry.projectId,
+            scheduledTaskId: entry.scheduledTaskId,
+          })),
+        )
+        .onConflictDoNothing({
+          target: [scheduledTaskJob.scheduledTaskId, scheduledTaskJob.dueAt],
+        })
+        .returning();
+
+export const claimNextScheduledTaskJob = async (input: {
+  now: Date;
+  staleBefore: Date;
+  workerId: string;
+}) =>
+  db.transaction(async (tx) => {
+    const candidate = await tx
+      .select({ id: scheduledTaskJob.id })
+      .from(scheduledTaskJob)
+      .where(
+        and(
+          or(eq(scheduledTaskJob.status, "pending"), eq(scheduledTaskJob.status, "retrying")),
+          lte(scheduledTaskJob.availableAt, input.now),
+          or(isNull(scheduledTaskJob.lockedAt), lt(scheduledTaskJob.lockedAt, input.staleBefore)),
+        ),
+      )
+      .orderBy(asc(scheduledTaskJob.availableAt), asc(scheduledTaskJob.dueAt))
+      .limit(1)
+      .then((rows) => rows[0]);
+
+    if (!candidate) {
+      return null;
+    }
+
+    const claimed = await tx
+      .update(scheduledTaskJob)
+      .set({
+        attempts: sql`${scheduledTaskJob.attempts} + 1`,
+        lockedAt: input.now,
+        lockedBy: input.workerId,
+        status: "running",
+      })
+      .where(
+        and(
+          eq(scheduledTaskJob.id, candidate.id),
+          or(eq(scheduledTaskJob.status, "pending"), eq(scheduledTaskJob.status, "retrying")),
+          lte(scheduledTaskJob.availableAt, input.now),
+          or(isNull(scheduledTaskJob.lockedAt), lt(scheduledTaskJob.lockedAt, input.staleBefore)),
+        ),
+      )
+      .returning()
+      .then((rows) => rows[0]);
+
+    if (!claimed) {
+      return null;
+    }
+
+    const joined = await tx
+      .select({
+        project: getTableColumns(project),
+        scheduledTask: getTableColumns(scheduledTask),
+        scheduledTaskJob: getTableColumns(scheduledTaskJob),
+      })
+      .from(scheduledTaskJob)
+      .innerJoin(scheduledTask, eq(scheduledTaskJob.scheduledTaskId, scheduledTask.id))
+      .innerJoin(project, eq(scheduledTaskJob.projectId, project.id))
+      .where(eq(scheduledTaskJob.id, claimed.id))
+      .then((rows) => rows[0]);
+
+    return joined as ScheduledTaskJobWithProjectRecord | null;
+  });
+
+export const markScheduledTaskJobSucceeded = async (input: {
+  createdTaskId: string;
+  dueAt: Date;
+  jobId: string;
+  now: Date;
+  scheduledTaskId: string;
+}) => {
+  await db.transaction(async (tx) => {
+    await tx
+      .update(scheduledTaskJob)
+      .set({
+        completedAt: input.now,
+        createdTaskId: input.createdTaskId,
+        lockedAt: null,
+        lockedBy: null,
+        status: "succeeded",
+      })
+      .where(eq(scheduledTaskJob.id, input.jobId));
+
+    await tx
+      .update(scheduledTask)
+      .set({
+        consecutiveFailures: 0,
+        lastError: null,
+        lastRunAt: input.dueAt,
+      })
+      .where(eq(scheduledTask.id, input.scheduledTaskId));
+  });
+};
+
+export const markScheduledTaskJobRetrying = async (input: {
+  error: string;
+  jobId: string;
+  nextAvailableAt: Date;
+}) =>
+  db
+    .update(scheduledTaskJob)
+    .set({
+      availableAt: input.nextAvailableAt,
+      lastError: input.error,
+      lockedAt: null,
+      lockedBy: null,
+      status: "retrying",
+    })
+    .where(eq(scheduledTaskJob.id, input.jobId))
+    .returning()
+    .then((rows) => rows[0]);
+
+export const markScheduledTaskJobFailed = async (input: {
+  error: string;
+  jobId: string;
+  now: Date;
+  scheduledTaskId: string;
+}) => {
+  await db.transaction(async (tx) => {
+    await tx
+      .update(scheduledTaskJob)
+      .set({
+        completedAt: input.now,
+        lastError: input.error,
+        lockedAt: null,
+        lockedBy: null,
+        status: "failed",
+      })
+      .where(eq(scheduledTaskJob.id, input.jobId));
+
+    await tx
+      .update(scheduledTask)
+      .set({
+        consecutiveFailures: sql`${scheduledTask.consecutiveFailures} + 1`,
+        lastAlertedAt: input.now,
+        lastError: input.error,
+        lastFailureAt: input.now,
+      })
+      .where(eq(scheduledTask.id, input.scheduledTaskId));
+  });
+};
+
+export const releaseStaleScheduledTaskJobs = (staleBefore: Date) =>
+  db
+    .update(scheduledTaskJob)
+    .set({
+      lockedAt: null,
+      lockedBy: null,
+      status: sql`case
+        when ${scheduledTaskJob.status} = 'running' then 'retrying'
+        else ${scheduledTaskJob.status}
+      end`,
+    })
+    .where(and(eq(scheduledTaskJob.status, "running"), lt(scheduledTaskJob.lockedAt, staleBefore)))
+    .returning();
 
 export const deleteScheduledTask = (scheduledTaskId: string, projectId: string) =>
   db

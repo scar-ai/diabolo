@@ -20,6 +20,7 @@ import { OPENAI_CODEX_RESPONSES_PROVIDER_ID, normalizeProviderApiKey } from "@/l
 import { Org } from "@/lib/org";
 import { unwrap } from "@/lib/result";
 import { listUserLlmProviders, supportsCodexProviderSchema } from "@/lib/user/data";
+import { listUserProviderUsageSummary } from "@/lib/user/provider-usage";
 
 const providerIdPattern = /^[a-z0-9]+(?:[-_][a-z0-9]+)*$/;
 
@@ -285,6 +286,10 @@ export const $listAvailableCodexModels = createServerFn({ method: "GET" })
     const provider = await ensureCodexSharedAuthProvider(context.user.id);
     return listAvailableCodexModels(provider);
   });
+
+export const $getUserProviderUsageSummary = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => listUserProviderUsageSummary(context.user.id));
 
 export const $saveUserLlmProviders = createServerFn({ method: "POST" })
   .middleware([authMiddleware])

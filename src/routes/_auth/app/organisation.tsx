@@ -13,6 +13,7 @@ import {
 import { useState } from "react";
 import { toast } from "sonner";
 
+import { ProviderUsageChart } from "@/components/app/provider-usage-chart";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -27,7 +28,12 @@ import {
   $kickMember,
   $promoteMember,
 } from "@/lib/org/functions";
-import { myInvitesQueryOptions, myOrgQueryOptions, orgKeys } from "@/lib/org/queries";
+import {
+  myInvitesQueryOptions,
+  myOrgQueryOptions,
+  organisationProviderUsageSummaryQueryOptions,
+  orgKeys,
+} from "@/lib/org/queries";
 import { $acceptProjectInvite, $declineProjectInvite } from "@/lib/project/functions";
 import { collaboratorKeys, myProjectInvitesQueryOptions } from "@/lib/project/queries";
 import { $saveUserLlmProviders } from "@/lib/user/functions";
@@ -128,6 +134,9 @@ function OrganisationPage() {
   const invitesQuery = useQuery(myInvitesQueryOptions(user.id));
   const projectInvitesQuery = useQuery(myProjectInvitesQueryOptions(user.id));
   const providersQuery = useQuery(userLlmProvidersQueryOptions());
+  const organisationProviderUsageQuery = useQuery(
+    organisationProviderUsageSummaryQueryOptions(user.id),
+  );
 
   const org = orgQuery.data ?? null;
   const invites = invitesQuery.data ?? [];
@@ -576,6 +585,12 @@ function OrganisationPage() {
                 </div>
               </section>
             )}
+
+            <ProviderUsageChart
+              title="Organisation usage"
+              description={`Daily token consumption for ${org.name}'s shared providers.`}
+              usage={organisationProviderUsageQuery.data}
+            />
 
             {/* Project invites */}
             {projectInvites.length > 0 && (

@@ -8,6 +8,7 @@ import { buildOpenCodeConfigContent } from "@/lib/opencode/config";
 import { Sandbox } from "@/lib/sandbox";
 import { SandboxEvents } from "@/lib/sandbox/events";
 import { CODEX_LOCAL_PROXY_BASE_URL, CODEX_LOCAL_PROXY_SCRIPT } from "@/lib/sandbox/opencode";
+import { OPENCODE_USAGE_LOG_PATH } from "@/lib/sandbox/opencode";
 import { SandboxRuntimeState } from "@/lib/sandbox/runtime-state";
 import {
   appendTaskAgentMessage,
@@ -449,8 +450,11 @@ export const buildOpenCodeEnvironment = (input: {
   OPENCODE_GITHUB_TOKEN: input.githubToken,
   OPENCODE_GIT_AUTHOR_EMAIL: input.viewer.email,
   OPENCODE_GIT_AUTHOR_NAME: input.viewer.name,
+  OPENCODE_PROXY_MODE: input.providerKind,
+  OPENCODE_PROXY_UPSTREAM_BASE_URL: input.baseUrl,
+  OPENCODE_PROXY_USAGE_LOG_PATH: `${input.sandboxPath}/${OPENCODE_USAGE_LOG_PATH}`,
   OPENCODE_REPO_PATH: input.sandboxPath,
-  ...(input.providerKind === "codex"
+  ...(input.providerKind === "codex" || input.providerKind === "manual"
     ? {
         OPENCODE_CODEX_PROVIDER_ID: input.providerId,
         OPENCODE_CODEX_PROXY_BASE_URL: CODEX_LOCAL_PROXY_BASE_URL,

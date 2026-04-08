@@ -4,6 +4,7 @@ import * as z from "zod";
 import { authMiddleware } from "@/lib/auth/middleware";
 import { Org } from "@/lib/org";
 import { unwrap } from "@/lib/result";
+import { listOrganisationProviderUsageSummary } from "@/lib/user/provider-usage";
 
 const createOrgInputSchema = z.object({
   name: z.string().min(1).max(80),
@@ -42,6 +43,23 @@ export const $getMyOrg = createServerFn({ method: "GET" })
 export const $getMyInvites = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
   .handler(async ({ context }) => unwrap(Org.getPendingInvitesForUser(context.user.id)));
+
+export const $getOrganisationProviderUsageSummary = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    const membership = await unwrap(Org.getMembershipForUser(context.user.id));
+
+    if (!membership?.orgId) {
+      return {
+        days: [],
+        periodDays: 30,
+        periodStart: new Date().toISOString(),
+        providers: [],
+      };
+    }
+
+    return listOrganisationProviderUsageSummary(membership.orgId);
+  });
 
 export const $inviteMember = createServerFn({ method: "POST" })
   .middleware([authMiddleware])

@@ -162,6 +162,20 @@
       "when": 1775550000000,
       "tag": "0023_calm_codex_provider",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1775680821170,
+      "tag": "0024_provider_token_usage",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1775681217890,
+      "tag": "0025_scheduled_task_jobs",
+      "breakpoints": true
     }
   ]
 }

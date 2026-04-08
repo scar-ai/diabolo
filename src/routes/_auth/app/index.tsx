@@ -5,6 +5,7 @@ import { GitBranchIcon, PlusIcon } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
+import { useClientNow } from "@/components/app/client-time";
 import { BranchSelector } from "@/components/app/home/branch-selector";
 import { CreateProjectDialog } from "@/components/app/home/create-project-dialog";
 import { ProviderSelector } from "@/components/app/home/provider-selector";
@@ -381,8 +382,8 @@ function AppHome() {
   );
 }
 
-function getGreeting(name: string): string {
-  const hour = new Date().getHours();
+function getGreeting(name: string, now: Date): string {
+  const hour = now.getHours();
   const firstName = name.split(" ")[0];
 
   if (hour >= 5 && hour < 12) {
@@ -392,7 +393,7 @@ function getGreeting(name: string): string {
       `Morning, ${firstName}. Your future self thanks you for starting early.`,
       `Up with the sun, ${firstName}? Respect. Let's ship something.`,
     ];
-    return lines[new Date().getDate() % lines.length];
+    return lines[now.getDate() % lines.length];
   }
 
   if (hour >= 12 && hour < 17) {
@@ -402,7 +403,7 @@ function getGreeting(name: string): string {
       `Hey ${firstName}, it's that post-lunch window where great code gets written. Probably.`,
       `${firstName}, it's afternoon. Time to pretend the morning was just warmup.`,
     ];
-    return lines[new Date().getDate() % lines.length];
+    return lines[now.getDate() % lines.length];
   }
 
   if (hour >= 17 && hour < 21) {
@@ -412,7 +413,7 @@ function getGreeting(name: string): string {
       `Good evening, ${firstName}. Dinner can wait. Deployments cannot.`,
       `${firstName}, it's evening. The best engineers ship after 5pm. (Citation needed.)`,
     ];
-    return lines[new Date().getDate() % lines.length];
+    return lines[now.getDate() % lines.length];
   }
 
   const lines = [
@@ -421,13 +422,18 @@ function getGreeting(name: string): string {
     `Night mode activated, ${firstName}. No one's watching. Ship it.`,
     `${firstName}, it's the middle of the night. Either you're very dedicated or very stuck.`,
   ];
-  return lines[new Date().getDate() % lines.length];
+  return lines[now.getDate() % lines.length];
 }
 
 function Greeting({ name }: { name: string }) {
+  const now = useClientNow();
+  const firstName = name.split(" ")[0];
+
   return (
     <div className="text-center">
-      <h2 className="text-2xl font-semibold text-foreground">{getGreeting(name)}</h2>
+      <h2 className="text-2xl font-semibold text-foreground">
+        {now ? getGreeting(name, now) : `Hey ${firstName}.`}
+      </h2>
       <p className="mt-1.5 text-sm text-muted-foreground">Here&apos;s what&apos;s going on.</p>
     </div>
   );

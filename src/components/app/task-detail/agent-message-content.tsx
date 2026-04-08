@@ -1,6 +1,7 @@
 import { ChevronDownIcon, ChevronRightIcon, TerminalIcon } from "lucide-react";
 import { useState } from "react";
 
+import { ClientTimeText } from "@/components/app/client-time";
 import { Markdown } from "@/components/app/markdown";
 import type { ParsedTaskArtifact } from "@/lib/project/task-detail-selector";
 
@@ -82,10 +83,13 @@ export function AgentMessageContent({
 
       {completedAt || startedAt ? (
         <span className="text-[11px] text-muted-foreground/50">
-          {new Date(completedAt ?? startedAt!).toLocaleTimeString([], {
-            hour: "2-digit",
-            minute: "2-digit",
-          })}
+          <ClientTimeText
+            value={completedAt ?? startedAt!}
+            options={{
+              hour: "2-digit",
+              minute: "2-digit",
+            }}
+          />
         </span>
       ) : null}
     </div>

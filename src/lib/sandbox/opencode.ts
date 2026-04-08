@@ -6,12 +6,119 @@ const SANDBOX_TOOL_PATH_EXPORT =
   'export PATH="$HOME/.local/bin:$HOME/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/bin:$(npm config get prefix)/bin:$PATH"';
 
 export const CODEX_LOCAL_PROXY_BASE_URL = "http://127.0.0.1:4312";
+export const OPENCODE_USAGE_LOG_PATH = ".opencode/artifacts/opencode-usage.jsonl";
 
 export const CODEX_LOCAL_PROXY_SCRIPT = String.raw`import http from "node:http";
+import fs from "node:fs/promises";
+import path from "node:path";
 
 const port = Number(process.env.OPENCODE_CODEX_PROXY_PORT || "4312");
+const mode = (process.env.OPENCODE_PROXY_MODE || "manual").trim() || "manual";
 const providerId = (process.env.OPENCODE_CODEX_PROVIDER_ID || "codex").trim() || "codex";
 const endpoint = "https://chatgpt.com/backend-api/codex/responses";
+const upstreamBaseUrl = (process.env.OPENCODE_PROXY_UPSTREAM_BASE_URL || "").trim().replace(/\/+$/, "");
+const usageLogPath = (process.env.OPENCODE_PROXY_USAGE_LOG_PATH || "").trim();
+
+const appendUsageRecord = async (usage) => {
+  if (!usageLogPath || !usage || typeof usage !== "object") {
+    return;
+  }
+
+  const inputTokens =
+    typeof usage.inputTokens === "number" && Number.isFinite(usage.inputTokens) ? usage.inputTokens : 0;
+  const outputTokens =
+    typeof usage.outputTokens === "number" && Number.isFinite(usage.outputTokens) ? usage.outputTokens : 0;
+  const cacheCreationTokens =
+    typeof usage.cacheCreationTokens === "number" && Number.isFinite(usage.cacheCreationTokens)
+      ? usage.cacheCreationTokens
+      : 0;
+  const cacheReadTokens =
+    typeof usage.cacheReadTokens === "number" && Number.isFinite(usage.cacheReadTokens) ? usage.cacheReadTokens : 0;
+  const reasoningTokens =
+    typeof usage.reasoningTokens === "number" && Number.isFinite(usage.reasoningTokens)
+      ? usage.reasoningTokens
+      : 0;
+  const totalTokens =
+    typeof usage.totalTokens === "number" && Number.isFinite(usage.totalTokens)
+      ? usage.totalTokens
+      : inputTokens + outputTokens + cacheCreationTokens + cacheReadTokens + reasoningTokens;
+
+  if (totalTokens <= 0) {
+    return;
+  }
+
+  await fs.mkdir(path.dirname(usageLogPath), { recursive: true }).catch(() => {});
+  await fs
+    .appendFile(
+      usageLogPath,
+      JSON.stringify({
+        cacheCreationTokens,
+        cacheReadTokens,
+        inputTokens,
+        outputTokens,
+        reasoningTokens,
+        timestamp: Date.now(),
+        totalTokens,
+        type: "usage",
+      }) + "\n",
+      "utf8",
+    )
+    .catch(() => {});
+};
+
+const extractCodexUsage = (payload) => {
+  const usage = payload?.usage;
+
+  if (!usage || typeof usage !== "object") {
+    return null;
+  }
+
+  const inputTokens = typeof usage.input_tokens === "number" ? usage.input_tokens : 0;
+  const outputTokens = typeof usage.output_tokens === "number" ? usage.output_tokens : 0;
+  const reasoningTokens =
+    typeof usage.output_tokens_details?.reasoning_tokens === "number"
+      ? usage.output_tokens_details.reasoning_tokens
+      : 0;
+  const totalTokens = typeof usage.total_tokens === "number" ? usage.total_tokens : inputTokens + outputTokens;
+
+  return {
+    inputTokens,
+    outputTokens,
+    reasoningTokens,
+    totalTokens,
+  };
+};
+
+const extractChatCompletionsUsage = (payload) => {
+  const usage = payload?.usage;
+
+  if (!usage || typeof usage !== "object") {
+    return null;
+  }
+
+  const promptTokens = typeof usage.prompt_tokens === "number" ? usage.prompt_tokens : 0;
+  const completionTokens = typeof usage.completion_tokens === "number" ? usage.completion_tokens : 0;
+  const cacheReadTokens =
+    typeof usage.prompt_tokens_details?.cached_tokens === "number"
+      ? usage.prompt_tokens_details.cached_tokens
+      : 0;
+  const inputTokens = Math.max(0, promptTokens - cacheReadTokens);
+  const reasoningTokens =
+    typeof usage.completion_tokens_details?.reasoning_tokens === "number"
+      ? usage.completion_tokens_details.reasoning_tokens
+      : 0;
+  const totalTokens =
+    typeof usage.total_tokens === "number" ? usage.total_tokens : promptTokens + completionTokens;
+
+  return {
+    cacheCreationTokens: 0,
+    cacheReadTokens,
+    inputTokens,
+    outputTokens: completionTokens,
+    reasoningTokens,
+    totalTokens,
+  };
+};
 
 const readJson = async (response) => {
   const contentType = response.headers.get("content-type") || "";
@@ -316,6 +423,7 @@ const parseSsePayload = async (response) => {
   let responseId = null;
   const outputTextParts = [];
   let sawDone = false;
+  let usage = null;
 
   const flushEvent = () => {
     const trimmed = dataBuffer.trim();
@@ -358,6 +466,7 @@ const parseSsePayload = async (response) => {
 
       if (type === "response.completed" && event?.response && typeof event.response === "object") {
         completedResponse = event.response;
+        usage = extractCodexUsage(event.response);
         if (
           outputItems.size > 0 &&
           (!Array.isArray(completedResponse?.output) || completedResponse.output.length === 0)
@@ -416,17 +525,28 @@ const parseSsePayload = async (response) => {
   }
 
   if (completedResponse) {
+    if (usage) {
+      completedResponse.usage = usage;
+    }
     return completedResponse;
   }
 
-  return outputTextParts.length > 0 ? { id: responseId, output_text: outputTextParts.join("") } : null;
+  return outputTextParts.length > 0 ? { id: responseId, output_text: outputTextParts.join(""), usage } : null;
 };
 
-const createChatCompletion = ({ content, id, model, toolCalls }) => ({
+const createChatCompletion = ({ content, id, model, toolCalls, usage }) => ({
   id: typeof id === "string" && id ? id : "chatcmpl-" + crypto.randomUUID(),
   object: "chat.completion",
   created: Math.floor(Date.now() / 1000),
   model,
+  usage:
+    usage && typeof usage === "object"
+      ? {
+          completion_tokens: usage.outputTokens,
+          prompt_tokens: usage.inputTokens,
+          total_tokens: usage.totalTokens,
+        }
+      : undefined,
   choices: [
     {
       index: 0,
@@ -519,6 +639,24 @@ const sendStream = (response, payload) => {
         "\n\n",
     );
   }
+  if (payload.usage) {
+    response.write(
+      "data: " +
+        JSON.stringify({
+          id,
+          object: "chat.completion.chunk",
+          created,
+          model: payload.model,
+          choices: [],
+          usage: {
+            completion_tokens: payload.usage.outputTokens,
+            prompt_tokens: payload.usage.inputTokens,
+            total_tokens: payload.usage.totalTokens,
+          },
+        }) +
+        "\n\n",
+    );
+  }
   response.write(
     "data: " +
       JSON.stringify({
@@ -573,17 +711,89 @@ const server = http.createServer(async (request, response) => {
 
     const rawBody = Buffer.concat(chunks).toString("utf8");
     const payload = rawBody ? JSON.parse(rawBody) : {};
-    const model = getBackendModel(payload.model);
-    const upstream = await fetch(endpoint, {
+    if (mode === "codex") {
+      const model = getBackendModel(payload.model);
+      const upstream = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          authorization,
+          "content-type": "application/json",
+          origin: "https://chatgpt.com",
+          referer: "https://chatgpt.com/",
+          "user-agent": "OpenAI/Codex",
+        },
+        body: JSON.stringify(buildResponsesBody(payload, model)),
+      });
+
+      if (!upstream.ok) {
+        sendJson(response, upstream.status, { error: await getResponseErrorMessage(upstream) });
+        return;
+      }
+
+      const upstreamPayload = await parseSsePayload(upstream);
+      const content = extractOutputText(upstreamPayload);
+      const toolCalls = extractToolCalls(upstreamPayload);
+      const usage = upstreamPayload?.usage ?? null;
+
+      if (!content && toolCalls.length === 0) {
+        sendJson(response, 502, { error: "Codex returned an empty response." });
+        return;
+      }
+
+      await appendUsageRecord(usage);
+
+      if (payload.stream) {
+        sendStream(response, {
+          content,
+          id: upstreamPayload.id,
+          model,
+          toolCalls,
+          usage,
+        });
+        return;
+      }
+
+      sendJson(
+        response,
+        200,
+        createChatCompletion({
+          content,
+          id: upstreamPayload.id,
+          model,
+          toolCalls,
+          usage,
+        }),
+      );
+      return;
+    }
+
+    const manualEndpoint = upstreamBaseUrl ? upstreamBaseUrl + "/chat/completions" : "";
+
+    if (!manualEndpoint) {
+      sendJson(response, 500, { error: "Manual provider proxy is missing an upstream base URL." });
+      return;
+    }
+
+    const manualPayload =
+      payload && typeof payload === "object" && payload.stream
+        ? {
+            ...payload,
+            stream_options: {
+              ...(payload.stream_options && typeof payload.stream_options === "object"
+                ? payload.stream_options
+                : {}),
+              include_usage: true,
+            },
+          }
+        : payload;
+
+    const upstream = await fetch(manualEndpoint, {
       method: "POST",
       headers: {
         authorization,
         "content-type": "application/json",
-        origin: "https://chatgpt.com",
-        referer: "https://chatgpt.com/",
-        "user-agent": "OpenAI/Codex",
       },
-      body: JSON.stringify(buildResponsesBody(payload, model)),
+      body: JSON.stringify(manualPayload),
     });
 
     if (!upstream.ok) {
@@ -591,38 +801,62 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
-    const upstreamPayload = await parseSsePayload(upstream);
-    const content = extractOutputText(upstreamPayload);
-    const toolCalls = extractToolCalls(upstreamPayload);
-
-    if (!content && toolCalls.length === 0) {
-      sendJson(response, 502, { error: "Codex returned an empty response." });
-      return;
-    }
+    const responseHeaders = {
+      "cache-control": upstream.headers.get("cache-control") || "no-cache",
+      connection: upstream.headers.get("connection") || "keep-alive",
+      "content-type":
+        upstream.headers.get("content-type") || "text/event-stream; charset=utf-8",
+    };
 
     if (payload.stream) {
-      sendStream(response, {
-        content,
-        id: upstreamPayload.id,
-        model,
-        toolCalls,
-      });
+      const text = await upstream.text();
+      const usage = text
+        .split("\n")
+        .flatMap((line) => {
+          const trimmed = line.trim();
+
+          if (!trimmed.startsWith("data:")) {
+            return [];
+          }
+
+          const rawEvent = trimmed.slice(5).trim();
+
+          if (!rawEvent || rawEvent === "[DONE]") {
+            return [];
+          }
+
+          try {
+            return [JSON.parse(rawEvent)];
+          } catch {
+            return [];
+          }
+        })
+        .map((event) => extractChatCompletionsUsage(event))
+        .find(Boolean);
+
+      await appendUsageRecord(usage);
+
+      response.writeHead(200, responseHeaders);
+      response.end(text);
       return;
     }
 
-    sendJson(
-      response,
-      200,
-      createChatCompletion({
-        content,
-        id: upstreamPayload.id,
-        model,
-        toolCalls,
-      }),
-    );
+    const rawPayload = await upstream.text();
+    let parsedPayload = null;
+
+    try {
+      parsedPayload = rawPayload ? JSON.parse(rawPayload) : null;
+    } catch {}
+
+    await appendUsageRecord(extractChatCompletionsUsage(parsedPayload));
+
+    response.writeHead(200, {
+      "content-type": upstream.headers.get("content-type") || "application/json; charset=utf-8",
+    });
+    response.end(rawPayload);
   } catch (error) {
     sendJson(response, 500, {
-      error: error instanceof Error ? error.message : "Failed to proxy Codex request.",
+      error: error instanceof Error ? error.message : "Failed to proxy provider request.",
     });
   }
 });
@@ -668,6 +902,7 @@ const buildOpenCodeRunnerCommand = () =>
     "artifacts_dir = pathlib.Path(os.getcwd()) / '.opencode' / 'artifacts'",
     "artifacts_dir.mkdir(parents=True, exist_ok=True)",
     "log_path = artifacts_dir / 'opencode-run.log'",
+    "usage_log_path = artifacts_dir / 'opencode-usage.jsonl'",
     "proxy_path = pathlib.Path(os.getcwd()) / '.diabolo' / 'codex-openai-proxy.mjs'",
     "proxy_log_path = artifacts_dir / 'codex-proxy.log'",
     "",
@@ -678,6 +913,8 @@ const buildOpenCodeRunnerCommand = () =>
     "proxy_process = None",
     "proxy_log_file = None",
     "if os.environ.get('OPENCODE_CODEX_USE_LOCAL_PROXY') == '1':",
+    "    if usage_log_path.exists():",
+    "        usage_log_path.unlink()",
     "    proxy_path.parent.mkdir(parents=True, exist_ok=True)",
     "    proxy_path.write_text(base64.b64decode(os.environ['OPENCODE_CODEX_PROXY_SCRIPT_B64']).decode('utf-8'))",
     "    proxy_log_file = open(proxy_log_path, 'wb')",
