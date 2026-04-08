@@ -11,8 +11,18 @@ import {
   TaskHeaderActions,
 } from "@/components/app/task-detail";
 import type { CollaboratorMap } from "@/components/app/task-detail/types";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
-import { $destroyTaskSandboxById, $terminateTaskById } from "@/lib/project/functions";
+import { $deleteTask, $terminateTaskById } from "@/lib/project/functions";
 import {
   projectCollaboratorsQueryOptions,
   projectDetailQueryOptions,
@@ -55,10 +65,11 @@ function TaskDetailPage() {
   const { taskId } = Route.useParams();
   const queryClient = useQueryClient();
   const terminateTask = useServerFn($terminateTaskById);
-  const destroySandbox = useServerFn($destroyTaskSandboxById);
+  const deleteTask = useServerFn($deleteTask);
 
   const [followUpInput, setFollowUpInput] = useState("");
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const taskQuery = useQuery({
@@ -82,15 +93,16 @@ function TaskDetailPage() {
     },
   });
 
-  const destroyMutation = useMutation({
-    mutationFn: () => destroySandbox({ data: { taskId } }),
+  const deleteMutation = useMutation({
+    mutationFn: () => deleteTask({ data: { projectId: task.projectId, taskId } }),
     onSuccess: () => {
-      toast.success("Sandbox destroyed.");
-      queryClient.invalidateQueries({ queryKey: taskKeys.detail(taskId) });
+      toast.success("Task deleted.");
+      queryClient.removeQueries({ queryKey: taskKeys.detail(taskId) });
       queryClient.invalidateQueries({ queryKey: taskKeys.all });
+      window.history.back();
     },
     onError: (error) => {
-      toast.error(error instanceof Error ? error.message : "Failed to destroy sandbox.");
+      toast.error(error instanceof Error ? error.message : "Failed to delete task.");
     },
   });
 
@@ -142,7 +154,6 @@ function TaskDetailPage() {
   useTaskStream(taskId, true);
   const isRunning = task && !TERMINAL_STATUSES.has(task.status);
   const isCompleted = task && TERMINAL_STATUSES.has(task.status);
-  const sandboxAlive = isCompleted && task.sandboxId;
   const taskTitle = task?.title ?? task?.repoName ?? "Task";
   const _projectName = projectQuery.data?.name ?? null;
   const canSendFollowUp = Boolean(
@@ -223,14 +234,37 @@ function TaskDetailPage() {
             {taskTitle}
           </span>
         </div>
-        <TaskHeaderActions
-          destroyPending={destroyMutation.isPending}
-          onDestroy={() => destroyMutation.mutate()}
-          onTerminate={() => terminateMutation.mutate()}
-          sandboxAlive={!!sandboxAlive}
-          taskIsRunning={!!isRunning}
-          terminatePending={terminateMutation.isPending}
-        />
+        <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+          <TaskHeaderActions
+            deletePending={deleteMutation.isPending}
+            onDelete={() => setDeleteDialogOpen(true)}
+            onTerminate={() => terminateMutation.mutate()}
+            taskIsRunning={!!isRunning}
+            terminatePending={terminateMutation.isPending}
+          />
+          <AlertDialogContent size="sm">
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete task?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This removes the task from your history. The task data cannot be recovered.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={deleteMutation.isPending}>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                variant="destructive"
+                disabled={deleteMutation.isPending}
+                onClick={() => deleteMutation.mutate()}
+              >
+                {deleteMutation.isPending ? (
+                  <LoaderIcon className="size-3.5 animate-spin" />
+                ) : (
+                  "Delete"
+                )}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
 
       <main className="flex flex-1 flex-col overflow-hidden">
@@ -251,7 +285,7 @@ function TaskDetailPage() {
               sizeLabel: formatAttachmentSize(attachment.file.size),
             }))}
             canSubmit={canSendFollowUp}
-            disabled={Boolean(isRunning && !sandboxAlive)}
+            disabled={Boolean(isRunning)}
             isPending={followUpMutation.isPending}
             onAddAttachments={(files) => {
               setAttachments((current) => [
