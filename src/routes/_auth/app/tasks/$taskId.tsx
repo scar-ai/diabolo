@@ -12,7 +12,7 @@ import {
 } from "@/components/app/task-detail";
 import type { CollaboratorMap } from "@/components/app/task-detail/types";
 import { Button } from "@/components/ui/button";
-import { $deleteTask, $terminateTaskById } from "@/lib/project/functions";
+import { $deleteTaskById, $terminateTaskById } from "@/lib/project/functions";
 import {
   projectCollaboratorsQueryOptions,
   projectDetailQueryOptions,
@@ -55,7 +55,7 @@ function TaskDetailPage() {
   const { taskId } = Route.useParams();
   const queryClient = useQueryClient();
   const terminateTask = useServerFn($terminateTaskById);
-  const deleteTask = useServerFn($deleteTask);
+  const deleteTask = useServerFn($deleteTaskById);
 
   const [followUpInput, setFollowUpInput] = useState("");
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
@@ -139,6 +139,7 @@ function TaskDetailPage() {
     (collaboratorsQuery.data ?? []).map((c) => [c.userId, c.user]),
   );
   useTaskStream(taskId, true);
+  const sandboxAlive = Boolean(task?.sandboxId);
   const isRunning = task && !TERMINAL_STATUSES.has(task.status);
   const isCompleted = task && TERMINAL_STATUSES.has(task.status);
   const taskTitle = task?.title ?? task?.repoName ?? "Task";

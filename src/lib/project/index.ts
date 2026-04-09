@@ -709,6 +709,19 @@ export namespace Project {
         log.info("task deleted", { projectId, taskId });
       });
 
+  export const deleteTaskForUser = (taskId: string, userId: string): ResultAsync<void, Error> =>
+    requireTaskForUser(taskId, userId)
+      .andThen(({ task: value }) => {
+        if (RUNNING_TASK_STATUSES.has(value.status)) {
+          return errAsync(new Error("Running sessions cannot be removed."));
+        }
+
+        return fromPromise(deleteTask(taskId, value.projectId));
+      })
+      .map(() => {
+        log.info("task deleted by user", { taskId });
+      });
+
   export const terminateTaskForProject = (
     projectId: string,
     taskId: string,

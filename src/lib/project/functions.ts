@@ -199,6 +199,13 @@ export const $deleteTask = createServerFn({ method: "POST" })
     unwrap(Project.deleteTaskForProject(data.projectId, data.taskId, context.user.id)),
   );
 
+export const $deleteTaskById = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .inputValidator((data) => taskIdInputSchema.parse(data))
+  .handler(async ({ context, data }) =>
+    unwrap(Project.deleteTaskForUser(data.taskId, context.user.id)),
+  );
+
 export const $terminateTask = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .inputValidator((data) => getTaskInputSchema.parse(data))

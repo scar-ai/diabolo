@@ -189,6 +189,19 @@ export const runSandboxCommand = async (
   const heartbeatTimer = setInterval(() => {
     void SandboxRuntimeState.touchHeartbeat(taskId);
   }, heartbeatIntervalMs);
+  const publishLogChunk = async (chunk: string, stream: "stdout" | "stderr" | "output") => {
+    await appendTaskMessageLog(messageId, chunk);
+    await SandboxEvents.publish({
+      messageId,
+      payload: {
+        chunk,
+        stream,
+      },
+      taskId,
+      type: "log",
+    });
+    await SandboxRuntimeState.touchHeartbeat(taskId);
+  };
 
   try {
     const response = await sandbox.executeCommand(command, {
@@ -200,8 +213,7 @@ export const runSandboxCommand = async (
         }
 
         streamedOutput = true;
-        await appendTaskMessageLog(messageId, chunk);
-        await SandboxRuntimeState.touchHeartbeat(taskId);
+        await publishLogChunk(chunk, "stderr");
       },
       onStdoutChunk: async (chunk) => {
         if (!chunk) {
@@ -209,14 +221,13 @@ export const runSandboxCommand = async (
         }
 
         streamedOutput = true;
-        await appendTaskMessageLog(messageId, chunk);
-        await SandboxRuntimeState.touchHeartbeat(taskId);
+        await publishLogChunk(chunk, "stdout");
       },
       timeoutSeconds: timeout,
     });
 
     if (response.output && !streamedOutput) {
-      await appendTaskMessageLog(messageId, `${response.output}\n`);
+      await publishLogChunk(`${response.output}\n`, "output");
     }
 
     if (response.exitCode !== 0) {

@@ -3,6 +3,22 @@ import { useEffect } from "react";
 
 import { taskKeys } from "@/lib/project/queries";
 
+const TASK_STREAM_EVENT_TYPES = [
+  "artifact",
+  "branch",
+  "child_task_update",
+  "error",
+  "execution_complete",
+  "log",
+  "pull_request",
+  "sandbox_status",
+  "task_stage",
+  "text",
+  "tool_result",
+  "usage",
+  "user_message",
+] as const;
+
 export function useTaskStream(taskId: string | null | undefined, enabled = true) {
   const queryClient = useQueryClient();
 
@@ -20,6 +36,9 @@ export function useTaskStream(taskId: string | null | undefined, enabled = true)
     };
 
     source.onmessage = invalidate;
+    for (const eventType of TASK_STREAM_EVENT_TYPES) {
+      source.addEventListener(eventType, invalidate);
+    }
     source.onerror = () => {
       invalidate();
       source.close();
