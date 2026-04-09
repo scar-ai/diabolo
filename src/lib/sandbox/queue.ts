@@ -11,6 +11,7 @@ import {
   findNextPendingTaskMessage,
   findProcessingTaskMessage,
   findStaleProcessingMessage,
+  findTaskRecord,
   updateTaskMessageRecord,
   updateTaskRecord,
 } from "@/lib/sandbox/store";
@@ -36,14 +37,24 @@ const recoverStaleProcessing = async (taskId: string) => {
     return;
   }
 
-  const staleMessage = await findStaleProcessingMessage(
-    taskId,
-    new Date(Date.now() - PROCESSING_STALE_MS),
-  );
+  const staleBefore = new Date(Date.now() - PROCESSING_STALE_MS);
+  const taskRecord = await findTaskRecord(taskId);
+
+  if (taskRecord?.lastHeartbeatAt && taskRecord.lastHeartbeatAt > staleBefore) {
+    return;
+  }
+
+  const staleMessage = await findStaleProcessingMessage(taskId, staleBefore);
 
   if (!staleMessage) {
     return;
   }
+
+  log.warn("recovering stale processing message", {
+    messageId: staleMessage.id,
+    staleBefore: staleBefore.toISOString(),
+    taskId,
+  });
 
   await updateTaskMessageRecord(staleMessage.id, {
     completedAt: new Date(),
@@ -76,10 +87,13 @@ const recoverStaleProcessing = async (taskId: string) => {
 
 const drainTaskQueue = async (taskId: string) => {
   if (activeProcessors.has(taskId)) {
+    log.debug("task queue drain skipped; processor already active", { taskId });
     return;
   }
 
   activeProcessors.add(taskId);
+  const startedAt = Date.now();
+  log.info("task queue drain started", { taskId });
 
   try {
     for (;;) {
@@ -89,12 +103,23 @@ const drainTaskQueue = async (taskId: string) => {
         break;
       }
 
+      log.info("task message claimed for processing", {
+        messageId: claimed.id,
+        sequence: claimed.sequence,
+        taskId,
+      });
+
       await SandboxRun.processMessage(taskId, claimed.id, sandboxProvider);
     }
   } finally {
     activeProcessors.delete(taskId);
+    log.info("task queue drain finished", {
+      durationMs: Date.now() - startedAt,
+      taskId,
+    });
 
     if (await hasWorkRemaining(taskId)) {
+      log.info("task queue still has work; scheduling another drain", { taskId });
       queueMicrotask(() => {
         void drainTaskQueue(taskId);
       });
@@ -104,6 +129,7 @@ const drainTaskQueue = async (taskId: string) => {
 
 export namespace SandboxQueue {
   export const enqueue = async (taskId: string) => {
+    log.info("enqueue requested", { taskId });
     await clearTaskCancellation(taskId);
     await recoverStaleProcessing(taskId);
     await SandboxRuntimeState.setTaskStage({
@@ -117,6 +143,7 @@ export namespace SandboxQueue {
   };
 
   export const resume = async (taskId: string) => {
+    log.info("resume requested", { taskId });
     await recoverStaleProcessing(taskId);
 
     if (await hasWorkRemaining(taskId)) {
@@ -128,6 +155,7 @@ export namespace SandboxQueue {
 
   export const terminate = async (taskId: string) => {
     const now = new Date();
+    log.info("termination requested", { taskId });
 
     await cancelPendingTaskMessages(taskId, "Task was terminated by user.");
 

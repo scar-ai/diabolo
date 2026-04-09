@@ -18,10 +18,15 @@ export namespace SandboxRun {
     const message = await findTaskMessage(messageId);
 
     if (!message) {
+      op.warn("message missing before processing");
       return;
     }
 
     try {
+      op.info("message processing started", {
+        kind: message.kind,
+        sequence: message.sequence,
+      });
       await SandboxRuntimeState.setSandboxStatus(taskId, "running");
       if (message.kind === "initial" || message.sequence === 0) {
         await runInitialMessage(taskId, messageId);

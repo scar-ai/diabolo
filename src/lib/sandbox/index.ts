@@ -50,6 +50,8 @@ export namespace Sandbox {
   export type CommandOptions = {
     cwd?: string;
     envVars?: Record<string, string>;
+    onStderrChunk?: (chunk: string) => Promise<void> | void;
+    onStdoutChunk?: (chunk: string) => Promise<void> | void;
     timeoutSeconds?: number;
   };
 

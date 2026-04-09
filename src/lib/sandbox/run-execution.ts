@@ -1,6 +1,7 @@
 import path from "node:path";
 
 import { Github } from "@/lib/github";
+import { Log } from "@/lib/log";
 import { normalizeOpenCodeModelForProvider, resolveOpenCodeConfig } from "@/lib/opencode/config";
 import { findTaskWithProject } from "@/lib/project/data";
 import { parseStoredProjectSkills } from "@/lib/project/skills";
@@ -37,6 +38,7 @@ import {
 } from "./run-support";
 
 type Viewer = { email: string; login: string; name: string };
+const log = Log.create({ ns: "sandbox.run_execution" });
 
 const prepareMessageAttachments = async (input: {
   messageId: string;
@@ -167,6 +169,8 @@ const runOpenCodeMessage = async (input: {
   llmProvider: NonNullable<Awaited<ReturnType<typeof findUserLlmProvider>>>;
   messagePrompt: string;
 }) => {
+  const op = log.child({ messageId: input.messageId, taskId: input.taskId });
+  const runStartedAt = Date.now();
   const openCode = await resolveOpenCodeConfig({
     model: input.taskRecord?.opencodeModel?.trim() || null,
     provider: input.llmProvider,
@@ -190,7 +194,14 @@ const runOpenCodeMessage = async (input: {
     input.prepared.sandboxPath,
     undefined,
     60,
+    "refresh git exclude",
   );
+  op.info("starting OpenCode run", {
+    attachmentCount: attachments.length,
+    model,
+    sandboxId: input.prepared.sandbox.id,
+  });
+  const openCodeStartedAt = Date.now();
   const response = await runSandboxCommand(
     input.prepared.sandbox,
     input.taskId,
@@ -214,7 +225,12 @@ const runOpenCodeMessage = async (input: {
       viewer: input.viewer,
     }),
     3600,
+    "opencode run",
   );
+  op.info("OpenCode run completed", {
+    durationMs: Date.now() - openCodeStartedAt,
+    outputChars: response.output.length,
+  });
 
   const usageLog = await runSandboxCommand(
     input.prepared.sandbox,
@@ -224,6 +240,7 @@ const runOpenCodeMessage = async (input: {
     input.prepared.sandboxPath,
     undefined,
     30,
+    "read usage log",
   );
   const usageEvents = parseProviderUsageLog(usageLog.output);
 
@@ -252,6 +269,7 @@ const runOpenCodeMessage = async (input: {
     input.prepared.sandboxPath,
     undefined,
     60,
+    "inspect git status",
   );
   const handoffState = await syncGitHandoffState({
     messageId: input.messageId,
@@ -277,6 +295,13 @@ const runOpenCodeMessage = async (input: {
       sandboxStatus: "ready",
     },
   );
+
+  op.info("message execution finalized", {
+    durationMs: Date.now() - runStartedAt,
+    hasWorkspaceChanges: Boolean(changes.output.trim()),
+    prNumber: handoffState.prNumber,
+    usageEventCount: usageEvents.length,
+  });
 };
 
 export const runInitialMessage = async (taskId: string, messageId: string) => {

@@ -1,6 +1,5 @@
 import { buildAgentBrowserOpenCodeSetupCommand } from "@/lib/opencode/agent-browser";
 import { buildGitToolsOpenCodeSetupCommand } from "@/lib/opencode/git-tools";
-import { buildSpawnTaskOpenCodeSetupCommand } from "@/lib/opencode/spawn-task";
 
 const SANDBOX_TOOL_PATH_EXPORT =
   'export PATH="$HOME/.local/bin:$HOME/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/bin:$(npm config get prefix)/bin:$PATH"';
@@ -1000,7 +999,6 @@ export const opencodeInstallCommand = [
   'if ! command -v opencode >/dev/null 2>&1; then echo "OpenCode is missing from the Daytona browser snapshot." >&2; exit 1; fi',
   "opencode --version",
   buildAgentBrowserOpenCodeSetupCommand(),
-  buildSpawnTaskOpenCodeSetupCommand(),
   buildGitToolsOpenCodeSetupCommand(),
 ].join("\n");
 

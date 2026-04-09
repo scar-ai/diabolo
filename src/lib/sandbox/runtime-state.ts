@@ -1,10 +1,12 @@
 import "@tanstack/react-start/server-only";
+import { Log } from "@/lib/log";
 import { findTaskRecord, updateTaskRecord, type TaskRecord } from "@/lib/sandbox/store";
 
 import { SandboxEvents } from "./events";
 
 type TaskStatus = TaskRecord["status"];
 type SandboxStatus = TaskRecord["sandboxStatus"];
+const log = Log.create({ ns: "sandbox.runtime_state" });
 
 const publishChildUpdate = async (taskRecord: TaskRecord | null | undefined) => {
   if (!taskRecord?.parentTaskId) {
@@ -41,6 +43,7 @@ export namespace SandboxRuntimeState {
     sandboxStatus: SandboxStatus,
     extras?: Partial<TaskRecord>,
   ) => {
+    const previous = await findTaskRecord(taskId);
     const taskRecord = await updateTaskRecord(taskId, {
       ...extras,
       lastHeartbeatAt: new Date(),
@@ -50,6 +53,13 @@ export namespace SandboxRuntimeState {
     if (!taskRecord) {
       return null;
     }
+
+    log.info("sandbox status updated", {
+      nextSandboxStatus: taskRecord.sandboxStatus,
+      previousSandboxStatus: previous?.sandboxStatus ?? null,
+      stage: taskRecord.stage,
+      taskId,
+    });
 
     await SandboxEvents.publish({
       payload: {
@@ -73,6 +83,7 @@ export namespace SandboxRuntimeState {
     status?: TaskStatus;
     taskId: string;
   }) => {
+    const previous = await findTaskRecord(input.taskId);
     const taskRecord = await updateTaskRecord(input.taskId, {
       lastHeartbeatAt: new Date(),
       stage: input.stage,
@@ -82,6 +93,14 @@ export namespace SandboxRuntimeState {
     if (!taskRecord) {
       return null;
     }
+
+    log.info("task stage updated", {
+      messageId: input.messageId ?? null,
+      nextStage: taskRecord.stage,
+      previousStage: previous?.stage ?? null,
+      status: taskRecord.status,
+      taskId: input.taskId,
+    });
 
     await SandboxEvents.publish({
       messageId: input.messageId ?? null,
@@ -117,6 +136,12 @@ export namespace SandboxRuntimeState {
     if (!latest) {
       return null;
     }
+
+    log.error("sandbox spawn failure recorded", {
+      error: errorMessage,
+      spawnFailureCount: latest.spawnFailureCount,
+      taskId,
+    });
 
     await SandboxEvents.publish({
       payload: {

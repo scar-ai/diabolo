@@ -4,6 +4,7 @@ import { type ResultAsync } from "neverthrow";
 
 import { Github } from "@/lib/github";
 import type { JsonObject } from "@/lib/json";
+import { Log } from "@/lib/log";
 import { buildOpenCodeConfigContent } from "@/lib/opencode/config";
 import { Sandbox } from "@/lib/sandbox";
 import { SandboxEvents } from "@/lib/sandbox/events";
@@ -23,6 +24,7 @@ import {
 import { buildTaskScreenshotMetadata, TASK_SCREENSHOT_ARTIFACT_TYPE } from "@/lib/task-artifacts";
 
 const read = (value: string) => value.trim();
+const log = Log.create({ ns: "sandbox.command" });
 
 export const unwrapResult = async <T>(result: ResultAsync<T, Error>): Promise<T> => {
   const res = await result;
@@ -164,26 +166,93 @@ export const runSandboxCommand = async (
   cwd?: string,
   envVars?: Record<string, string>,
   timeout = 0,
+  label = "sandbox command",
 ) => {
-  await SandboxRuntimeState.touchHeartbeat(taskId);
-  const response = await sandbox.executeCommand(command, {
-    cwd,
-    envVars,
+  const startedAt = Date.now();
+  let streamedOutput = false;
+  const heartbeatIntervalMs = 20_000;
+  const op = log.child({
+    label,
+    messageId,
+    sandboxId: sandbox.id,
+    taskId,
+  });
+
+  op.info("sandbox command started", {
+    cwd: cwd ?? null,
+    envVarCount: Object.keys(envVars ?? {}).length,
     timeoutSeconds: timeout,
   });
 
-  if (response.output) {
-    await appendTaskMessageLog(messageId, `${response.output}\n`);
-  }
-
-  if (response.exitCode !== 0) {
-    throw new Error(read(response.output) || `Command failed with exit code ${response.exitCode}.`);
-  }
-
-  await assertTaskNotCancelled(taskId);
   await SandboxRuntimeState.touchHeartbeat(taskId);
+  let handledFailure = false;
+  const heartbeatTimer = setInterval(() => {
+    void SandboxRuntimeState.touchHeartbeat(taskId);
+  }, heartbeatIntervalMs);
 
-  return response;
+  try {
+    const response = await sandbox.executeCommand(command, {
+      cwd,
+      envVars,
+      onStderrChunk: async (chunk) => {
+        if (!chunk) {
+          return;
+        }
+
+        streamedOutput = true;
+        await appendTaskMessageLog(messageId, chunk);
+        await SandboxRuntimeState.touchHeartbeat(taskId);
+      },
+      onStdoutChunk: async (chunk) => {
+        if (!chunk) {
+          return;
+        }
+
+        streamedOutput = true;
+        await appendTaskMessageLog(messageId, chunk);
+        await SandboxRuntimeState.touchHeartbeat(taskId);
+      },
+      timeoutSeconds: timeout,
+    });
+
+    if (response.output && !streamedOutput) {
+      await appendTaskMessageLog(messageId, `${response.output}\n`);
+    }
+
+    if (response.exitCode !== 0) {
+      handledFailure = true;
+      op.warn("sandbox command failed", {
+        durationMs: Date.now() - startedAt,
+        exitCode: response.exitCode,
+        outputChars: response.output.length,
+      });
+      throw new Error(
+        read(response.output) || `Command failed with exit code ${response.exitCode}.`,
+      );
+    }
+
+    await assertTaskNotCancelled(taskId);
+    await SandboxRuntimeState.touchHeartbeat(taskId);
+
+    op.info("sandbox command completed", {
+      durationMs: Date.now() - startedAt,
+      exitCode: response.exitCode,
+      outputChars: response.output.length,
+    });
+
+    return response;
+  } catch (error) {
+    if (!handledFailure) {
+      op.error("sandbox command errored", {
+        durationMs: Date.now() - startedAt,
+        error,
+      });
+    }
+
+    throw error;
+  } finally {
+    clearInterval(heartbeatTimer);
+  }
 };
 
 const detectArtifacts = async (taskId: string, messageId: string, payload: JsonObject) => {
@@ -365,6 +434,7 @@ export const syncGitHandoffState = async (input: {
     input.sandboxPath,
     undefined,
     30,
+    "detect current branch",
   );
   const branchName = read(branch.output) || null;
 

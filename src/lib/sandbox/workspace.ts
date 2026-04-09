@@ -1,6 +1,7 @@
 import { Buffer } from "node:buffer";
 
 import type { Github } from "@/lib/github";
+import { Log } from "@/lib/log";
 import { formatProjectEnvVarsForDotEnv } from "@/lib/project/env";
 import type { ProjectSkillEntry } from "@/lib/project/skills";
 import type { Sandbox } from "@/lib/sandbox";
@@ -24,7 +25,10 @@ type Run = (
   cwd?: string,
   envVars?: Record<string, string>,
   timeout?: number,
+  label?: string,
 ) => Promise<{ exitCode: number; output: string }>;
+
+const log = Log.create({ ns: "sandbox.workspace" });
 
 const updateStage = async (
   taskId: string,
@@ -107,6 +111,7 @@ const syncProjectEnvFile = async (input: {
     input.sandboxPath,
     undefined,
     120,
+    "sync project env",
   );
 
 const buildProjectSkillsSyncCommand = (skills: ProjectSkillEntry[]) => {
@@ -170,6 +175,7 @@ const syncProjectSkills = async (input: {
     input.sandboxPath,
     undefined,
     1800,
+    "sync project skills",
   );
 
 export namespace SandboxWorkspace {
@@ -213,11 +219,20 @@ export namespace SandboxWorkspace {
     taskId: string;
     viewer: Viewer;
   }) => {
+    const op = log.child({ taskId: input.taskId });
+    const prepareStartedAt = Date.now();
+
     try {
       await updateStage(input.taskId, "Getting your sandbox ready");
       await SandboxRuntimeState.setSandboxStatus(input.taskId, "spawning");
 
+      const createWorkspaceStartedAt = Date.now();
       const sandbox = await input.provider.createWorkspace(input.repoName);
+      op.info("sandbox workspace created", {
+        durationMs: Date.now() - createWorkspaceStartedAt,
+        sandboxId: sandbox.id,
+        sandboxName: sandbox.name,
+      });
 
       await SandboxRuntimeState.setSandboxStatus(input.taskId, "ready", {
         sandboxId: sandbox.id,
@@ -226,20 +241,32 @@ export namespace SandboxWorkspace {
         status: "running",
       });
 
+      const resolveWorkspaceStartedAt = Date.now();
       const root = await sandbox.getWorkspaceRoot();
       const sandboxPath = `${root.replace(/\/$/, "")}/${input.repoName}`;
+      op.info("sandbox workspace resolved", {
+        durationMs: Date.now() - resolveWorkspaceStartedAt,
+        sandboxId: sandbox.id,
+        sandboxPath,
+      });
 
       await updateTaskRecord(input.taskId, {
         sandboxPath,
         stage: "Cloning repository into sandbox",
       });
 
+      const cloneStartedAt = Date.now();
       await sandbox.cloneRepository({
         accessToken: input.githubAccessToken,
         branch: input.branch,
         ownerLogin: input.repoOwnerLogin,
         targetPath: sandboxPath,
         url: input.repoUrl,
+      });
+      op.info("repository cloned into sandbox", {
+        branch: input.branch,
+        durationMs: Date.now() - cloneStartedAt,
+        sandboxId: sandbox.id,
       });
 
       const setup = [
@@ -263,7 +290,11 @@ export namespace SandboxWorkspace {
         sandboxPath,
         input.envVars,
         900,
+        "bootstrap sandbox runtime",
       );
+      op.info("sandbox bootstrap completed", {
+        sandboxId: sandbox.id,
+      });
 
       await syncProjectEnvFile({
         envVars: input.envVars,
@@ -283,11 +314,22 @@ export namespace SandboxWorkspace {
         taskId: input.taskId,
       });
 
+      op.info("sandbox prepared", {
+        durationMs: Date.now() - prepareStartedAt,
+        sandboxId: sandbox.id,
+        sandboxPath,
+        skillCount: input.skills.length,
+      });
+
       return {
         sandbox,
         sandboxPath,
       };
     } catch (error) {
+      op.error("sandbox prepare failed", {
+        durationMs: Date.now() - prepareStartedAt,
+        error,
+      });
       await SandboxRuntimeState.markSpawnFailure(
         input.taskId,
         error instanceof Error ? error.message : String(error),
@@ -310,8 +352,18 @@ export namespace SandboxWorkspace {
     viewer: Viewer;
   }) => {
     if (input.taskRecord.sandboxId && input.taskRecord.sandboxPath) {
+      const op = log.child({
+        sandboxId: input.taskRecord.sandboxId,
+        taskId: input.taskId,
+      });
+
       try {
+        const reconnectStartedAt = Date.now();
         const sandbox = await input.provider.getWorkspace(input.taskRecord.sandboxId);
+        op.info("reused existing sandbox", {
+          durationMs: Date.now() - reconnectStartedAt,
+          sandboxPath: input.taskRecord.sandboxPath,
+        });
 
         await syncProjectEnvFile({
           envVars: input.envVars,
@@ -335,7 +387,12 @@ export namespace SandboxWorkspace {
           sandbox,
           sandboxPath: input.taskRecord.sandboxPath,
         };
-      } catch {}
+      } catch (error) {
+        op.warn("existing sandbox reuse failed; recreating", {
+          error,
+          sandboxPath: input.taskRecord.sandboxPath,
+        });
+      }
     }
 
     await updateStage(input.taskId, "Recreating sandbox for follow-up");

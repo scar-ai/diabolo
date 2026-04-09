@@ -190,6 +190,7 @@ export const buildOpenCodeConfigContent = (config: OpenCodeConfig) => {
         options: {
           apiKey: `{env:${config.apiKeyEnvVar}}`,
           baseURL: config.runtimeBaseUrl ?? config.baseUrl,
+          setCacheKey: true,
         },
       },
     },
