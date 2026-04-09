@@ -211,7 +211,6 @@ const runOpenCodeMessage = async (input: {
     buildOpenCodeEnvironment({
       apiKey: openCode.runtimeApiKey ?? openCode.apiKey,
       apiKeyEnvVar: openCode.apiKeyEnvVar,
-      baseUrl: openCode.runtimeBaseUrl ?? openCode.baseUrl,
       defaultBranch: input.repo.defaultBranch,
       githubToken: input.githubAccessToken,
       model,
@@ -220,8 +219,10 @@ const runOpenCodeMessage = async (input: {
       providerName: openCode.providerName,
       projectEnvVars: input.taskProjectEnvVars,
       repoFullName: input.repo.fullName,
+      runtimeBaseUrl: openCode.runtimeBaseUrl ?? openCode.baseUrl,
       sandboxPath: input.prepared.sandboxPath,
       taskId: input.taskId,
+      upstreamBaseUrl: openCode.baseUrl,
       viewer: input.viewer,
     }),
     3600,

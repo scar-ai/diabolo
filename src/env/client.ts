@@ -5,6 +5,7 @@ export const env = createEnv({
   clientPrefix: "VITE_",
   client: {
     VITE_BASE_URL: z.url().default("http://localhost:3000"),
+    VITE_TASK_WEBSOCKET_URL: z.string().optional(),
   },
   runtimeEnv: import.meta.env,
 });

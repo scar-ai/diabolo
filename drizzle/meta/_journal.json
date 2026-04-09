@@ -176,6 +176,13 @@
       "when": 1775681217890,
       "tag": "0025_scheduled_task_jobs",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1775765623525,
+      "tag": "0026_rainy_rogue",
+      "breakpoints": true
     }
   ]
 }

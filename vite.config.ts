@@ -7,6 +7,12 @@ import { nitro } from "nitro/vite";
 import { defineConfig } from "vite";
 
 export default defineConfig({
+  nitro: {
+    features: {
+      websocket: true,
+    },
+    serverDir: "./server",
+  },
   resolve: {
     tsconfigPaths: true,
   },

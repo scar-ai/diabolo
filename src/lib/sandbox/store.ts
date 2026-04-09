@@ -216,6 +216,7 @@ export const createTaskEvent = async (input: {
   payload: JsonObject;
   taskId: string;
   type: string;
+  sandboxId?: string;
 }) =>
   db.transaction(async (tx) => {
     await tx
@@ -244,6 +245,8 @@ export const createTaskEvent = async (input: {
         sequence,
         taskId: input.taskId,
         type: input.type,
+        sandboxId: input.sandboxId ?? null,
+        timestamp: input.createdAt ?? new Date(),
       })
       .returning();
 

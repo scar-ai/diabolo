@@ -499,7 +499,6 @@ export const syncGitHandoffState = async (input: {
 export const buildOpenCodeEnvironment = (input: {
   apiKey: string;
   apiKeyEnvVar: string;
-  baseUrl: string;
   defaultBranch: string;
   githubToken: string;
   model: string;
@@ -508,8 +507,10 @@ export const buildOpenCodeEnvironment = (input: {
   providerName: string;
   projectEnvVars?: Record<string, string>;
   repoFullName: string;
+  runtimeBaseUrl: string;
   sandboxPath: string;
   taskId: string;
+  upstreamBaseUrl: string;
   viewer: { email: string; name: string };
 }) => ({
   [input.apiKeyEnvVar]: input.apiKey,
@@ -517,11 +518,12 @@ export const buildOpenCodeEnvironment = (input: {
     buildOpenCodeConfigContent({
       apiKey: input.apiKey,
       apiKeyEnvVar: input.apiKeyEnvVar,
-      baseUrl: input.baseUrl,
+      baseUrl: input.upstreamBaseUrl,
       model: input.model,
       providerId: input.providerId,
       providerKind: "manual",
       providerName: input.providerName,
+      runtimeBaseUrl: input.runtimeBaseUrl,
       selectedProviderId: input.providerId,
     }),
     "utf8",
@@ -532,7 +534,7 @@ export const buildOpenCodeEnvironment = (input: {
   OPENCODE_GIT_AUTHOR_EMAIL: input.viewer.email,
   OPENCODE_GIT_AUTHOR_NAME: input.viewer.name,
   OPENCODE_PROXY_MODE: input.providerKind,
-  OPENCODE_PROXY_UPSTREAM_BASE_URL: input.baseUrl,
+  OPENCODE_PROXY_UPSTREAM_BASE_URL: input.upstreamBaseUrl,
   OPENCODE_PROXY_USAGE_LOG_PATH: `${input.sandboxPath}/${OPENCODE_USAGE_LOG_PATH}`,
   OPENCODE_REPO_PATH: input.sandboxPath,
   ...(input.providerKind === "codex" || input.providerKind === "manual"

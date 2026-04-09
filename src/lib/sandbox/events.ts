@@ -6,6 +6,8 @@ import {
   type ParsedTaskArtifactRecord,
   type ParsedTaskEventRecord,
 } from "@/lib/sandbox/store";
+import { createSandboxEvent, type SandboxEvent } from "@/lib/session/events";
+import { broadcastTaskEvent } from "@/lib/session/server";
 
 type TaskStreamListener = (event: ParsedTaskEventRecord) => void;
 
@@ -21,6 +23,18 @@ const notify = (event: ParsedTaskEventRecord) => {
   for (const listener of bucket) {
     listener(event);
   }
+
+  const sandboxEvent: SandboxEvent = createSandboxEvent(
+    event.type as any,
+    event.parsedPayload,
+    event.messageId,
+    event.sandboxId,
+  );
+
+  broadcastTaskEvent(event.taskId, {
+    event: sandboxEvent,
+    sequence: event.sequence,
+  });
 };
 
 export namespace SandboxEvents {
@@ -50,6 +64,7 @@ export namespace SandboxEvents {
     payload: JsonObject;
     taskId: string;
     type: string;
+    sandboxId?: string;
   }) => {
     const event = await createTaskEvent(input);
     notify(event);

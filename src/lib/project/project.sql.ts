@@ -249,14 +249,18 @@ export const taskEvent = pgTable(
       .references(() => task.id, { onDelete: "cascade" }),
     messageId: text("message_id").references(() => taskMessage.id, { onDelete: "cascade" }),
     sequence: integer().notNull(),
-    type: text().notNull(),
-    payload: text().notNull(),
+    type: text().notNull(), // EventType: heartbeat, token, tool_call, step_start, step_finish, tool_result, git_sync, error, execution_complete, artifact, push_complete, push_error, user_message
+    payload: text().notNull(), // JSON string of event data
+    sandboxId: text("sandbox_id"),
+    timestamp: timestamp("timestamp").defaultNow().notNull(),
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },
   (table) => [
     index("task_event_taskId_idx").on(table.taskId),
     index("task_event_taskId_sequence_idx").on(table.taskId, table.sequence),
     index("task_event_messageId_idx").on(table.messageId),
+    index("task_event_type_idx").on(table.type),
+    index("task_event_timestamp_idx").on(table.timestamp),
   ],
 );
 

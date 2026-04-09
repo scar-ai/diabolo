@@ -26,7 +26,6 @@ import { Route as AuthAppSessionsRouteImport } from './routes/_auth/app/sessions
 import { Route as AuthAppProjectsRouteImport } from './routes/_auth/app/projects'
 import { Route as AuthAppProjectSettingsRouteImport } from './routes/_auth/app/project-settings'
 import { Route as AuthAppOrganisationRouteImport } from './routes/_auth/app/organisation'
-import { Route as ApiTasksTaskIdStreamRouteImport } from './routes/api/tasks/$taskId/stream'
 import { Route as ApiTasksTaskIdFollowUpRouteImport } from './routes/api/tasks/$taskId/follow-up'
 import { Route as ApiTasksTaskIdAttachmentsRouteImport } from './routes/api/tasks/$taskId/attachments'
 import { Route as AuthAppTasksTaskIdRouteImport } from './routes/_auth/app/tasks/$taskId'
@@ -116,11 +115,6 @@ const AuthAppOrganisationRoute = AuthAppOrganisationRouteImport.update({
   path: '/organisation',
   getParentRoute: () => AuthAppRouteRoute,
 } as any)
-const ApiTasksTaskIdStreamRoute = ApiTasksTaskIdStreamRouteImport.update({
-  id: '/api/tasks/$taskId/stream',
-  path: '/api/tasks/$taskId/stream',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const ApiTasksTaskIdFollowUpRoute = ApiTasksTaskIdFollowUpRouteImport.update({
   id: '/api/tasks/$taskId/follow-up',
   path: '/api/tasks/$taskId/follow-up',
@@ -169,7 +163,6 @@ export interface FileRoutesByFullPath {
   '/app/tasks/$taskId': typeof AuthAppTasksTaskIdRoute
   '/api/tasks/$taskId/attachments': typeof ApiTasksTaskIdAttachmentsRoute
   '/api/tasks/$taskId/follow-up': typeof ApiTasksTaskIdFollowUpRoute
-  '/api/tasks/$taskId/stream': typeof ApiTasksTaskIdStreamRoute
   '/api/tasks/$taskId/artifacts/$artifactId': typeof ApiTasksTaskIdArtifactsArtifactIdRoute
   '/api/opencode/codex/$providerId/chat/completions': typeof ApiOpencodeCodexProviderIdChatCompletionsRoute
 }
@@ -191,7 +184,6 @@ export interface FileRoutesByTo {
   '/app/tasks/$taskId': typeof AuthAppTasksTaskIdRoute
   '/api/tasks/$taskId/attachments': typeof ApiTasksTaskIdAttachmentsRoute
   '/api/tasks/$taskId/follow-up': typeof ApiTasksTaskIdFollowUpRoute
-  '/api/tasks/$taskId/stream': typeof ApiTasksTaskIdStreamRoute
   '/api/tasks/$taskId/artifacts/$artifactId': typeof ApiTasksTaskIdArtifactsArtifactIdRoute
   '/api/opencode/codex/$providerId/chat/completions': typeof ApiOpencodeCodexProviderIdChatCompletionsRoute
 }
@@ -217,7 +209,6 @@ export interface FileRoutesById {
   '/_auth/app/tasks/$taskId': typeof AuthAppTasksTaskIdRoute
   '/api/tasks/$taskId/attachments': typeof ApiTasksTaskIdAttachmentsRoute
   '/api/tasks/$taskId/follow-up': typeof ApiTasksTaskIdFollowUpRoute
-  '/api/tasks/$taskId/stream': typeof ApiTasksTaskIdStreamRoute
   '/api/tasks/$taskId/artifacts/$artifactId': typeof ApiTasksTaskIdArtifactsArtifactIdRoute
   '/api/opencode/codex/$providerId/chat/completions': typeof ApiOpencodeCodexProviderIdChatCompletionsRoute
 }
@@ -242,7 +233,6 @@ export interface FileRouteTypes {
     | '/app/tasks/$taskId'
     | '/api/tasks/$taskId/attachments'
     | '/api/tasks/$taskId/follow-up'
-    | '/api/tasks/$taskId/stream'
     | '/api/tasks/$taskId/artifacts/$artifactId'
     | '/api/opencode/codex/$providerId/chat/completions'
   fileRoutesByTo: FileRoutesByTo
@@ -264,7 +254,6 @@ export interface FileRouteTypes {
     | '/app/tasks/$taskId'
     | '/api/tasks/$taskId/attachments'
     | '/api/tasks/$taskId/follow-up'
-    | '/api/tasks/$taskId/stream'
     | '/api/tasks/$taskId/artifacts/$artifactId'
     | '/api/opencode/codex/$providerId/chat/completions'
   id:
@@ -289,7 +278,6 @@ export interface FileRouteTypes {
     | '/_auth/app/tasks/$taskId'
     | '/api/tasks/$taskId/attachments'
     | '/api/tasks/$taskId/follow-up'
-    | '/api/tasks/$taskId/stream'
     | '/api/tasks/$taskId/artifacts/$artifactId'
     | '/api/opencode/codex/$providerId/chat/completions'
   fileRoutesById: FileRoutesById
@@ -305,7 +293,6 @@ export interface RootRouteChildren {
   ApiTasksCreateRoute: typeof ApiTasksCreateRoute
   ApiTasksTaskIdAttachmentsRoute: typeof ApiTasksTaskIdAttachmentsRoute
   ApiTasksTaskIdFollowUpRoute: typeof ApiTasksTaskIdFollowUpRoute
-  ApiTasksTaskIdStreamRoute: typeof ApiTasksTaskIdStreamRoute
   ApiTasksTaskIdArtifactsArtifactIdRoute: typeof ApiTasksTaskIdArtifactsArtifactIdRoute
   ApiOpencodeCodexProviderIdChatCompletionsRoute: typeof ApiOpencodeCodexProviderIdChatCompletionsRoute
 }
@@ -431,13 +418,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthAppOrganisationRouteImport
       parentRoute: typeof AuthAppRouteRoute
     }
-    '/api/tasks/$taskId/stream': {
-      id: '/api/tasks/$taskId/stream'
-      path: '/api/tasks/$taskId/stream'
-      fullPath: '/api/tasks/$taskId/stream'
-      preLoaderRoute: typeof ApiTasksTaskIdStreamRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/api/tasks/$taskId/follow-up': {
       id: '/api/tasks/$taskId/follow-up'
       path: '/api/tasks/$taskId/follow-up'
@@ -537,7 +517,6 @@ const rootRouteChildren: RootRouteChildren = {
   ApiTasksCreateRoute: ApiTasksCreateRoute,
   ApiTasksTaskIdAttachmentsRoute: ApiTasksTaskIdAttachmentsRoute,
   ApiTasksTaskIdFollowUpRoute: ApiTasksTaskIdFollowUpRoute,
-  ApiTasksTaskIdStreamRoute: ApiTasksTaskIdStreamRoute,
   ApiTasksTaskIdArtifactsArtifactIdRoute:
     ApiTasksTaskIdArtifactsArtifactIdRoute,
   ApiOpencodeCodexProviderIdChatCompletionsRoute:
