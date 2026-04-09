@@ -12,7 +12,7 @@ import {
 } from "@/components/app/task-detail";
 import type { CollaboratorMap } from "@/components/app/task-detail/types";
 import { Button } from "@/components/ui/button";
-import { $destroyTaskSandboxById, $terminateTaskById } from "@/lib/project/functions";
+import { $deleteTask, $terminateTaskById } from "@/lib/project/functions";
 import {
   projectCollaboratorsQueryOptions,
   projectDetailQueryOptions,
@@ -55,7 +55,7 @@ function TaskDetailPage() {
   const { taskId } = Route.useParams();
   const queryClient = useQueryClient();
   const terminateTask = useServerFn($terminateTaskById);
-  const destroySandbox = useServerFn($destroyTaskSandboxById);
+  const deleteTask = useServerFn($deleteTask);
 
   const [followUpInput, setFollowUpInput] = useState("");
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
@@ -82,15 +82,14 @@ function TaskDetailPage() {
     },
   });
 
-  const destroyMutation = useMutation({
-    mutationFn: () => destroySandbox({ data: { taskId } }),
+  const deleteMutation = useMutation({
+    mutationFn: () => deleteTask({ data: { taskId } }),
     onSuccess: () => {
-      toast.success("Sandbox destroyed.");
-      queryClient.invalidateQueries({ queryKey: taskKeys.detail(taskId) });
+      toast.success("Task removed from history.");
       queryClient.invalidateQueries({ queryKey: taskKeys.all });
     },
     onError: (error) => {
-      toast.error(error instanceof Error ? error.message : "Failed to destroy sandbox.");
+      toast.error(error instanceof Error ? error.message : "Failed to delete task.");
     },
   });
 
@@ -142,7 +141,6 @@ function TaskDetailPage() {
   useTaskStream(taskId, true);
   const isRunning = task && !TERMINAL_STATUSES.has(task.status);
   const isCompleted = task && TERMINAL_STATUSES.has(task.status);
-  const sandboxAlive = isCompleted && task.sandboxId;
   const taskTitle = task?.title ?? task?.repoName ?? "Task";
   const _projectName = projectQuery.data?.name ?? null;
   const canSendFollowUp = Boolean(
@@ -224,10 +222,9 @@ function TaskDetailPage() {
           </span>
         </div>
         <TaskHeaderActions
-          destroyPending={destroyMutation.isPending}
-          onDestroy={() => destroyMutation.mutate()}
+          deletePending={deleteMutation.isPending}
+          onDelete={() => deleteMutation.mutate()}
           onTerminate={() => terminateMutation.mutate()}
-          sandboxAlive={!!sandboxAlive}
           taskIsRunning={!!isRunning}
           terminatePending={terminateMutation.isPending}
         />
