@@ -3,17 +3,15 @@ import { LoaderIcon, SquareIcon, Trash2Icon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 export function TaskHeaderActions({
-  destroyPending,
-  onDestroy,
-  onTerminate,
-  sandboxAlive,
   terminatePending,
   taskIsRunning,
+  onDelete,
+  deletePending,
+  onTerminate,
 }: {
-  destroyPending: boolean;
-  onDestroy: () => void;
+  deletePending: boolean;
+  onDelete: () => void;
   onTerminate: () => void;
-  sandboxAlive: boolean;
   terminatePending: boolean;
   taskIsRunning: boolean;
 }) {
@@ -29,20 +27,20 @@ export function TaskHeaderActions({
           {terminatePending ? "Stopping..." : "Terminate"}
         </Button>
       ) : null}
-      {sandboxAlive ? (
+      {!taskIsRunning ? (
         <Button
           variant="ghost"
           size="sm"
           className="gap-1.5 text-destructive hover:bg-destructive/10 hover:text-destructive"
-          disabled={destroyPending}
-          onClick={onDestroy}
+          disabled={deletePending}
+          onClick={onDelete}
         >
-          {destroyPending ? (
+          {deletePending ? (
             <LoaderIcon className="size-3.5 animate-spin" />
           ) : (
             <Trash2Icon className="size-3.5" />
           )}
-          {destroyPending ? "Destroying..." : "Destroy Sandbox"}
+          {deletePending ? "Deleting..." : "Delete from History"}
         </Button>
       ) : null}
     </>
