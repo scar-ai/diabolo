@@ -8,8 +8,12 @@ import { Log } from "@/lib/log";
 import { buildOpenCodeConfigContent } from "@/lib/opencode/config";
 import { Sandbox } from "@/lib/sandbox";
 import { SandboxEvents } from "@/lib/sandbox/events";
-import { CODEX_LOCAL_PROXY_BASE_URL, CODEX_LOCAL_PROXY_SCRIPT } from "@/lib/sandbox/opencode";
-import { OPENCODE_USAGE_LOG_PATH } from "@/lib/sandbox/opencode";
+import {
+  CODEX_LOCAL_PROXY_BASE_URL,
+  CODEX_LOCAL_PROXY_SCRIPT,
+  OPENCODE_SERVER_BASE_URL,
+  OPENCODE_USAGE_LOG_PATH,
+} from "@/lib/sandbox/opencode";
 import { SandboxRuntimeState } from "@/lib/sandbox/runtime-state";
 import {
   appendTaskAgentMessage,
@@ -395,6 +399,8 @@ const normalizeEvent = (event: JsonObject) => {
 };
 
 export const parseAgentOutput = async (taskId: string, messageId: string, output: string) => {
+  let errorMessage: string | null = null;
+
   for (const line of output.split("\n")) {
     const trimmed = line.trim();
 
@@ -413,7 +419,7 @@ export const parseAgentOutput = async (taskId: string, messageId: string, output
 
         const message = await findTaskMessage(messageId);
 
-        if (message?.kind === "initial" || message?.sequence === 0) {
+        if (message?.kind === "initial") {
           await appendTaskAgentMessage(taskId, normalized.payload.text, timestamp);
         }
       }
@@ -425,8 +431,20 @@ export const parseAgentOutput = async (taskId: string, messageId: string, output
         type: normalized.type,
       });
       await detectArtifacts(taskId, messageId, normalized.payload);
+
+      if (!errorMessage && normalized.type === "error") {
+        errorMessage =
+          (typeof normalized.payload.message === "string" && normalized.payload.message.trim()) ||
+          (typeof normalized.payload.error === "string" && normalized.payload.error.trim()) ||
+          "OpenCode reported an error.";
+      }
     } catch {}
   }
+
+  return {
+    errorMessage,
+    hadError: Boolean(errorMessage),
+  };
 };
 
 export const syncGitHandoffState = async (input: {
@@ -513,6 +531,9 @@ export const buildOpenCodeEnvironment = (input: {
   viewer: { email: string; name: string };
 }) => ({
   [input.apiKeyEnvVar]: input.apiKey,
+  // Force OpenCode into headless mode so it does not block on the question tool
+  // waiting for interactive client input that Diabolo does not surface.
+  OPENCODE_CLIENT: "serve",
   OPENCODE_CONFIG_CONTENT_B64: Buffer.from(
     buildOpenCodeConfigContent({
       apiKey: input.apiKey,
@@ -535,6 +556,7 @@ export const buildOpenCodeEnvironment = (input: {
   OPENCODE_PROXY_UPSTREAM_BASE_URL: input.baseUrl,
   OPENCODE_PROXY_USAGE_LOG_PATH: `${input.sandboxPath}/${OPENCODE_USAGE_LOG_PATH}`,
   OPENCODE_REPO_PATH: input.sandboxPath,
+  OPENCODE_SERVER_BASE_URL,
   ...(input.providerKind === "codex" || input.providerKind === "manual"
     ? {
         OPENCODE_CODEX_PROVIDER_ID: input.providerId,

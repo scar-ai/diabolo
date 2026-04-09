@@ -6,11 +6,14 @@ import { normalizeOpenCodeModelForProvider, resolveOpenCodeConfig } from "@/lib/
 import { findTaskWithProject } from "@/lib/project/data";
 import { parseStoredProjectSkills } from "@/lib/project/skills";
 import { Sandbox } from "@/lib/sandbox";
-import { buildOpenCodePrompt, buildOpenCodeRunCommand } from "@/lib/sandbox/opencode";
+import {
+  buildOpenCodePrompt,
+  buildOpenCodePromptCommand,
+  buildOpenCodeRuntimeCommand,
+} from "@/lib/sandbox/opencode";
 import {
   findTaskMessage,
   findTaskRecord,
-  getTaskConversation,
   listTaskArtifactsByMessageId,
   updateTaskRecord,
 } from "@/lib/sandbox/store";
@@ -201,12 +204,11 @@ const runOpenCodeMessage = async (input: {
     model,
     sandboxId: input.prepared.sandbox.id,
   });
-  const openCodeStartedAt = Date.now();
-  const response = await runSandboxCommand(
+  await runSandboxCommand(
     input.prepared.sandbox,
     input.taskId,
     input.messageId,
-    buildOpenCodeRunCommand(model, prompt, attachments),
+    buildOpenCodeRuntimeCommand(),
     input.prepared.sandboxPath,
     buildOpenCodeEnvironment({
       apiKey: openCode.runtimeApiKey ?? openCode.apiKey,
@@ -224,8 +226,19 @@ const runOpenCodeMessage = async (input: {
       taskId: input.taskId,
       viewer: input.viewer,
     }),
+    180,
+    "ensure opencode runtime",
+  );
+  const openCodeStartedAt = Date.now();
+  const response = await runSandboxCommand(
+    input.prepared.sandbox,
+    input.taskId,
+    input.messageId,
+    buildOpenCodePromptCommand(model, prompt, attachments),
+    input.prepared.sandboxPath,
+    undefined,
     3600,
-    "opencode run",
+    "opencode prompt",
   );
   op.info("OpenCode run completed", {
     durationMs: Date.now() - openCodeStartedAt,
@@ -258,7 +271,10 @@ const runOpenCodeMessage = async (input: {
     usageEvents,
   });
 
-  await parseAgentOutput(input.taskId, input.messageId, response.output);
+  const parsedOutput = await parseAgentOutput(input.taskId, input.messageId, response.output);
+  if (parsedOutput.hadError) {
+    throw new Error(parsedOutput.errorMessage ?? "OpenCode reported an error.");
+  }
   await assertTaskNotCancelled(input.taskId);
 
   const changes = await runSandboxCommand(
@@ -308,7 +324,7 @@ export const runInitialMessage = async (taskId: string, messageId: string) => {
   const context = await loadTaskExecutionContext(taskId, messageId);
 
   if (!context) {
-    return;
+    throw new Error("Task execution context is unavailable.");
   }
 
   await updateTaskRecord(taskId, {
@@ -355,22 +371,8 @@ export const runFollowUpMessage = async (taskId: string, messageId: string) => {
   const context = await loadTaskExecutionContext(taskId, messageId);
 
   if (!context) {
-    return;
+    throw new Error("Task execution context is unavailable.");
   }
-
-  const previousConversation: NonNullable<
-    Parameters<typeof buildOpenCodePrompt>[1]
-  >["conversationHistory"] = (await getTaskConversation(taskId))
-    .filter((message) => message.sequence < context.messageRecord.sequence)
-    .map((message) => ({
-      error: message.error,
-      kind: message.kind === "initial" ? "initial" : "follow_up",
-      prompt: message.prompt,
-      responseMessages: message.parsedResponseMessages,
-      sequence: message.sequence,
-      stage: message.stage,
-      status: message.status,
-    }));
 
   const prepared = await SandboxWorkspace.getOrCreateFollowUp({
     authenticatedRemoteUrl: context.authenticatedRemoteUrl,
@@ -398,9 +400,6 @@ export const runFollowUpMessage = async (taskId: string, messageId: string) => {
     messageId,
     llmProvider: context.llmProvider,
     messagePrompt: context.messageRecord.prompt,
-    messagePromptOptions: {
-      conversationHistory: previousConversation,
-    },
     prepared,
     repo: context.repo,
     taskId,

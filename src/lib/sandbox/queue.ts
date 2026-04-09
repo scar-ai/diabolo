@@ -23,14 +23,7 @@ const PROCESSING_STALE_MS = 10 * 60 * 1000;
 const activeProcessors = new Set<string>();
 const sandboxProvider = getSandboxProvider();
 
-const hasWorkRemaining = async (taskId: string) => {
-  const [pending, processing] = await Promise.all([
-    findNextPendingTaskMessage(taskId),
-    findProcessingTaskMessage(taskId),
-  ]);
-
-  return Boolean(pending || processing);
-};
+const hasPendingWork = async (taskId: string) => Boolean(await findNextPendingTaskMessage(taskId));
 
 const recoverStaleProcessing = async (taskId: string) => {
   if (activeProcessors.has(taskId)) {
@@ -118,8 +111,8 @@ const drainTaskQueue = async (taskId: string) => {
       taskId,
     });
 
-    if (await hasWorkRemaining(taskId)) {
-      log.info("task queue still has work; scheduling another drain", { taskId });
+    if (await hasPendingWork(taskId)) {
+      log.info("task queue still has pending work; scheduling another drain", { taskId });
       queueMicrotask(() => {
         void drainTaskQueue(taskId);
       });
@@ -143,10 +136,15 @@ export namespace SandboxQueue {
   };
 
   export const resume = async (taskId: string) => {
+    if (activeProcessors.has(taskId)) {
+      log.debug("resume skipped; processor already active", { taskId });
+      return;
+    }
+
     log.info("resume requested", { taskId });
     await recoverStaleProcessing(taskId);
 
-    if (await hasWorkRemaining(taskId)) {
+    if (await hasPendingWork(taskId)) {
       queueMicrotask(() => {
         void drainTaskQueue(taskId);
       });

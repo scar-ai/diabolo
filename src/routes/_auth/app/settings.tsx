@@ -3,6 +3,8 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import {
   CheckCircle2Icon,
+  EyeIcon,
+  EyeOffIcon,
   ExternalLinkIcon,
   KeyRoundIcon,
   Loader2Icon,
@@ -191,6 +193,7 @@ function SettingsPage() {
 
   const [draftProviders, setDraftProviders] = useState<ProviderDraft[] | null>(null);
   const [pendingDeviceAuth, setPendingDeviceAuth] = useState<DeviceAuthState | null>(null);
+  const [visibleApiKeyProviders, setVisibleApiKeyProviders] = useState<Set<string>>(new Set());
   const hasPendingAuth = pendingDeviceAuth !== null;
 
   const providersQuery = useQuery({
@@ -368,6 +371,18 @@ function SettingsPage() {
     setDraftProviders(null);
     setPendingDeviceAuth(null);
     setCallbackUrlDraft("");
+  };
+
+  const toggleApiKeyVisibility = (providerId: string) => {
+    setVisibleApiKeyProviders((current) => {
+      const next = new Set(current);
+      if (next.has(providerId)) {
+        next.delete(providerId);
+      } else {
+        next.add(providerId);
+      }
+      return next;
+    });
   };
 
   return (
@@ -860,17 +875,33 @@ function SettingsPage() {
                               <Label htmlFor={`key-${provider.id}`} className="text-xs">
                                 API key
                               </Label>
-                              <Input
-                                id={`key-${provider.id}`}
-                                type="password"
-                                autoComplete="off"
-                                value={provider.providerApiKey}
-                                onChange={(e) =>
-                                  updateProvider(provider.id, { providerApiKey: e.target.value })
-                                }
-                                placeholder="sk-..."
-                                className="h-8 font-mono text-sm"
-                              />
+                              <div className="relative">
+                                <Input
+                                  id={`key-${provider.id}`}
+                                  type={
+                                    visibleApiKeyProviders.has(provider.id) ? "text" : "password"
+                                  }
+                                  autoComplete="off"
+                                  value={provider.providerApiKey}
+                                  onChange={(e) =>
+                                    updateProvider(provider.id, { providerApiKey: e.target.value })
+                                  }
+                                  placeholder="sk-..."
+                                  className="h-8 pr-9 font-mono text-sm"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => toggleApiKeyVisibility(provider.id)}
+                                  className="absolute top-1/2 right-2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                                  tabIndex={-1}
+                                >
+                                  {visibleApiKeyProviders.has(provider.id) ? (
+                                    <EyeOffIcon className="size-3.5" />
+                                  ) : (
+                                    <EyeIcon className="size-3.5" />
+                                  )}
+                                </button>
+                              </div>
                             </div>
                           </>
                         )}

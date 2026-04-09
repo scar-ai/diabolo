@@ -291,6 +291,8 @@ export const buildGitToolsOpenCodeSetupCommand = () =>
     'OPENCODE_TOOLS_ROOT="${OPENCODE_TOOLS_ROOT:-$HOME/.config/opencode}"',
     'mkdir -p "$OPENCODE_TOOLS_ROOT/tools"',
     writeFileCommand("$OPENCODE_TOOLS_ROOT/package.json", GIT_TOOLS_PACKAGE_JSON),
-    'if [ ! -d "$OPENCODE_TOOLS_ROOT/node_modules/@opencode-ai/plugin" ]; then (cd "$OPENCODE_TOOLS_ROOT" && npm install --no-package-lock --silent @opencode-ai/plugin); fi',
+    'GLOBAL_NODE_MODULES="$(npm root -g)"',
+    'if [ ! -e "$OPENCODE_TOOLS_ROOT/node_modules" ] && [ -d "$GLOBAL_NODE_MODULES" ]; then ln -s "$GLOBAL_NODE_MODULES" "$OPENCODE_TOOLS_ROOT/node_modules"; fi',
+    'if [ ! -d "$OPENCODE_TOOLS_ROOT/node_modules/@opencode-ai/plugin" ]; then echo "Global @opencode-ai/plugin dependency is missing from the Daytona browser snapshot." >&2; exit 1; fi',
     writeFileCommand("$OPENCODE_TOOLS_ROOT/tools/git.ts", GIT_TOOLS_CONTENT),
   ].join("\n");
