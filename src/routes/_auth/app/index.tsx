@@ -12,9 +12,11 @@ import { ProviderSelector } from "@/components/app/home/provider-selector";
 import { RunningTasksPanel } from "@/components/app/home/running-tasks-panel";
 import { ScheduledTasksSection } from "@/components/app/home/scheduled-tasks-section";
 import { PromptComposer } from "@/components/app/prompt-composer";
+import { ReasoningEffortSelector } from "@/components/app/reasoning-effort-selector";
 import { Button } from "@/components/ui/button";
 import { githubReposQueryOptions } from "@/lib/github/queries";
 import { githubBranchesQueryOptions } from "@/lib/github/queries";
+import { modelSupportsReasoningEffort, type ReasoningEffort } from "@/lib/models/reasoning-effort";
 import { $createProject } from "@/lib/project/functions";
 import {
   allUserTaskSummariesQueryOptions,
@@ -74,6 +76,7 @@ function AppHome() {
   const [createProjectRepoId, setCreateProjectRepoId] = useState("");
   const [createProjectName, setCreateProjectName] = useState("");
   const [selectedProviderId, setSelectedProviderId] = useState<string | null>(null);
+  const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort | null>(null);
 
   const currentProjectId = search.projectId ?? "";
   const projectsQuery = useQuery(projectsQueryOptions(user.id));
@@ -121,6 +124,12 @@ function AppHome() {
     selectedProviderId && providers.some((provider) => provider.id === selectedProviderId)
       ? selectedProviderId
       : defaultProviderId;
+  const selectedProvider =
+    providers.find((provider) => provider.id === effectiveProviderId) ?? null;
+  const selectedModel = selectedProvider?.providerModel ?? "";
+  const supportsReasoningEffort = Boolean(
+    selectedModel && modelSupportsReasoningEffort(selectedModel),
+  );
 
   const currentProjectRunningTasks = (recentTasksQuery.data ?? []).filter(
     (task) =>
@@ -158,6 +167,7 @@ function AppHome() {
       attachments: File[];
       prompt: string;
       providerId: string;
+      reasoningEffort: ReasoningEffort | null;
       sourceBranch: string;
     }) => {
       if (!currentProject)
@@ -167,6 +177,9 @@ function AppHome() {
       formData.set("projectId", currentProject.id);
       formData.set("prompt", data.prompt);
       formData.set("providerId", data.providerId);
+      if (data.reasoningEffort) {
+        formData.set("reasoningEffort", data.reasoningEffort);
+      }
       formData.set("sourceBranch", data.sourceBranch);
 
       for (const file of data.attachments) {
@@ -217,6 +230,7 @@ function AppHome() {
       attachments: attachments.map((a) => a.file),
       prompt: inputValue.trim(),
       providerId: effectiveProviderId,
+      reasoningEffort: supportsReasoningEffort ? reasoningEffort : null,
       sourceBranch: currentBranch,
     });
   };
@@ -369,6 +383,15 @@ function AppHome() {
                   providers={providers}
                 />
               </>
+            }
+            footerRight={
+              supportsReasoningEffort ? (
+                <ReasoningEffortSelector
+                  disabled={taskMutation.isPending}
+                  onValueChange={setReasoningEffort}
+                  value={reasoningEffort}
+                />
+              ) : undefined
             }
             note={
               providers.length === 0

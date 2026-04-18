@@ -57,6 +57,10 @@ export default {
       .string()
       .optional()
       .describe("Optional model override for the child task."),
+    reasoningEffort: z
+      .string()
+      .optional()
+      .describe("Optional reasoning effort override for the child task."),
   },
   async execute(args) {
     const endpoint = process.env.OPENCODE_SPAWN_TASK_ENDPOINT;
@@ -80,6 +84,7 @@ export default {
           model: args.model || null,
           parentTaskId,
           prompt: args.prompt,
+          reasoningEffort: args.reasoningEffort || null,
           title: args.title,
         }),
       });

@@ -7,6 +7,8 @@ import {
 } from "lucide-react";
 
 import { PromptComposer } from "@/components/app/prompt-composer";
+import { ReasoningEffortSelector } from "@/components/app/reasoning-effort-selector";
+import { modelSupportsReasoningEffort, type ReasoningEffort } from "@/lib/models/reasoning-effort";
 
 import type { TaskData } from "./types";
 
@@ -17,8 +19,10 @@ export function TaskFollowUpComposer({
   isPending,
   onAddAttachments,
   onChange,
+  onReasoningEffortChange,
   onRemoveAttachment,
   onSubmit,
+  reasoningEffort,
   task,
   value,
 }: {
@@ -28,13 +32,18 @@ export function TaskFollowUpComposer({
   isPending: boolean;
   onAddAttachments: (files: File[]) => void;
   onChange: (value: string) => void;
+  onReasoningEffortChange: (value: ReasoningEffort | null) => void;
   onRemoveAttachment: (id: string) => void;
   onSubmit: () => void;
+  reasoningEffort: ReasoningEffort | null;
   task: TaskData;
   value: string;
 }) {
   const sandboxAlive = Boolean(task.sandboxId);
   const taskIsRunning = task.status === "queued" || task.status === "running";
+  const supportsReasoningEffort = Boolean(
+    task.opencodeModel && modelSupportsReasoningEffort(task.opencodeModel),
+  );
 
   return (
     <>
@@ -97,6 +106,15 @@ export function TaskFollowUpComposer({
                   <ChevronDownIcon className="size-3 shrink-0 opacity-50" aria-hidden="true" />
                 </button>
               </>
+            }
+            footerRight={
+              supportsReasoningEffort ? (
+                <ReasoningEffortSelector
+                  disabled={disabled}
+                  onValueChange={onReasoningEffortChange}
+                  value={reasoningEffort}
+                />
+              ) : undefined
             }
           />
         </div>

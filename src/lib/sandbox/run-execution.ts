@@ -6,12 +6,21 @@ import { normalizeOpenCodeModelForProvider, resolveOpenCodeConfig } from "@/lib/
 import { findTaskWithProject } from "@/lib/project/data";
 import { parseStoredProjectSkills } from "@/lib/project/skills";
 import { Sandbox } from "@/lib/sandbox";
-import { buildOpenCodePrompt, buildOpenCodeRunCommand } from "@/lib/sandbox/opencode";
+import {
+  buildOpenCodeRuntimeEnvironment,
+  ensureOpenCodeServer,
+  getOpenCodeRuntimeFingerprint,
+  type OpenCodePromptResult,
+  parseOpenCodePromptResult,
+  readOpenCodeUsageLog,
+  runOpenCodePrompt,
+} from "@/lib/sandbox/opencode-host";
 import {
   findTaskMessage,
   findTaskRecord,
-  getTaskConversation,
+  listCompletedMessagesBeforeSequence,
   listTaskArtifactsByMessageId,
+  updateTaskMessageRecord,
   updateTaskRecord,
 } from "@/lib/sandbox/store";
 import { SandboxWorkspace } from "@/lib/sandbox/workspace";
@@ -24,13 +33,11 @@ import {
 import { findUserLlmProvider, listUserLlmProviders } from "@/lib/user/data";
 import { parseProviderUsageLog, recordProviderUsageEvents } from "@/lib/user/provider-usage";
 
-import { OPENCODE_USAGE_LOG_PATH } from "./opencode";
 import {
   assertTaskNotCancelled,
-  buildOpenCodeEnvironment,
   completeMessageExecution,
   getTaskProjectEnvVars,
-  parseAgentOutput,
+  recordRuntimeAgentEvent,
   runSandboxCommand,
   syncGitHandoffState,
   unwrapResult,
@@ -39,6 +46,37 @@ import {
 
 type Viewer = { email: string; login: string; name: string };
 const log = Log.create({ ns: "sandbox.run_execution" });
+
+const buildReplayMessageText = (input: {
+  prompt: string;
+  responseText?: string | null;
+  sequence: number;
+}) =>
+  [
+    "Recovered prior task exchange for follow-up continuity.",
+    `Exchange sequence: ${input.sequence}`,
+    "",
+    "User task:",
+    input.prompt.trim(),
+    ...(input.responseText?.trim()
+      ? ["", "Final assistant response:", input.responseText.trim()]
+      : []),
+  ].join("\n");
+
+const buildReplayMessages = async (taskId: string, sequence: number) => {
+  const completedMessages = await listCompletedMessagesBeforeSequence(taskId, sequence);
+
+  return completedMessages.map((message) => ({
+    messageId:
+      message.opencodeUserMessageId?.trim() ||
+      `replay_${message.sequence.toString().padStart(4, "0")}`,
+    text: buildReplayMessageText({
+      prompt: message.prompt,
+      responseText: message.parsedResponseMessages.at(-1)?.text ?? null,
+      sequence: message.sequence,
+    }),
+  }));
+};
 
 const prepareMessageAttachments = async (input: {
   messageId: string;
@@ -158,7 +196,7 @@ const loadTaskExecutionContext = async (taskId: string, messageId: string) => {
 const runOpenCodeMessage = async (input: {
   defaultCompletionStage: string;
   messageId: string;
-  messagePromptOptions?: Parameters<typeof buildOpenCodePrompt>[1];
+  messageRecord: NonNullable<Awaited<ReturnType<typeof findTaskMessage>>>;
   prepared: { sandbox: Sandbox.Session; sandboxPath: string };
   repo: Github.Repo;
   taskId: string;
@@ -168,24 +206,66 @@ const runOpenCodeMessage = async (input: {
   githubAccessToken: string;
   llmProvider: NonNullable<Awaited<ReturnType<typeof findUserLlmProvider>>>;
   messagePrompt: string;
+  requiresSessionRecovery?: boolean;
 }) => {
   const op = log.child({ messageId: input.messageId, taskId: input.taskId });
   const runStartedAt = Date.now();
   const openCode = await resolveOpenCodeConfig({
-    model: input.taskRecord?.opencodeModel?.trim() || null,
+    model: input.messageRecord.model?.trim() || input.taskRecord?.opencodeModel?.trim() || null,
     provider: input.llmProvider,
   });
   const model = openCode.model;
+  const runtimeFingerprint = getOpenCodeRuntimeFingerprint(openCode);
+  // Rehydrate follow-ups from recorded history instead of reusing a live OpenCode
+  // session. The persisted-session path can hang without producing runtime events.
+  const shouldPreferReplayRecovery = input.messageRecord.sequence > 0;
+  const shouldRecoverSession =
+    shouldPreferReplayRecovery ||
+    Boolean(input.requiresSessionRecovery) ||
+    (!!input.taskRecord?.opencodeSessionId &&
+      !!input.taskRecord?.opencodeRuntimeFingerprint &&
+      input.taskRecord.opencodeRuntimeFingerprint !== runtimeFingerprint);
+  const replayMessages =
+    input.messageRecord.sequence > 0 && shouldRecoverSession
+      ? await buildReplayMessages(input.taskId, input.messageRecord.sequence)
+      : [];
   const attachments = await prepareMessageAttachments({
     messageId: input.messageId,
     prepared: input.prepared,
   });
-  const prompt = buildOpenCodePrompt(input.messagePrompt, {
-    attachments,
-    ...input.messagePromptOptions,
-    envVarKeys: Object.keys(input.taskProjectEnvVars),
-    sandboxId: input.prepared.sandbox.id,
-  });
+  const buildRuntimeEnvironment = (
+    sessionId?: string | null,
+    replayMessagesForRun = replayMessages,
+  ) =>
+    buildOpenCodeRuntimeEnvironment({
+      apiKey: openCode.runtimeApiKey ?? openCode.apiKey,
+      apiKeyEnvVar: openCode.apiKeyEnvVar,
+      attachments,
+      defaultBranch: input.repo.defaultBranch,
+      githubToken: input.githubAccessToken,
+      messageId: input.messageId,
+      model,
+      projectEnvVars: input.taskProjectEnvVars,
+      providerId: openCode.providerId,
+      providerKind: openCode.providerKind,
+      providerName: openCode.providerName,
+      reasoningEffort: input.messageRecord.reasoningEffort ?? null,
+      repoFullName: input.repo.fullName,
+      runtimeBaseUrl: openCode.runtimeBaseUrl ?? openCode.baseUrl,
+      sandboxId: input.prepared.sandbox.id,
+      sandboxPath: input.prepared.sandboxPath,
+      replayMessages: replayMessagesForRun,
+      sessionId,
+      taskId: input.taskId,
+      upstreamBaseUrl: openCode.baseUrl,
+      userPrompt: input.messagePrompt,
+      viewer: input.viewer,
+    });
+  const persistedSessionId =
+    shouldRecoverSession || input.taskRecord?.opencodeRuntimeFingerprint !== runtimeFingerprint
+      ? null
+      : (input.taskRecord?.opencodeSessionId ?? null);
+  const openCodeEnvironment = buildRuntimeEnvironment(persistedSessionId);
   await runSandboxCommand(
     input.prepared.sandbox,
     input.taskId,
@@ -196,53 +276,104 @@ const runOpenCodeMessage = async (input: {
     60,
     "refresh git exclude",
   );
+  await ensureOpenCodeServer({
+    environment: openCodeEnvironment,
+    messageId: input.messageId,
+    run: runSandboxCommand,
+    sandbox: input.prepared.sandbox,
+    sandboxPath: input.prepared.sandboxPath,
+    taskId: input.taskId,
+  });
   op.info("starting OpenCode run", {
     attachmentCount: attachments.length,
     model,
     sandboxId: input.prepared.sandbox.id,
   });
   const openCodeStartedAt = Date.now();
-  const response = await runSandboxCommand(
-    input.prepared.sandbox,
-    input.taskId,
-    input.messageId,
-    buildOpenCodeRunCommand(model, prompt, attachments),
-    input.prepared.sandboxPath,
-    buildOpenCodeEnvironment({
-      apiKey: openCode.runtimeApiKey ?? openCode.apiKey,
-      apiKeyEnvVar: openCode.apiKeyEnvVar,
-      defaultBranch: input.repo.defaultBranch,
-      githubToken: input.githubAccessToken,
-      model,
-      providerId: openCode.providerId,
-      providerKind: openCode.providerKind,
-      providerName: openCode.providerName,
-      projectEnvVars: input.taskProjectEnvVars,
-      repoFullName: input.repo.fullName,
-      runtimeBaseUrl: openCode.runtimeBaseUrl ?? openCode.baseUrl,
+  let response: Awaited<ReturnType<typeof runOpenCodePrompt>>;
+  let runtimeResult: OpenCodePromptResult | null = null;
+
+  try {
+    response = await runOpenCodePrompt({
+      environment: openCodeEnvironment,
+      messageId: input.messageId,
+      run: runSandboxCommand,
+      sandbox: input.prepared.sandbox,
       sandboxPath: input.prepared.sandboxPath,
       taskId: input.taskId,
-      upstreamBaseUrl: openCode.baseUrl,
-      viewer: input.viewer,
-    }),
-    3600,
-    "opencode run",
-  );
+    });
+    runtimeResult = parseOpenCodePromptResult(response.output);
+  } catch (error) {
+    if (
+      input.messageRecord.sequence > 0 &&
+      !shouldRecoverSession &&
+      input.taskRecord?.opencodeSessionId
+    ) {
+      op.warn("opencode session unavailable; retrying with recovered context", {
+        error,
+        sessionId: input.taskRecord.opencodeSessionId,
+      });
+      const recoveredReplayMessages = await buildReplayMessages(
+        input.taskId,
+        input.messageRecord.sequence,
+      );
+      const recoveredEnvironment = buildRuntimeEnvironment(null, recoveredReplayMessages);
+
+      response = await runOpenCodePrompt({
+        environment: recoveredEnvironment,
+        messageId: input.messageId,
+        run: runSandboxCommand,
+        sandbox: input.prepared.sandbox,
+        sandboxPath: input.prepared.sandboxPath,
+        taskId: input.taskId,
+      });
+      runtimeResult = parseOpenCodePromptResult(response.output);
+      await updateTaskMessageRecord(input.messageId, {
+        replayStrategy: "replayed_history",
+        replayedAt: new Date(),
+      });
+    } else {
+      throw error;
+    }
+  }
   op.info("OpenCode run completed", {
     durationMs: Date.now() - openCodeStartedAt,
     outputChars: response.output.length,
   });
+  if (!runtimeResult) {
+    throw new Error("OpenCode prompt completed without a parseable runtime result.");
+  }
 
-  const usageLog = await runSandboxCommand(
-    input.prepared.sandbox,
-    input.taskId,
-    input.messageId,
-    `if [ -f '${OPENCODE_USAGE_LOG_PATH}' ]; then cat '${OPENCODE_USAGE_LOG_PATH}'; fi`,
-    input.prepared.sandboxPath,
-    undefined,
-    30,
-    "read usage log",
-  );
+  await updateTaskRecord(input.taskId, {
+    opencodeRuntimeFingerprint: runtimeFingerprint,
+    opencodeSessionId: runtimeResult.sessionId?.trim() || null,
+  });
+  await updateTaskMessageRecord(input.messageId, {
+    opencodeAssistantMessageId: runtimeResult.assistantMessageId?.trim() || null,
+    opencodeUserMessageId: runtimeResult.userMessageId?.trim() || null,
+    replayStrategy: replayMessages.length > 0 ? "replayed_history" : null,
+    replayedAt: replayMessages.length > 0 ? new Date() : null,
+  });
+
+  if (runtimeResult?.text?.trim()) {
+    await recordRuntimeAgentEvent({
+      messageId: input.messageId,
+      payload: {
+        text: runtimeResult.text.trim(),
+        timestamp: Date.now(),
+      },
+      taskId: input.taskId,
+      type: "token",
+    });
+  }
+
+  const usageLog = await readOpenCodeUsageLog({
+    messageId: input.messageId,
+    run: runSandboxCommand,
+    sandbox: input.prepared.sandbox,
+    sandboxPath: input.prepared.sandboxPath,
+    taskId: input.taskId,
+  });
   const usageEvents = parseProviderUsageLog(usageLog.output);
 
   await recordProviderUsageEvents({
@@ -258,8 +389,6 @@ const runOpenCodeMessage = async (input: {
     taskId: input.taskId,
     usageEvents,
   });
-
-  await parseAgentOutput(input.taskId, input.messageId, response.output);
   await assertTaskNotCancelled(input.taskId);
 
   const changes = await runSandboxCommand(
@@ -341,6 +470,7 @@ export const runInitialMessage = async (taskId: string, messageId: string) => {
     defaultCompletionStage: "Task completed",
     githubAccessToken: context.githubAccessToken,
     messageId,
+    messageRecord: context.messageRecord,
     llmProvider: context.llmProvider,
     messagePrompt: context.messageRecord.prompt,
     prepared,
@@ -358,20 +488,6 @@ export const runFollowUpMessage = async (taskId: string, messageId: string) => {
   if (!context) {
     return;
   }
-
-  const previousConversation: NonNullable<
-    Parameters<typeof buildOpenCodePrompt>[1]
-  >["conversationHistory"] = (await getTaskConversation(taskId))
-    .filter((message) => message.sequence < context.messageRecord.sequence)
-    .map((message) => ({
-      error: message.error,
-      kind: message.kind === "initial" ? "initial" : "follow_up",
-      prompt: message.prompt,
-      responseMessages: message.parsedResponseMessages,
-      sequence: message.sequence,
-      stage: message.stage,
-      status: message.status,
-    }));
 
   const prepared = await SandboxWorkspace.getOrCreateFollowUp({
     authenticatedRemoteUrl: context.authenticatedRemoteUrl,
@@ -397,13 +513,15 @@ export const runFollowUpMessage = async (taskId: string, messageId: string) => {
     defaultCompletionStage: "Follow-up completed",
     githubAccessToken: context.githubAccessToken,
     messageId,
+    messageRecord: context.messageRecord,
     llmProvider: context.llmProvider,
     messagePrompt: context.messageRecord.prompt,
-    messagePromptOptions: {
-      conversationHistory: previousConversation,
-    },
     prepared,
     repo: context.repo,
+    requiresSessionRecovery:
+      !prepared.reused ||
+      !context.taskRecord.opencodeSessionId ||
+      !context.taskRecord.opencodeRuntimeFingerprint,
     taskId,
     taskProjectEnvVars: context.taskProjectEnvVars,
     taskRecord: context.taskRecord,

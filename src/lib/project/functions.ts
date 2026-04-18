@@ -55,6 +55,7 @@ const createTaskInputSchema = z.object({
   providerId: z.string().min(1).nullable().optional(),
   projectId: z.string().min(1),
   prompt: z.string().min(10),
+  reasoningEffort: z.string().trim().min(1).nullable().optional(),
   sourceBranch: z.string().min(1),
 });
 
@@ -89,7 +90,9 @@ const taskIdInputSchema = z.object({
 });
 
 const followUpInputSchema = z.object({
+  model: z.string().trim().min(1).nullable().optional(),
   prompt: z.string().min(10),
+  reasoningEffort: z.string().trim().min(1).nullable().optional(),
   taskId: z.string().min(1),
 });
 
@@ -255,7 +258,17 @@ export const $runFollowUpById = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .inputValidator((data) => followUpInputSchema.parse(data))
   .handler(async ({ context, data }) =>
-    unwrap(Project.runTaskFollowUpForUser(data.taskId, data.prompt, context.user.id)),
+    unwrap(
+      Project.runTaskFollowUpForUser(
+        data.taskId,
+        data.prompt,
+        {
+          model: data.model ?? null,
+          reasoningEffort: data.reasoningEffort ?? null,
+        },
+        context.user.id,
+      ),
+    ),
   );
 
 // ─── Collaboration server functions ──────────────────────────────────────────

@@ -10,6 +10,7 @@ import {
   taskEventSequence,
   taskMessage,
 } from "@/lib/project/project.sql";
+import { findUserById } from "@/lib/user/data";
 
 import type { Sandbox } from "./index";
 
@@ -47,6 +48,31 @@ const parseJson = <T>(raw: string | null | undefined): T | null => {
 };
 
 const stringifyPayload = (payload: unknown) => JSON.stringify(payload ?? {});
+
+const syncPendingQueuePositions = async (
+  executor: any,
+  taskId: string,
+  skipMessageId?: string | null,
+) => {
+  const pendingMessages = await executor
+    .select({ id: taskMessage.id })
+    .from(taskMessage)
+    .where(and(eq(taskMessage.taskId, taskId), eq(taskMessage.status, "pending")))
+    .orderBy(asc(taskMessage.sequence), asc(taskMessage.createdAt));
+
+  let position = 1;
+
+  for (const message of pendingMessages) {
+    const nextQueuePosition = skipMessageId && message.id === skipMessageId ? null : position++;
+
+    await executor
+      .update(taskMessage)
+      .set({
+        queuePosition: nextQueuePosition,
+      })
+      .where(eq(taskMessage.id, message.id));
+  }
+};
 
 export type TaskRecord = typeof task.$inferSelect;
 export type TaskMessageRecord = typeof taskMessage.$inferSelect;
@@ -165,10 +191,16 @@ export const findNextPendingTaskMessage = (taskId: string) =>
 export const createTaskMessage = async (input: {
   createdByUserId?: string | null;
   kind: "follow_up" | "initial";
+  model?: string | null;
   prompt: string;
+  reasoningEffort?: string | null;
   taskId: string;
 }) =>
   db.transaction(async (tx) => {
+    const createdByUserId = input.createdByUserId
+      ? ((await findUserById(input.createdByUserId))?.id ?? null)
+      : null;
+
     const allocated = await tx
       .update(task)
       .set({
@@ -182,14 +214,18 @@ export const createTaskMessage = async (input: {
     const inserted = await tx
       .insert(taskMessage)
       .values({
-        createdByUserId: input.createdByUserId ?? null,
+        createdByUserId,
         id: crypto.randomUUID(),
         kind: input.kind,
+        model: input.model ?? null,
         prompt: input.prompt,
+        reasoningEffort: input.reasoningEffort ?? null,
         sequence,
         taskId: input.taskId,
       })
       .returning();
+
+    await syncPendingQueuePositions(tx, input.taskId);
 
     return inserted[0];
   });
@@ -311,15 +347,21 @@ export const claimNextTaskMessage = (taskId: string) =>
     }
 
     const now = new Date();
+    const executionTimeoutAt = new Date(now.getTime() + 90 * 60 * 1000);
     const updated = await tx
       .update(taskMessage)
       .set({
+        dispatchedAt: now,
+        executionTimeoutAt,
+        queuePosition: null,
         processingStartedAt: now,
-        stage: "Dequeued prompt",
+        stage: "Dispatching prompt",
         status: "processing",
       })
       .where(eq(taskMessage.id, next.id))
       .returning();
+
+    await syncPendingQueuePositions(tx, taskId, next.id);
 
     return updated[0] ?? null;
   });
@@ -367,6 +409,28 @@ export const appendTaskMessageAgentMessage = async (
   });
 };
 
+export const setTaskMessageAgentResponse = async (
+  messageId: string,
+  text: string,
+  timestamp: number,
+) => {
+  const trimmed = text.trim();
+
+  if (!trimmed) {
+    return null;
+  }
+
+  const current = await findTaskMessage(messageId);
+
+  if (!current) {
+    return null;
+  }
+
+  return updateTaskMessageRecord(messageId, {
+    responseMessages: serializeAgentMessages([{ text: trimmed, timestamp }]),
+  });
+};
+
 export const appendTaskAgentMessage = async (taskId: string, text: string, timestamp: number) => {
   const trimmed = text.trim();
 
@@ -390,6 +454,24 @@ export const appendTaskAgentMessage = async (taskId: string, text: string, times
   });
 };
 
+export const setTaskAgentResponse = async (taskId: string, text: string, timestamp: number) => {
+  const trimmed = text.trim();
+
+  if (!trimmed) {
+    return null;
+  }
+
+  const current = await findTaskRecord(taskId);
+
+  if (!current) {
+    return null;
+  }
+
+  return updateTaskRecord(taskId, {
+    agentMessages: serializeAgentMessages([{ text: trimmed, timestamp }]),
+  });
+};
+
 export const getTaskConversation = async (taskId: string) => {
   const messages = await listTaskMessages(taskId);
   return messages.map((message) => ({
@@ -410,7 +492,9 @@ export const cancelPendingTaskMessages = (taskId: string, errorMessage: string) 
     .update(taskMessage)
     .set({
       completedAt: new Date(),
+      executionTimeoutAt: null,
       error: errorMessage,
+      queuePosition: null,
       stage: "Cancelled",
       status: "cancelled",
     })
@@ -441,6 +525,18 @@ export const findStaleProcessingMessage = (taskId: string, staleBefore: Date) =>
     .orderBy(asc(taskMessage.sequence))
     .then((rows) => rows[0]);
 
+export const recomputeTaskMessageQueuePositions = (taskId: string) =>
+  db.transaction(async (tx) => {
+    await syncPendingQueuePositions(tx, taskId);
+
+    await tx
+      .update(taskMessage)
+      .set({
+        queuePosition: null,
+      })
+      .where(and(eq(taskMessage.taskId, taskId), sql`${taskMessage.status} <> 'pending'`));
+  });
+
 export const findLatestCompletedMessage = (taskId: string) =>
   db
     .select()
@@ -448,3 +544,22 @@ export const findLatestCompletedMessage = (taskId: string) =>
     .where(and(eq(taskMessage.taskId, taskId), isNotNull(taskMessage.completedAt)))
     .orderBy(desc(taskMessage.sequence))
     .then((rows) => rows[0]);
+
+export const listCompletedMessagesBeforeSequence = async (taskId: string, sequence: number) => {
+  const rows = await db
+    .select()
+    .from(taskMessage)
+    .where(
+      and(
+        eq(taskMessage.taskId, taskId),
+        eq(taskMessage.status, "completed"),
+        sql`${taskMessage.sequence} < ${sequence}`,
+      ),
+    )
+    .orderBy(asc(taskMessage.sequence), asc(taskMessage.createdAt));
+
+  return rows.map((message) => ({
+    ...message,
+    parsedResponseMessages: parseAgentMessages(message.responseMessages),
+  }));
+};

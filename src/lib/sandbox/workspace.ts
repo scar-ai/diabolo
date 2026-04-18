@@ -322,6 +322,7 @@ export namespace SandboxWorkspace {
       });
 
       return {
+        reused: false,
         sandbox,
         sandboxPath,
       };
@@ -384,6 +385,7 @@ export namespace SandboxWorkspace {
         });
 
         return {
+          reused: true,
           sandbox,
           sandboxPath: input.taskRecord.sandboxPath,
         };

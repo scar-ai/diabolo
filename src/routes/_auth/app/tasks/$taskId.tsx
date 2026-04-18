@@ -12,6 +12,7 @@ import {
 } from "@/components/app/task-detail";
 import type { CollaboratorMap } from "@/components/app/task-detail/types";
 import { Button } from "@/components/ui/button";
+import { type ReasoningEffort } from "@/lib/models/reasoning-effort";
 import { $deleteTaskById, $terminateTaskById } from "@/lib/project/functions";
 import {
   projectCollaboratorsQueryOptions,
@@ -46,7 +47,7 @@ export const Route = createFileRoute("/_auth/app/tasks/$taskId")({
     projectId: typeof search.projectId === "string" ? search.projectId : undefined,
   }),
   loader: ({ context, params }) => {
-    context.queryClient.prefetchQuery(taskDetailQueryOptions(params.taskId));
+    return context.queryClient.ensureQueryData(taskDetailQueryOptions(params.taskId));
   },
   component: TaskDetailPage,
 });
@@ -59,6 +60,7 @@ function TaskDetailPage() {
 
   const [followUpInput, setFollowUpInput] = useState("");
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
+  const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const taskQuery = useQuery({
@@ -94,9 +96,16 @@ function TaskDetailPage() {
   });
 
   const followUpMutation = useMutation({
-    mutationFn: async (data: { attachments: File[]; prompt: string }) => {
+    mutationFn: async (data: {
+      attachments: File[];
+      prompt: string;
+      reasoningEffort: ReasoningEffort | null;
+    }) => {
       const formData = new FormData();
       formData.set("prompt", data.prompt);
+      if (data.reasoningEffort) {
+        formData.set("reasoningEffort", data.reasoningEffort);
+      }
 
       for (const file of data.attachments) {
         formData.append("attachments", file);
@@ -120,6 +129,7 @@ function TaskDetailPage() {
       queryClient.invalidateQueries({ queryKey: taskKeys.detail(taskId) });
       queryClient.invalidateQueries({ queryKey: taskKeys.all });
       setAttachments([]);
+      setReasoningEffort(null);
     },
     onError: (error) => {
       toast.error(error instanceof Error ? error.message : "Failed to start follow-up.");
@@ -183,6 +193,7 @@ function TaskDetailPage() {
     followUpMutation.mutate({
       attachments: attachments.map((attachment) => attachment.file),
       prompt,
+      reasoningEffort,
     });
   };
 
@@ -261,10 +272,12 @@ function TaskDetailPage() {
               ]);
             }}
             onChange={setFollowUpInput}
+            onReasoningEffortChange={setReasoningEffort}
             onRemoveAttachment={(id) =>
               setAttachments((current) => current.filter((attachment) => attachment.id !== id))
             }
             onSubmit={handleSendFollowUp}
+            reasoningEffort={reasoningEffort}
             task={task}
             value={followUpInput}
           />

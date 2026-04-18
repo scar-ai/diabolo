@@ -8,6 +8,7 @@ const requestSchema = z.object({
   model: z.string().trim().min(1).nullable().optional(),
   parentTaskId: z.string().min(1),
   prompt: z.string().min(10),
+  reasoningEffort: z.string().trim().min(1).nullable().optional(),
   title: z.string().min(1),
 });
 
@@ -20,8 +21,7 @@ export const Route = createFileRoute("/api/opencode/spawn-task")({
           ? authorization.slice("Bearer ".length)
           : "";
 
-        const json = await request.json();
-        const input = requestSchema.parse(json);
+        const input = requestSchema.parse(await request.json());
 
         if (!verifySpawnTaskToken(input.parentTaskId, token)) {
           return Response.json({ error: "Unauthorized spawn-task request." }, { status: 401 });
@@ -31,6 +31,7 @@ export const Route = createFileRoute("/api/opencode/spawn-task")({
           model: input.model ?? null,
           parentTaskId: input.parentTaskId,
           prompt: input.prompt,
+          reasoningEffort: input.reasoningEffort ?? null,
           title: input.title,
         });
 

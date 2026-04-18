@@ -57,7 +57,6 @@ export function useTaskWebSocket(taskId: string | null | undefined, enabled = tr
           }
 
           queryClient.invalidateQueries({ queryKey: taskKeys.detail(taskId) });
-          queryClient.invalidateQueries({ queryKey: taskKeys.all });
         } catch (error) {
           console.error("Failed to parse websocket message:", error);
         }

@@ -20,6 +20,7 @@ import { Route as AuthAppRouteRouteImport } from './routes/_auth/app/route'
 import { Route as AuthAppIndexRouteImport } from './routes/_auth/app/index'
 import { Route as ApiTasksCreateRouteImport } from './routes/api/tasks/create'
 import { Route as ApiOpencodeSpawnTaskRouteImport } from './routes/api/opencode/spawn-task'
+import { Route as ApiOpencodeRuntimeEventsRouteImport } from './routes/api/opencode/runtime-events'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 import { Route as AuthAppSettingsRouteImport } from './routes/_auth/app/settings'
 import { Route as AuthAppSessionsRouteImport } from './routes/_auth/app/sessions'
@@ -85,6 +86,12 @@ const ApiOpencodeSpawnTaskRoute = ApiOpencodeSpawnTaskRouteImport.update({
   path: '/api/opencode/spawn-task',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiOpencodeRuntimeEventsRoute =
+  ApiOpencodeRuntimeEventsRouteImport.update({
+    id: '/api/opencode/runtime-events',
+    path: '/api/opencode/runtime-events',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   id: '/api/auth/$',
   path: '/api/auth/$',
@@ -157,6 +164,7 @@ export interface FileRoutesByFullPath {
   '/app/sessions': typeof AuthAppSessionsRoute
   '/app/settings': typeof AuthAppSettingsRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/opencode/runtime-events': typeof ApiOpencodeRuntimeEventsRoute
   '/api/opencode/spawn-task': typeof ApiOpencodeSpawnTaskRoute
   '/api/tasks/create': typeof ApiTasksCreateRoute
   '/app/': typeof AuthAppIndexRoute
@@ -178,6 +186,7 @@ export interface FileRoutesByTo {
   '/app/sessions': typeof AuthAppSessionsRoute
   '/app/settings': typeof AuthAppSettingsRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/opencode/runtime-events': typeof ApiOpencodeRuntimeEventsRoute
   '/api/opencode/spawn-task': typeof ApiOpencodeSpawnTaskRoute
   '/api/tasks/create': typeof ApiTasksCreateRoute
   '/app': typeof AuthAppIndexRoute
@@ -203,6 +212,7 @@ export interface FileRoutesById {
   '/_auth/app/sessions': typeof AuthAppSessionsRoute
   '/_auth/app/settings': typeof AuthAppSettingsRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/opencode/runtime-events': typeof ApiOpencodeRuntimeEventsRoute
   '/api/opencode/spawn-task': typeof ApiOpencodeSpawnTaskRoute
   '/api/tasks/create': typeof ApiTasksCreateRoute
   '/_auth/app/': typeof AuthAppIndexRoute
@@ -227,6 +237,7 @@ export interface FileRouteTypes {
     | '/app/sessions'
     | '/app/settings'
     | '/api/auth/$'
+    | '/api/opencode/runtime-events'
     | '/api/opencode/spawn-task'
     | '/api/tasks/create'
     | '/app/'
@@ -248,6 +259,7 @@ export interface FileRouteTypes {
     | '/app/sessions'
     | '/app/settings'
     | '/api/auth/$'
+    | '/api/opencode/runtime-events'
     | '/api/opencode/spawn-task'
     | '/api/tasks/create'
     | '/app'
@@ -272,6 +284,7 @@ export interface FileRouteTypes {
     | '/_auth/app/sessions'
     | '/_auth/app/settings'
     | '/api/auth/$'
+    | '/api/opencode/runtime-events'
     | '/api/opencode/spawn-task'
     | '/api/tasks/create'
     | '/_auth/app/'
@@ -289,6 +302,7 @@ export interface RootRouteChildren {
   AlphaRoute: typeof AlphaRoute
   BetaRoute: typeof BetaRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
+  ApiOpencodeRuntimeEventsRoute: typeof ApiOpencodeRuntimeEventsRoute
   ApiOpencodeSpawnTaskRoute: typeof ApiOpencodeSpawnTaskRoute
   ApiTasksCreateRoute: typeof ApiTasksCreateRoute
   ApiTasksTaskIdAttachmentsRoute: typeof ApiTasksTaskIdAttachmentsRoute
@@ -374,6 +388,13 @@ declare module '@tanstack/react-router' {
       path: '/api/opencode/spawn-task'
       fullPath: '/api/opencode/spawn-task'
       preLoaderRoute: typeof ApiOpencodeSpawnTaskRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/opencode/runtime-events': {
+      id: '/api/opencode/runtime-events'
+      path: '/api/opencode/runtime-events'
+      fullPath: '/api/opencode/runtime-events'
+      preLoaderRoute: typeof ApiOpencodeRuntimeEventsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/auth/$': {
@@ -513,6 +534,7 @@ const rootRouteChildren: RootRouteChildren = {
   AlphaRoute: AlphaRoute,
   BetaRoute: BetaRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
+  ApiOpencodeRuntimeEventsRoute: ApiOpencodeRuntimeEventsRoute,
   ApiOpencodeSpawnTaskRoute: ApiOpencodeSpawnTaskRoute,
   ApiTasksCreateRoute: ApiTasksCreateRoute,
   ApiTasksTaskIdAttachmentsRoute: ApiTasksTaskIdAttachmentsRoute,

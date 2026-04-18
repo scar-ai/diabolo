@@ -177,6 +177,7 @@ export const buildOpenCodeConfigContent = (config: OpenCodeConfig) => {
         "*": "allow",
       },
       edit: "allow",
+      question: "deny",
       skill: "allow",
       webfetch: "allow",
     },
@@ -198,6 +199,17 @@ export const buildOpenCodeConfigContent = (config: OpenCodeConfig) => {
 
   return JSON.stringify(output);
 };
+
+export const buildOpenCodeRuntimeFingerprint = (config: OpenCodeConfig) =>
+  JSON.stringify({
+    apiKeyEnvVar: config.apiKeyEnvVar,
+    baseUrl: normalizeBaseUrl(config.baseUrl),
+    model: config.model,
+    providerId: config.providerId,
+    providerKind: config.providerKind,
+    runtimeBaseUrl: normalizeBaseUrl(config.runtimeBaseUrl ?? config.baseUrl),
+    selectedProviderId: config.selectedProviderId,
+  });
 
 export const getOpenCodeChatCompletionsEndpoint = (config: OpenCodeConfig) =>
   `${normalizeBaseUrl(config.baseUrl)}/chat/completions`;

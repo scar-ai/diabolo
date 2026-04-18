@@ -11,7 +11,9 @@ export type EventType =
   | "artifact"
   | "push_complete"
   | "push_error"
-  | "user_message";
+  | "user_message"
+  | "prompt_queued"
+  | "prompt_dispatched";
 
 export type SandboxStatus =
   | "pending"
@@ -34,7 +36,7 @@ export type SessionStatus =
   | "archived"
   | "cancelled";
 
-export type MessageStatus = "pending" | "processing" | "completed" | "failed";
+export type MessageStatus = "pending" | "processing" | "completed" | "failed" | "cancelled";
 
 export type ArtifactType = "pr" | "screenshot" | "preview" | "branch";
 

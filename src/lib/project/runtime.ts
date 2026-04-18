@@ -149,6 +149,10 @@ export const destroyTaskSandboxRecord = async (value: TaskRecord) => {
 export const queueFollowUpPrompt = async (
   value: TaskRecord,
   prompt: string,
+  options: {
+    model?: string | null;
+    reasoningEffort?: string | null;
+  },
   userId?: string | null,
 ) => {
   await updateTask(value.id, {
@@ -160,7 +164,10 @@ export const queueFollowUpPrompt = async (
     status: "queued",
   });
 
-  await Sandbox.runTaskFollowUp(value.id, prompt.trim(), userId).match(
+  await Sandbox.runTaskFollowUp(value.id, prompt.trim(), {
+    createdByUserId: userId,
+    ...options,
+  }).match(
     () => {},
     (error) => {
       throw error;

@@ -4,6 +4,10 @@ import * as R from "remeda";
 import { Github } from "@/lib/github";
 import { Log } from "@/lib/log";
 import {
+  modelSupportsReasoningEffort,
+  normalizeReasoningEffort,
+} from "@/lib/models/reasoning-effort";
+import {
   normalizeOpenCodeModelForProvider,
   type OpenCodeConfig,
   resolveOpenCodeConfig,
@@ -207,6 +211,24 @@ export namespace Project {
       return okAsync(undefined);
     });
 
+  const resolveTaskMessageOverrides = (
+    openCodeConfig: OpenCodeConfig,
+    input?: {
+      reasoningEffort?: string | null;
+    },
+  ) => {
+    const reasoningEffort = normalizeReasoningEffort(input?.reasoningEffort);
+
+    if (reasoningEffort && !modelSupportsReasoningEffort(openCodeConfig.model)) {
+      throw new Error("The selected model does not support reasoning effort overrides.");
+    }
+
+    return {
+      model: openCodeConfig.model,
+      reasoningEffort,
+    };
+  };
+
   export const createProjectForUser = (input: {
     name: string;
     repoId: string;
@@ -307,6 +329,7 @@ export namespace Project {
     providerId?: string | null;
     projectId: string;
     prompt: string;
+    reasoningEffort?: string | null;
     sourceBranch: string;
     userId: string;
   }): ResultAsync<TaskRecord, Error> => {
@@ -332,8 +355,12 @@ export namespace Project {
         ).map((draft) => ({ draft, openCodeConfig })),
       )
       .andThen(({ draft, openCodeConfig }) =>
-        fromPromise(generateTaskTitle(draft.prompt, openCodeConfig)).andThen((title) =>
-          fromPromise(
+        fromPromise(generateTaskTitle(draft.prompt, openCodeConfig)).andThen((title) => {
+          const messageOverrides = resolveTaskMessageOverrides(openCodeConfig, {
+            reasoningEffort: input.reasoningEffort ?? null,
+          });
+
+          return fromPromise(
             insertTask({
               branchName: draft.sourceBranch,
               createdByUserId: input.userId,
@@ -351,11 +378,12 @@ export namespace Project {
               title,
             }),
           ).andThen((createdTask) =>
-            Sandbox.enqueueTaskMessage(createdTask.id, draft.prompt, "initial", input.userId).map(
-              () => createdTask,
-            ),
-          ),
-        ),
+            Sandbox.enqueueTaskMessage(createdTask.id, draft.prompt, "initial", {
+              createdByUserId: input.userId,
+              ...messageOverrides,
+            }).map(() => createdTask),
+          );
+        }),
       )
       .map((value) => {
         op.info("task created", { taskId: value.id });
@@ -405,8 +433,10 @@ export namespace Project {
         ).map((draft) => ({ draft, openCodeConfig, scheduledTask })),
       )
       .andThen(({ draft, openCodeConfig }) =>
-        fromPromise(generateTaskTitle(draft.prompt, openCodeConfig)).andThen((title) =>
-          fromPromise(
+        fromPromise(generateTaskTitle(draft.prompt, openCodeConfig)).andThen((title) => {
+          const messageOverrides = resolveTaskMessageOverrides(openCodeConfig);
+
+          return fromPromise(
             insertTask({
               branchName: draft.sourceBranch,
               createdByUserId: input.userId,
@@ -426,11 +456,12 @@ export namespace Project {
               title,
             }),
           ).andThen((createdTask) =>
-            Sandbox.enqueueTaskMessage(createdTask.id, draft.prompt, "initial", input.userId).map(
-              () => createdTask,
-            ),
-          ),
-        ),
+            Sandbox.enqueueTaskMessage(createdTask.id, draft.prompt, "initial", {
+              createdByUserId: input.userId,
+              ...messageOverrides,
+            }).map(() => createdTask),
+          );
+        }),
       )
       .map((value) => {
         op.info("scheduled task run created", { taskId: value.id });
@@ -534,6 +565,7 @@ export namespace Project {
     providerId?: string | null;
     projectId: string;
     prompt: string;
+    reasoningEffort?: string | null;
     sourceBranch: string;
     userId: string;
   }): ResultAsync<{ messageId: string; task: TaskRecord }, Error> =>
@@ -575,15 +607,20 @@ export namespace Project {
             title: null,
           }),
         ).andThen((task) => {
+          const messageOverrides = resolveTaskMessageOverrides(openCodeConfig, {
+            reasoningEffort: input.reasoningEffort ?? null,
+          });
+
           void generateTaskTitle(draft.prompt, openCodeConfig).then((title) =>
             updateTask(task.id, { title }),
           );
-          return Sandbox.createTaskMessageDraft(task.id, draft.prompt, "initial", input.userId).map(
-            (message) => ({
-              messageId: message.id,
-              task,
-            }),
-          );
+          return Sandbox.createTaskMessageDraft(task.id, draft.prompt, "initial", {
+            createdByUserId: input.userId,
+            ...messageOverrides,
+          }).map((message) => ({
+            messageId: message.id,
+            task,
+          }));
         }),
       );
 
@@ -597,6 +634,7 @@ export namespace Project {
     model?: string | null;
     parentTaskId: string;
     prompt: string;
+    reasoningEffort?: string | null;
     title: string;
   }): ResultAsync<TaskRecord, Error> =>
     fromPromise(findTaskWithProject(input.parentTaskId)).andThen((value) => {
@@ -614,8 +652,12 @@ export namespace Project {
           executionUserId,
           parentTask.opencodeProviderId ?? null,
           input.model ?? parentTask.opencodeModel ?? null,
-        ).andThen((openCodeConfig) =>
-          Sandbox.startTask(
+        ).andThen((openCodeConfig) => {
+          const messageOverrides = resolveTaskMessageOverrides(openCodeConfig, {
+            reasoningEffort: input.reasoningEffort ?? null,
+          });
+
+          return Sandbox.startTask(
             {
               envVars: serializeProjectEnvEntries(
                 parseStoredProjectEnvEntries(value.project.envVars),
@@ -650,7 +692,9 @@ export namespace Project {
                 title: input.title.trim() || buildTaskTitle(input.prompt),
               }),
             ).andThen((createdTask) =>
-              Sandbox.enqueueTaskMessage(createdTask.id, input.prompt, "initial").andThen(() =>
+              Sandbox.enqueueTaskMessage(createdTask.id, input.prompt, "initial", {
+                ...messageOverrides,
+              }).andThen(() =>
                 fromPromise(
                   publishChildTaskUpdate({
                     childTaskId: createdTask.id,
@@ -663,8 +707,8 @@ export namespace Project {
                 ).map(() => createdTask),
               ),
             ),
-          ),
-        ),
+          );
+        }),
       );
     });
 
@@ -772,11 +816,15 @@ export namespace Project {
   export const runTaskFollowUpForUser = (
     taskId: string,
     prompt: string,
+    options: {
+      model?: string | null;
+      reasoningEffort?: string | null;
+    },
     userId: string,
   ): ResultAsync<TaskRecord, Error> =>
     requireTaskForUser(taskId, userId).andThen(({ task: value }) =>
       requireTaskReadyForQueuedPrompt(value.id).andThen(() =>
-        fromPromise(queueFollowUpPrompt(value, prompt, userId)).map((updated) => {
+        fromPromise(queueFollowUpPrompt(value, prompt, options, userId)).map((updated) => {
           log.info("follow-up queued", { taskId });
           return updated;
         }),
@@ -786,27 +834,42 @@ export namespace Project {
   export const prepareTaskFollowUpForUser = (
     taskId: string,
     prompt: string,
+    options: {
+      model?: string | null;
+      reasoningEffort?: string | null;
+    },
     userId: string,
   ): ResultAsync<{ messageId: string; task: TaskRecord }, Error> =>
     requireTaskForUser(taskId, userId).andThen(({ task: value }) =>
       requireTaskReadyForQueuedPrompt(value.id).andThen(() =>
-        fromPromise(
-          updateTask(value.id, {
-            completedAt: null,
-            error: null,
-            lastHeartbeatAt: new Date(),
-            sandboxStatus: value.sandboxId ? "ready" : "pending",
-            stage: "Queued prompt",
-            status: "queued",
-          }),
-        ).andThen((updatedTask) =>
-          Sandbox.createTaskMessageDraft(value.id, prompt.trim(), "follow_up", userId).map(
-            (message) => ({
+        resolveTaskOpenCodeConfig(
+          userId,
+          value.opencodeProviderId ?? null,
+          options.model ?? value.opencodeModel ?? null,
+        ).andThen((openCodeConfig) => {
+          const messageOverrides = resolveTaskMessageOverrides(openCodeConfig, {
+            reasoningEffort: options.reasoningEffort ?? null,
+          });
+
+          return fromPromise(
+            updateTask(value.id, {
+              completedAt: null,
+              error: null,
+              lastHeartbeatAt: new Date(),
+              sandboxStatus: value.sandboxId ? "ready" : "pending",
+              stage: "Queued prompt",
+              status: "queued",
+            }),
+          ).andThen((updatedTask) =>
+            Sandbox.createTaskMessageDraft(value.id, prompt.trim(), "follow_up", {
+              createdByUserId: userId,
+              ...messageOverrides,
+            }).map((message) => ({
               messageId: message.id,
               task: updatedTask ?? value,
-            }),
-          ),
-        ),
+            })),
+          );
+        }),
       ),
     );
 

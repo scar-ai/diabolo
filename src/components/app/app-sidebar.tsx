@@ -326,7 +326,7 @@ export function AppSidebar({ user }: { user: AppUser }) {
                       key={task.id}
                       to="/app/tasks/$taskId"
                       params={{ taskId: task.id }}
-                      search={{ projectId: selectedProject.id }}
+                      search={{ projectId: task.projectId }}
                       className={cn(
                         "flex items-center gap-2 rounded-lg px-2.5 py-2 text-sm transition-colors outline-none",
                         "focus-visible:ring-2 focus-visible:ring-sidebar-ring",

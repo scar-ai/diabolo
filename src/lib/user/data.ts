@@ -1,10 +1,15 @@
 import { and, asc, desc, eq, ne, or, sql } from "drizzle-orm";
 
 import { db } from "@/lib/db";
-import { organisationMember, userLlmProvider } from "@/lib/db/schema";
+import { organisationMember, user, userLlmProvider } from "@/lib/db/schema";
 import { CODEX_SHARED_AUTH_PROVIDER_PREFIX } from "@/lib/opencode/codex";
 
 type UserLlmProviderRecord = typeof userLlmProvider.$inferSelect;
+
+export const findUserById = (userId: string) =>
+  db.query.user.findFirst({
+    where: eq(user.id, userId),
+  });
 
 const getMembership = (userId: string) =>
   db.query.organisationMember.findFirst({

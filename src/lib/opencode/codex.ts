@@ -411,11 +411,25 @@ const parseCodexSseResponse = async (response: Response) => {
         responseId = event.response_id;
       }
 
-      if (
-        (type === "response.output_text.delta" || type === "response.output_text.added") &&
-        typeof event.delta === "string"
-      ) {
+      if (type === "response.output_text.delta" && typeof event.delta === "string") {
         outputTextParts.push(event.delta);
+      }
+
+      if (type === "response.output_text.done" && typeof event.text === "string") {
+        outputTextParts.push(event.text);
+      }
+
+      if (
+        type === "response.content_part.done" &&
+        event.part &&
+        typeof event.part === "object" &&
+        !Array.isArray(event.part)
+      ) {
+        const part = event.part as Record<string, unknown>;
+
+        if (part.type === "output_text" && typeof part.text === "string") {
+          outputTextParts.push(part.text);
+        }
       }
 
       if (

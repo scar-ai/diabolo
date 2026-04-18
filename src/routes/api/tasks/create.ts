@@ -5,6 +5,11 @@ import { Project } from "@/lib/project";
 import { unwrap } from "@/lib/result";
 import { uploadTaskAttachments } from "@/lib/task-attachments";
 
+const optionalFormString = (formData: FormData, key: string) => {
+  const value = formData.get(key);
+  return typeof value === "string" ? value.trim() || null : null;
+};
+
 export const Route = createFileRoute("/api/tasks/create")({
   server: {
     handlers: {
@@ -19,6 +24,7 @@ export const Route = createFileRoute("/api/tasks/create")({
           const projectId = getFormString(formData, "projectId");
           const prompt = getFormString(formData, "prompt");
           const providerId = getFormString(formData, "providerId");
+          const reasoningEffort = optionalFormString(formData, "reasoningEffort");
           const sourceBranch = getFormString(formData, "sourceBranch");
 
           if (projectId.length < 1) {
@@ -38,6 +44,7 @@ export const Route = createFileRoute("/api/tasks/create")({
               providerId: providerId || null,
               projectId,
               prompt,
+              reasoningEffort,
               sourceBranch,
               userId: user.id,
             }),

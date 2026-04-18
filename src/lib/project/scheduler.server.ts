@@ -201,7 +201,11 @@ const queueScheduledTaskRun = async (input: {
     title,
   });
 
-  await Sandbox.enqueueTaskMessage(createdTask.id, draft.prompt, "initial", executionUserId).match(
+  await Sandbox.enqueueTaskMessage(createdTask.id, draft.prompt, "initial", {
+    createdByUserId: executionUserId,
+    model: openCodeConfig.model,
+    reasoningEffort: null,
+  }).match(
     () => undefined,
     (error) => {
       throw error;

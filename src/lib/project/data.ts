@@ -3,6 +3,7 @@ import { getTableColumns } from "drizzle-orm";
 
 import { db } from "@/lib/db";
 import { organisationMember } from "@/lib/org/org.sql";
+import { findUserById } from "@/lib/user/data";
 
 import {
   project,
@@ -167,11 +168,20 @@ export const insertTask = (input: {
   status: string;
   title?: string | null;
 }) =>
-  db
-    .insert(task)
-    .values(input)
-    .returning()
-    .then((rows) => rows[0]);
+  (async () => {
+    const createdByUserId = input.createdByUserId
+      ? ((await findUserById(input.createdByUserId))?.id ?? null)
+      : null;
+
+    return db
+      .insert(task)
+      .values({
+        ...input,
+        createdByUserId,
+      })
+      .returning()
+      .then((rows) => rows[0]);
+  })();
 
 export const deleteTask = (taskId: string, projectId: string) =>
   db.delete(task).where(and(eq(task.id, taskId), eq(task.projectId, projectId)));

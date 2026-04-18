@@ -143,7 +143,11 @@ export namespace Sandbox {
     taskId: string,
     prompt: string,
     kind: "follow_up" | "initial",
-    createdByUserId?: string | null,
+    options?: {
+      createdByUserId?: string | null;
+      model?: string | null;
+      reasoningEffort?: string | null;
+    },
   ): ResultAsync<TaskMessageRecord, Error> =>
     fromPromise(
       (async () => {
@@ -158,9 +162,11 @@ export namespace Sandbox {
         }
 
         return createTaskMessage({
-          createdByUserId: createdByUserId ?? null,
+          createdByUserId: options?.createdByUserId ?? null,
           kind,
+          model: options?.model ?? null,
           prompt: trimmedPrompt,
+          reasoningEffort: options?.reasoningEffort ?? null,
           taskId,
         });
       })(),
@@ -189,9 +195,13 @@ export namespace Sandbox {
     taskId: string,
     prompt: string,
     kind: "follow_up" | "initial",
-    createdByUserId?: string | null,
+    options?: {
+      createdByUserId?: string | null;
+      model?: string | null;
+      reasoningEffort?: string | null;
+    },
   ): ResultAsync<TaskMessageRecord, Error> =>
-    createTaskMessageDraft(taskId, prompt, kind, createdByUserId).andThen((message) =>
+    createTaskMessageDraft(taskId, prompt, kind, options).andThen((message) =>
       queueTaskMessage(taskId, message.id, prompt).map(() => message),
     );
 
@@ -222,7 +232,11 @@ export namespace Sandbox {
   export const runTaskFollowUp = (
     jobId: string,
     prompt: string,
-    createdByUserId?: string | null,
+    options?: {
+      createdByUserId?: string | null;
+      model?: string | null;
+      reasoningEffort?: string | null;
+    },
   ): ResultAsync<void, Error> =>
-    enqueueTaskMessage(jobId, prompt, "follow_up", createdByUserId).map(() => undefined);
+    enqueueTaskMessage(jobId, prompt, "follow_up", options).map(() => undefined);
 }
