@@ -70,13 +70,12 @@ import {
   type TaskDetailRecord as TTaskDetailRecord,
 } from "./runtime";
 import {
-  buildTaskTitle,
   RUNNING_TASK_STATUSES,
   type TaskMessageRecord as TTaskMessageRecord,
   type TaskRecord as TTaskRecord,
   type TaskSummaryRecord as TTaskSummaryRecord,
 } from "./shared";
-import { generateTaskTitle } from "./title";
+import { buildFallbackTaskTitle } from "./title";
 
 const log = Log.create({ ns: "project" });
 
@@ -136,6 +135,34 @@ export namespace Project {
     fromPromise(findProjectScheduledTask(scheduledTaskId, projectId)).andThen((value) =>
       value ? okAsync(value) : errAsync(new Error("Scheduled task not found.")),
     );
+
+  const deleteTaskWithSandboxCleanup = async (value: TTaskRecord) => {
+    if (RUNNING_TASK_STATUSES.has(value.status)) {
+      throw new Error("Running sessions cannot be removed.");
+    }
+
+    if (value.sandboxId) {
+      await Sandbox.destroySandbox(value.sandboxId).match(
+        () => {
+          log.info("task sandbox destroyed before task deletion", {
+            projectId: value.projectId,
+            sandboxId: value.sandboxId,
+            taskId: value.id,
+          });
+        },
+        (error) => {
+          log.warn("task sandbox destruction failed before task deletion", {
+            error: error.message,
+            projectId: value.projectId,
+            sandboxId: value.sandboxId,
+            taskId: value.id,
+          });
+        },
+      );
+    }
+
+    await deleteTask(value.id, value.projectId);
+  };
 
   const resolveTaskOpenCodeConfig = (
     userId: string,
@@ -354,37 +381,35 @@ export namespace Project {
           input.userId,
         ).map((draft) => ({ draft, openCodeConfig })),
       )
-      .andThen(({ draft, openCodeConfig }) =>
-        fromPromise(generateTaskTitle(draft.prompt, openCodeConfig)).andThen((title) => {
-          const messageOverrides = resolveTaskMessageOverrides(openCodeConfig, {
-            reasoningEffort: input.reasoningEffort ?? null,
-          });
+      .andThen(({ draft, openCodeConfig }) => {
+        const messageOverrides = resolveTaskMessageOverrides(openCodeConfig, {
+          reasoningEffort: input.reasoningEffort ?? null,
+        });
 
-          return fromPromise(
-            insertTask({
-              branchName: draft.sourceBranch,
-              createdByUserId: input.userId,
-              envVars: draft.envVars ? JSON.stringify(draft.envVars) : null,
-              id: draft.id,
-              opencodeModel: openCodeConfig.model,
-              opencodeProviderId: openCodeConfig.selectedProviderId,
-              projectId: input.projectId,
-              prompt: draft.prompt,
-              repoId: draft.repoId,
-              sandboxStatus: "pending",
-              stage: draft.stage,
-              startedAt: new Date(draft.startedAt),
-              status: draft.status,
-              title,
-            }),
-          ).andThen((createdTask) =>
-            Sandbox.enqueueTaskMessage(createdTask.id, draft.prompt, "initial", {
-              createdByUserId: input.userId,
-              ...messageOverrides,
-            }).map(() => createdTask),
-          );
-        }),
-      )
+        return fromPromise(
+          insertTask({
+            branchName: draft.sourceBranch,
+            createdByUserId: input.userId,
+            envVars: draft.envVars ? JSON.stringify(draft.envVars) : null,
+            id: draft.id,
+            opencodeModel: openCodeConfig.model,
+            opencodeProviderId: openCodeConfig.selectedProviderId,
+            projectId: input.projectId,
+            prompt: draft.prompt,
+            repoId: draft.repoId,
+            sandboxStatus: "pending",
+            stage: draft.stage,
+            startedAt: new Date(draft.startedAt),
+            status: draft.status,
+            title: buildFallbackTaskTitle(draft.prompt),
+          }),
+        ).andThen((createdTask) =>
+          Sandbox.enqueueTaskMessage(createdTask.id, draft.prompt, "initial", {
+            createdByUserId: input.userId,
+            ...messageOverrides,
+          }).map(() => createdTask),
+        );
+      })
       .map((value) => {
         op.info("task created", { taskId: value.id });
         return value;
@@ -432,37 +457,35 @@ export namespace Project {
           input.userId,
         ).map((draft) => ({ draft, openCodeConfig, scheduledTask })),
       )
-      .andThen(({ draft, openCodeConfig }) =>
-        fromPromise(generateTaskTitle(draft.prompt, openCodeConfig)).andThen((title) => {
-          const messageOverrides = resolveTaskMessageOverrides(openCodeConfig);
+      .andThen(({ draft, openCodeConfig }) => {
+        const messageOverrides = resolveTaskMessageOverrides(openCodeConfig);
 
-          return fromPromise(
-            insertTask({
-              branchName: draft.sourceBranch,
-              createdByUserId: input.userId,
-              envVars: draft.envVars ? JSON.stringify(draft.envVars) : null,
-              id: draft.id,
-              opencodeModel: openCodeConfig.model,
-              opencodeProviderId: openCodeConfig.selectedProviderId,
-              projectId: input.projectId,
-              prompt: draft.prompt,
-              repoId: draft.repoId,
-              scheduledTaskId: input.scheduledTaskId,
-              sandboxStatus: "pending",
-              spawnSource: "scheduled",
-              stage: draft.stage,
-              startedAt: new Date(draft.startedAt),
-              status: draft.status,
-              title,
-            }),
-          ).andThen((createdTask) =>
-            Sandbox.enqueueTaskMessage(createdTask.id, draft.prompt, "initial", {
-              createdByUserId: input.userId,
-              ...messageOverrides,
-            }).map(() => createdTask),
-          );
-        }),
-      )
+        return fromPromise(
+          insertTask({
+            branchName: draft.sourceBranch,
+            createdByUserId: input.userId,
+            envVars: draft.envVars ? JSON.stringify(draft.envVars) : null,
+            id: draft.id,
+            opencodeModel: openCodeConfig.model,
+            opencodeProviderId: openCodeConfig.selectedProviderId,
+            projectId: input.projectId,
+            prompt: draft.prompt,
+            repoId: draft.repoId,
+            scheduledTaskId: input.scheduledTaskId,
+            sandboxStatus: "pending",
+            spawnSource: "scheduled",
+            stage: draft.stage,
+            startedAt: new Date(draft.startedAt),
+            status: draft.status,
+            title: buildFallbackTaskTitle(draft.prompt),
+          }),
+        ).andThen((createdTask) =>
+          Sandbox.enqueueTaskMessage(createdTask.id, draft.prompt, "initial", {
+            createdByUserId: input.userId,
+            ...messageOverrides,
+          }).map(() => createdTask),
+        );
+      })
       .map((value) => {
         op.info("scheduled task run created", { taskId: value.id });
         return value;
@@ -604,16 +627,13 @@ export namespace Project {
             stage: draft.stage,
             startedAt: new Date(draft.startedAt),
             status: draft.status,
-            title: null,
+            title: buildFallbackTaskTitle(draft.prompt),
           }),
         ).andThen((task) => {
           const messageOverrides = resolveTaskMessageOverrides(openCodeConfig, {
             reasoningEffort: input.reasoningEffort ?? null,
           });
 
-          void generateTaskTitle(draft.prompt, openCodeConfig).then((title) =>
-            updateTask(task.id, { title }),
-          );
           return Sandbox.createTaskMessageDraft(task.id, draft.prompt, "initial", {
             createdByUserId: input.userId,
             ...messageOverrides,
@@ -689,7 +709,7 @@ export namespace Project {
                   : draft.stage,
                 startedAt: new Date(draft.startedAt),
                 status: draft.status,
-                title: input.title.trim() || buildTaskTitle(input.prompt),
+                title: buildFallbackTaskTitle(input.prompt),
               }),
             ).andThen((createdTask) =>
               Sandbox.enqueueTaskMessage(createdTask.id, input.prompt, "initial", {
@@ -742,26 +762,14 @@ export namespace Project {
   ): ResultAsync<void, Error> =>
     requireUserProject(projectId, userId)
       .andThen(() => requireTaskForProject(projectId, taskId))
-      .andThen((value) => {
-        if (RUNNING_TASK_STATUSES.has(value.status)) {
-          return errAsync(new Error("Running sessions cannot be removed."));
-        }
-
-        return fromPromise(deleteTask(taskId, projectId));
-      })
+      .andThen((value) => fromPromise(deleteTaskWithSandboxCleanup(value)))
       .map(() => {
         log.info("task deleted", { projectId, taskId });
       });
 
   export const deleteTaskForUser = (taskId: string, userId: string): ResultAsync<void, Error> =>
     requireTaskForUser(taskId, userId)
-      .andThen(({ task: value }) => {
-        if (RUNNING_TASK_STATUSES.has(value.status)) {
-          return errAsync(new Error("Running sessions cannot be removed."));
-        }
-
-        return fromPromise(deleteTask(taskId, value.projectId));
-      })
+      .andThen(({ task: value }) => fromPromise(deleteTaskWithSandboxCleanup(value)))
       .map(() => {
         log.info("task deleted by user", { taskId });
       });

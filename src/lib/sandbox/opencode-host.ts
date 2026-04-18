@@ -17,6 +17,7 @@ import {
   buildAbortPersistentOpenCodePromptCommand,
   buildEnsurePersistentOpenCodeServerCommand,
   buildPersistentOpenCodeRuntimeEnvironment,
+  buildReadPersistentOpenCodeSessionMetadataCommand,
   buildRunPersistentOpenCodePromptCommand,
 } from "@/lib/sandbox/opencode-runtime";
 
@@ -43,6 +44,12 @@ export type OpenCodePromptResult = {
   success?: boolean;
   text?: string;
   userMessageId?: string;
+};
+
+export type OpenCodeSessionMetadataResult = {
+  sessionId?: string | null;
+  success?: boolean;
+  title?: string | null;
 };
 
 const buildOpenCodeUserPrompt = (
@@ -218,6 +225,25 @@ export const abortOpenCodePrompt = async (input: {
     "abort opencode prompt",
   );
 
+export const readOpenCodeSessionMetadata = async (input: {
+  environment: Record<string, string>;
+  messageId: string;
+  run: RunSandboxCommand;
+  sandbox: Sandbox.Session;
+  sandboxPath: string;
+  taskId: string;
+}) =>
+  input.run(
+    input.sandbox,
+    input.taskId,
+    input.messageId,
+    buildReadPersistentOpenCodeSessionMetadataCommand(),
+    input.sandboxPath,
+    input.environment,
+    30,
+    "read opencode session metadata",
+  );
+
 export const readOpenCodeUsageLog = async (input: {
   messageId: string;
   run: RunSandboxCommand;
@@ -244,6 +270,20 @@ export const parseOpenCodePromptResult = (output: string) =>
     .flatMap((line) => {
       try {
         return [JSON.parse(line) as OpenCodePromptResult];
+      } catch {
+        return [];
+      }
+    })
+    .find((entry) => entry && entry.success === true) ?? null;
+
+export const parseOpenCodeSessionMetadataResult = (output: string) =>
+  output
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .flatMap((line) => {
+      try {
+        return [JSON.parse(line) as OpenCodeSessionMetadataResult];
       } catch {
         return [];
       }

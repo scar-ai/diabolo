@@ -5,13 +5,16 @@ import { Log } from "@/lib/log";
 import { normalizeOpenCodeModelForProvider, resolveOpenCodeConfig } from "@/lib/opencode/config";
 import { findTaskWithProject } from "@/lib/project/data";
 import { parseStoredProjectSkills } from "@/lib/project/skills";
+import { resolveTaskTitle } from "@/lib/project/title";
 import { Sandbox } from "@/lib/sandbox";
 import {
   buildOpenCodeRuntimeEnvironment,
   ensureOpenCodeServer,
   getOpenCodeRuntimeFingerprint,
   type OpenCodePromptResult,
+  parseOpenCodeSessionMetadataResult,
   parseOpenCodePromptResult,
+  readOpenCodeSessionMetadata,
   readOpenCodeUsageLog,
   runOpenCodePrompt,
 } from "@/lib/sandbox/opencode-host";
@@ -348,6 +351,26 @@ const runOpenCodeMessage = async (input: {
     opencodeRuntimeFingerprint: runtimeFingerprint,
     opencodeSessionId: runtimeResult.sessionId?.trim() || null,
   });
+
+  const sessionMetadataEnvironment = buildRuntimeEnvironment(runtimeResult.sessionId ?? null, []);
+  const sessionMetadata = parseOpenCodeSessionMetadataResult(
+    (
+      await readOpenCodeSessionMetadata({
+        environment: sessionMetadataEnvironment,
+        messageId: input.messageId,
+        run: runSandboxCommand,
+        sandbox: input.prepared.sandbox,
+        sandboxPath: input.prepared.sandboxPath,
+        taskId: input.taskId,
+      })
+    ).output,
+  );
+  const resolvedTitle = resolveTaskTitle(input.taskRecord.prompt, sessionMetadata?.title ?? null);
+
+  await updateTaskRecord(input.taskId, {
+    title: resolvedTitle,
+  });
+
   await updateTaskMessageRecord(input.messageId, {
     opencodeAssistantMessageId: runtimeResult.assistantMessageId?.trim() || null,
     opencodeUserMessageId: runtimeResult.userMessageId?.trim() || null,

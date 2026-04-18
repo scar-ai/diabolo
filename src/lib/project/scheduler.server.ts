@@ -18,7 +18,7 @@ import { parseStoredProjectEnvEntries, serializeProjectEnvEntries } from "@/lib/
 import { Sandbox } from "@/lib/sandbox";
 import { findUserLlmProvider, listUserLlmProviders } from "@/lib/user/data";
 
-import { generateTaskTitle } from "./title";
+import { buildFallbackTaskTitle } from "./title";
 
 const log = Log.create({ ns: "project.scheduler" });
 
@@ -181,7 +181,6 @@ const queueScheduledTaskRun = async (input: {
     },
   );
 
-  const title = await generateTaskTitle(draft.prompt, openCodeConfig);
   const createdTask = await insertTask({
     branchName: draft.sourceBranch,
     createdByUserId: executionUserId,
@@ -198,7 +197,7 @@ const queueScheduledTaskRun = async (input: {
     stage: `Queued scheduled task: ${input.scheduledTask.name}`,
     startedAt: new Date(draft.startedAt),
     status: draft.status,
-    title,
+    title: buildFallbackTaskTitle(draft.prompt),
   });
 
   await Sandbox.enqueueTaskMessage(createdTask.id, draft.prompt, "initial", {

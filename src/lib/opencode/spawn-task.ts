@@ -48,7 +48,10 @@ export default {
   description:
     "Spawn a child background coding task in the same repository. Use this to delegate a bounded sub-task while you continue working.",
   args: {
-    title: z.string().min(1).describe("Short title describing the child task."),
+    title: z
+      .string()
+      .min(1)
+      .describe("Short queue label for the child task. The saved task title is generated from the child prompt summary."),
     prompt: z
       .string()
       .min(10)

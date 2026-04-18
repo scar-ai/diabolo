@@ -168,9 +168,22 @@ export const resolveOpenCodeConfig = async (input: {
 
 export const buildOpenCodeConfigContent = (config: OpenCodeConfig) => {
   const providerScopedModelId = getProviderScopedModelId(config.model, config.providerId);
+  const titlePrompt = [
+    "You write short titles for coding work sessions.",
+    "Return only the title text, with no quotes or markdown.",
+    "Summarize the user's prompt explicitly and descriptively.",
+    "Keep it under 48 characters and 2 to 6 words when possible.",
+    "Avoid vague filler like task, help, update, fix this, or miscellaneous.",
+  ].join(" ");
 
   const output: Record<string, unknown> = {
     $schema: "https://opencode.ai/config.json",
+    agent: {
+      title: {
+        prompt: titlePrompt,
+        temperature: 0.1,
+      },
+    },
     model: config.model,
     permission: {
       bash: {

@@ -263,6 +263,34 @@ const readSessionId = async () => {
   return typeof session?.id === "string" && session.id ? session.id : null;
 };
 
+const resolveExistingSessionId = async () => {
+  const candidates = [
+    typeof process.env.OPENCODE_SESSION_ID === "string" ? process.env.OPENCODE_SESSION_ID : "",
+    (await readSessionId()) ?? "",
+  ];
+
+  for (const candidate of candidates) {
+    const sessionId = candidate.trim();
+
+    if (!sessionId) {
+      continue;
+    }
+
+    const existingSession = await httpJson(serverBaseUrl + "/session/" + sessionId, {
+      method: "GET",
+    }).catch(() => null);
+
+    if (existingSession) {
+      return {
+        payload: existingSession,
+        sessionId,
+      };
+    }
+  }
+
+  return null;
+};
+
 const ensureSessionId = async (preferredSessionId, allowCreateIfPreferredMissing = false) => {
   const preferred =
     typeof preferredSessionId === "string" && preferredSessionId.trim()
@@ -333,6 +361,25 @@ const readReplayMessages = () => {
   } catch {
     return [];
   }
+};
+
+const extractSessionTitle = (payload) => {
+  const candidates = [
+    payload?.title,
+    payload?.name,
+    payload?.summary,
+    payload?.session?.title,
+    payload?.session?.name,
+    payload?.session?.summary,
+  ];
+
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim()) {
+      return candidate.trim();
+    }
+  }
+
+  return null;
 };
 
 const buildModelSpec = (model, reasoningEffort) => {
@@ -954,6 +1001,19 @@ const abortPrompt = async () => {
   }).catch(() => {});
 };
 
+const sessionMetadata = async () => {
+  await ensureServer();
+  const session = await resolveExistingSessionId();
+
+  process.stdout.write(
+    JSON.stringify({
+      sessionId: session?.sessionId ?? null,
+      success: true,
+      title: extractSessionTitle(session?.payload),
+    }) + "\n",
+  );
+};
+
 const command = process.argv[2];
 
 if (command === "ensure-server") {
@@ -962,6 +1022,8 @@ if (command === "ensure-server") {
   await prompt();
 } else if (command === "abort") {
   await abortPrompt();
+} else if (command === "session-metadata") {
+  await sessionMetadata();
 } else {
   throw new Error("Unknown opencode runtime command: " + command);
 }
@@ -996,6 +1058,9 @@ export const buildRunPersistentOpenCodePromptCommand = () =>
 
 export const buildAbortPersistentOpenCodePromptCommand = () =>
   "node .diabolo/opencode/opencode-runtime.mjs abort";
+
+export const buildReadPersistentOpenCodeSessionMetadataCommand = () =>
+  "node .diabolo/opencode/opencode-runtime.mjs session-metadata";
 
 export const buildPersistentOpenCodeRuntimeEnvironment = () => ({
   OPENCODE_RUNTIME_SCRIPT_B64: Buffer.from(OPENCODE_RUNTIME_SCRIPT, "utf8").toString("base64"),
