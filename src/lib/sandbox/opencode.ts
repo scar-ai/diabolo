@@ -280,7 +280,15 @@ const buildResponsesBody = (payload, model) => {
       output.push({
         type: "message",
         role: normalizeRole(message.role),
-        content: message?.role === "system" ? text : [{ type: "input_text", text }],
+        content:
+          message?.role === "system"
+            ? text
+            : [
+                {
+                  type: message?.role === "assistant" ? "output_text" : "input_text",
+                  text,
+                },
+              ],
       });
     }
 

@@ -623,6 +623,27 @@ const waitForFinalMessageState = async (input) => {
   return bestState;
 };
 
+const summarizeMessageParts = (parts) =>
+  (Array.isArray(parts) ? parts : []).map((part) => {
+    if (!part || typeof part !== "object") {
+      return { type: "unknown" };
+    }
+
+    const summary = {
+      id: typeof part.id === "string" ? part.id : undefined,
+      text:
+        typeof part.text === "string"
+          ? part.text.slice(0, 200)
+          : typeof part.delta === "string"
+            ? part.delta.slice(0, 200)
+            : undefined,
+      tool: typeof part.tool === "string" ? part.tool : undefined,
+      type: typeof part.type === "string" ? part.type : "unknown",
+    };
+
+    return summary;
+  });
+
 const prompt = async () => {
   await ensureServer();
   await fsp.rm(usageLogPath, { force: true }).catch(() => {});
@@ -652,31 +673,249 @@ const prompt = async () => {
     system: decodeEnvBase64("OPENCODE_PROMPT_SYSTEM_B64") || undefined,
   };
   const promptStartedAt = Date.now();
-  const result = await httpJson(serverBaseUrl + "/session/" + sessionId + "/message", {
+  const response = await fetch(serverBaseUrl + "/event");
+  if (!response.ok || !response.body) {
+    throw new Error("Failed to connect to OpenCode event stream.");
+  }
+
+  await httpJson(serverBaseUrl + "/session/" + sessionId + "/prompt_async", {
     body: JSON.stringify(requestBody),
     headers: { "content-type": "application/json" },
     method: "POST",
   });
-  const resultInfo = result?.info && typeof result.info === "object" ? result.info : {};
-  const resultParts = Array.isArray(result?.parts) ? result.parts : [];
-  const resultText = resultParts
-    .filter((part) => part && typeof part === "object" && part.type === "text")
-    .map((part) => (typeof part.text === "string" ? part.text : ""))
-    .join("")
-    .trim();
+  const decoder = new TextDecoder();
+  const reader = response.body.getReader();
+  let buffer = "";
+  const textState = {
+    combinedText: "",
+    partOrder: [],
+    partText: new Map(),
+  };
+  const allowedAssistantIds = new Set();
+  const pendingParts = new Map();
+  let assistantMessageId = null;
+  let sawCompletion = false;
+  let sawRunActivity = false;
+  let runtimeError = null;
+
+  const handleAuthorizedPart = async (part, delta) => {
+    if (part?.type === "text") {
+      const nextText = mergeTextPart(textState, part, delta);
+      if (nextText) {
+        await postRuntimeEvent({
+          messageId: promptMessageId,
+          payload: {
+            text: nextText,
+            timestamp: Date.now(),
+          },
+          type: "token",
+        });
+      }
+      return;
+    }
+
+    const transformed = transformPartToEvent(
+      part,
+      promptMessageId,
+      textState.combinedText,
+      typeof delta === "string" ? delta : "",
+    );
+    if (transformed.event) {
+      await postRuntimeEvent(transformed.event);
+    }
+  };
+
+  const flushEvent = async (raw) => {
+    let parsed;
+
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return;
+    }
+
+    const type = typeof parsed?.type === "string" ? parsed.type : "";
+    const props = parsed?.properties && typeof parsed.properties === "object" ? parsed.properties : {};
+
+    if (type === "session.idle") {
+      if (props?.sessionID === sessionId && sawRunActivity) {
+        sawCompletion = true;
+      }
+      return;
+    }
+
+    if (type === "message.updated") {
+      const info = props?.info && typeof props.info === "object" ? props.info : {};
+      const createdAt = getMessageCreatedAt(info);
+      const isCurrentRunAssistant =
+        info?.sessionID === sessionId &&
+        info?.role === "assistant" &&
+        typeof info?.id === "string" &&
+        (info?.parentID === opencodeMessageId || createdAt >= promptStartedAt);
+
+      if (isCurrentRunAssistant) {
+        sawRunActivity = true;
+        allowedAssistantIds.add(info.id);
+        assistantMessageId = info.id;
+        await flushPendingParts(info.id, pendingParts, handleAuthorizedPart);
+      }
+
+      if (
+        isCurrentRunAssistant &&
+        typeof info?.finish === "string" &&
+        info.finish &&
+        info.finish !== "tool-calls"
+      ) {
+        sawCompletion = true;
+      }
+
+      return;
+    }
+
+    if (type === "message.part.updated") {
+      const part = props?.part && typeof props.part === "object" ? props.part : {};
+      if (part?.sessionID !== sessionId) {
+        return;
+      }
+
+      if (!allowedAssistantIds.has(part?.messageID)) {
+        const pending = pendingParts.get(part.messageID) || [];
+        pending.push({
+          delta: props?.delta,
+          part,
+        });
+        pendingParts.set(part.messageID, pending);
+        return;
+      }
+      sawRunActivity = true;
+      await handleAuthorizedPart(part, props?.delta);
+      return;
+    }
+
+    if (type === "message.part.added") {
+      const part = props?.part && typeof props.part === "object" ? props.part : {};
+      if (part?.sessionID !== sessionId) {
+        return;
+      }
+
+      if (!allowedAssistantIds.has(part?.messageID)) {
+        const pending = pendingParts.get(part.messageID) || [];
+        pending.push({
+          delta: props?.delta,
+          part,
+        });
+        pendingParts.set(part.messageID, pending);
+        return;
+      }
+      sawRunActivity = true;
+      await handleAuthorizedPart(part, props?.delta);
+      return;
+    }
+
+    if (type === "message.error") {
+      const errorMessage =
+        (props?.error && typeof props.error === "object" && props.error && typeof props.error.message === "string"
+          ? props.error.message
+          : null) ||
+        (typeof props?.message === "string" ? props.message : null) ||
+        "OpenCode prompt failed.";
+      runtimeError = errorMessage;
+      await postRuntimeEvent({
+        messageId: promptMessageId,
+        payload: {
+          error: errorMessage,
+          timestamp: Date.now(),
+        },
+        type: "error",
+      });
+    }
+  };
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+
+      buffer += decoder.decode(value, { stream: true });
+
+      while (buffer.includes("\n\n")) {
+        const index = buffer.indexOf("\n\n");
+        const chunk = buffer.slice(0, index);
+        buffer = buffer.slice(index + 2);
+        const raw = chunk
+          .split("\n")
+          .filter((line) => line.startsWith("data:"))
+          .map((line) => line.slice(5).trim())
+          .filter(Boolean)
+          .join("\n");
+
+        if (!raw || raw === "[DONE]") {
+          continue;
+        }
+
+        await flushEvent(raw);
+
+        if (runtimeError || sawCompletion) {
+          break;
+        }
+      }
+
+      if (runtimeError || sawCompletion) {
+        break;
+      }
+    }
+  } finally {
+    await reader.cancel().catch(() => {});
+  }
+
+  if (runtimeError) {
+    throw new Error(runtimeError);
+  }
+
   const finalState = await waitForFinalMessageState({
-    allowedAssistantIds:
-      typeof resultInfo?.id === "string" && resultInfo.role === "assistant"
-        ? new Set([resultInfo.id])
-        : new Set(),
-    assistantMessageId:
-      typeof resultInfo?.id === "string" && resultInfo.role === "assistant" ? resultInfo.id : null,
-    currentText: resultText,
+    allowedAssistantIds,
+    assistantMessageId,
+    currentText: textState.combinedText,
     opencodeMessageId,
     promptStartedAt,
     sessionId,
   });
-  const finalText = finalState.text || resultText;
+  const finalText = finalState.text || textState.combinedText;
+
+  if (!finalText && (process.env.OPENCODE_PROXY_MODE || "").trim() === "codex") {
+    const sessionMessages = await httpJson(serverBaseUrl + "/session/" + sessionId + "/message", {
+      method: "GET",
+    }).catch(() => null);
+
+    process.stdout.write(
+      JSON.stringify({
+        debug: {
+          finalState,
+          promptMessageId,
+          requestMessageId: opencodeMessageId,
+          sessionMessages: (Array.isArray(sessionMessages) ? sessionMessages : []).slice(-6).map((msg) => ({
+            info:
+              msg?.info && typeof msg.info === "object"
+                ? {
+                    finish: typeof msg.info.finish === "string" ? msg.info.finish : undefined,
+                    id: typeof msg.info.id === "string" ? msg.info.id : undefined,
+                    parentID:
+                      typeof msg.info.parentID === "string" ? msg.info.parentID : undefined,
+                    role: typeof msg.info.role === "string" ? msg.info.role : undefined,
+                    sessionID:
+                      typeof msg.info.sessionID === "string" ? msg.info.sessionID : undefined,
+                  }
+                : {},
+            parts: summarizeMessageParts(msg?.parts),
+          })),
+        },
+        messageId: promptMessageId,
+        type: "codex_empty_text_debug",
+      }) + "\n",
+    );
+  }
 
   if (finalText) {
     await postRuntimeEvent({

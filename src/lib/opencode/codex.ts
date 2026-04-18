@@ -292,7 +292,17 @@ const buildCodexResponsesRequestBody = (
 
     if (text) {
       output.push({
-        content: message.role === "system" ? text : [{ text, type: "input_text" as const }],
+        content:
+          message.role === "system"
+            ? text
+            : [
+                {
+                  text,
+                  type: (message.role === "assistant" ? "output_text" : "input_text") as
+                    | "input_text"
+                    | "output_text",
+                },
+              ],
         role: normalizeCodexMessageRole(message.role),
         type: "message" as const,
       });
