@@ -161,7 +161,7 @@ export const resolveOpenCodeConfig = async (input: {
     providerId,
     providerKind,
     providerName: trimToNull(input.provider.name) || providerId,
-    runtimeBaseUrl: OPENCODE_LOCAL_PROXY_BASE_URL,
+    runtimeBaseUrl: normalizeBaseUrl(baseUrl),
     selectedProviderId,
   };
 };

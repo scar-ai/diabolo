@@ -27,43 +27,7 @@ const MESSAGE_EXECUTION_TIMEOUT_MS = 90 * 60 * 1000;
 const activeProcessors = new Set<string>();
 const sandboxProvider = getSandboxProvider();
 
-const abortRunningPrompt = async (taskId: string) => {
-  const [taskRecord, processingMessage] = await Promise.all([
-    findTaskRecord(taskId),
-    findProcessingTaskMessage(taskId),
-  ]);
-
-  if (!taskRecord?.sandboxId || !taskRecord.sandboxPath) {
-    return;
-  }
-
-  try {
-    const sandbox = await sandboxProvider.getWorkspace(taskRecord.sandboxId);
-    await abortOpenCodePrompt({
-      messageId: processingMessage?.id ?? taskId,
-      run: async (session, _taskId, _messageId, command, cwd, envVars, timeoutSeconds) =>
-        session.executeCommand(command, {
-          cwd,
-          envVars,
-          timeoutSeconds,
-        }),
-      sandbox,
-      sandboxPath: taskRecord.sandboxPath,
-      taskId,
-    });
-  } catch (error) {
-    log.warn("failed to abort persistent opencode prompt", { error, taskId });
-  }
-};
-
-const hasWorkRemaining = async (taskId: string) => {
-  const [pending, processing] = await Promise.all([
-    findNextPendingTaskMessage(taskId),
-    findProcessingTaskMessage(taskId),
-  ]);
-
-  return Boolean(pending || processing);
-};
+const hasPendingWork = async (taskId: string) => Boolean(await findNextPendingTaskMessage(taskId));
 
 const recoverStaleProcessing = async (taskId: string) => {
   if (activeProcessors.has(taskId)) {
@@ -286,8 +250,8 @@ const drainTaskQueue = async (taskId: string) => {
       taskId,
     });
 
-    if (await hasWorkRemaining(taskId)) {
-      log.info("task queue still has work; scheduling another drain", { taskId });
+    if (await hasPendingWork(taskId)) {
+      log.info("task queue still has pending work; scheduling another drain", { taskId });
       queueMicrotask(() => {
         void drainTaskQueue(taskId);
       });
@@ -313,10 +277,15 @@ export namespace SandboxQueue {
   };
 
   export const resume = async (taskId: string) => {
+    if (activeProcessors.has(taskId)) {
+      log.debug("resume skipped; processor already active", { taskId });
+      return;
+    }
+
     log.info("resume requested", { taskId });
     await recoverStaleProcessing(taskId);
 
-    if (await hasWorkRemaining(taskId)) {
+    if (await hasPendingWork(taskId)) {
       queueMicrotask(() => {
         void drainTaskQueue(taskId);
       });

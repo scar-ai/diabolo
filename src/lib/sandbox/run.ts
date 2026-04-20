@@ -28,7 +28,7 @@ export namespace SandboxRun {
         sequence: message.sequence,
       });
       await SandboxRuntimeState.setSandboxStatus(taskId, "running");
-      if (message.kind === "initial" || message.sequence === 0) {
+      if (message.kind === "initial") {
         await runInitialMessage(taskId, messageId);
       } else {
         await runFollowUpMessage(taskId, messageId);
@@ -41,7 +41,7 @@ export namespace SandboxRun {
         taskId,
         messageId,
         formattedError,
-        message.sequence === 0 ? "Task failed" : "Follow-up failed",
+        message.kind === "initial" ? "Task failed" : "Follow-up failed",
       );
       op.error("message failed", { error });
     } finally {

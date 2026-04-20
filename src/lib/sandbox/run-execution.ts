@@ -8,20 +8,13 @@ import { parseStoredProjectSkills } from "@/lib/project/skills";
 import { resolveTaskTitle } from "@/lib/project/title";
 import { Sandbox } from "@/lib/sandbox";
 import {
-  buildOpenCodeRuntimeEnvironment,
-  ensureOpenCodeServer,
-  getOpenCodeRuntimeFingerprint,
-  type OpenCodePromptResult,
-  parseOpenCodeSessionMetadataResult,
-  parseOpenCodePromptResult,
-  readOpenCodeSessionMetadata,
-  readOpenCodeUsageLog,
-  runOpenCodePrompt,
-} from "@/lib/sandbox/opencode-host";
+  buildOpenCodePrompt,
+  buildOpenCodePromptCommand,
+  buildOpenCodeRuntimeCommand,
+} from "@/lib/sandbox/opencode";
 import {
   findTaskMessage,
   findTaskRecord,
-  listCompletedMessagesBeforeSequence,
   listTaskArtifactsByMessageId,
   updateTaskMessageRecord,
   updateTaskRecord,
@@ -292,53 +285,42 @@ const runOpenCodeMessage = async (input: {
     model,
     sandboxId: input.prepared.sandbox.id,
   });
-  const openCodeStartedAt = Date.now();
-  let response: Awaited<ReturnType<typeof runOpenCodePrompt>>;
-  let runtimeResult: OpenCodePromptResult | null = null;
-
-  try {
-    response = await runOpenCodePrompt({
-      environment: openCodeEnvironment,
-      messageId: input.messageId,
-      run: runSandboxCommand,
-      sandbox: input.prepared.sandbox,
+  await runSandboxCommand(
+    input.prepared.sandbox,
+    input.taskId,
+    input.messageId,
+    buildOpenCodeRuntimeCommand(),
+    input.prepared.sandboxPath,
+    buildOpenCodeEnvironment({
+      apiKey: openCode.runtimeApiKey ?? openCode.apiKey,
+      apiKeyEnvVar: openCode.apiKeyEnvVar,
+      baseUrl: openCode.runtimeBaseUrl ?? openCode.baseUrl,
+      defaultBranch: input.repo.defaultBranch,
+      githubToken: input.githubAccessToken,
+      model,
+      providerId: openCode.providerId,
+      providerKind: openCode.providerKind,
+      providerName: openCode.providerName,
+      projectEnvVars: input.taskProjectEnvVars,
+      repoFullName: input.repo.fullName,
       sandboxPath: input.prepared.sandboxPath,
       taskId: input.taskId,
-    });
-    runtimeResult = parseOpenCodePromptResult(response.output);
-  } catch (error) {
-    if (
-      input.messageRecord.sequence > 0 &&
-      !shouldRecoverSession &&
-      input.taskRecord?.opencodeSessionId
-    ) {
-      op.warn("opencode session unavailable; retrying with recovered context", {
-        error,
-        sessionId: input.taskRecord.opencodeSessionId,
-      });
-      const recoveredReplayMessages = await buildReplayMessages(
-        input.taskId,
-        input.messageRecord.sequence,
-      );
-      const recoveredEnvironment = buildRuntimeEnvironment(null, recoveredReplayMessages);
-
-      response = await runOpenCodePrompt({
-        environment: recoveredEnvironment,
-        messageId: input.messageId,
-        run: runSandboxCommand,
-        sandbox: input.prepared.sandbox,
-        sandboxPath: input.prepared.sandboxPath,
-        taskId: input.taskId,
-      });
-      runtimeResult = parseOpenCodePromptResult(response.output);
-      await updateTaskMessageRecord(input.messageId, {
-        replayStrategy: "replayed_history",
-        replayedAt: new Date(),
-      });
-    } else {
-      throw error;
-    }
-  }
+      viewer: input.viewer,
+    }),
+    180,
+    "ensure opencode runtime",
+  );
+  const openCodeStartedAt = Date.now();
+  const response = await runSandboxCommand(
+    input.prepared.sandbox,
+    input.taskId,
+    input.messageId,
+    buildOpenCodePromptCommand(model, prompt, attachments),
+    input.prepared.sandboxPath,
+    undefined,
+    3600,
+    "opencode prompt",
+  );
   op.info("OpenCode run completed", {
     durationMs: Date.now() - openCodeStartedAt,
     outputChars: response.output.length,
@@ -412,6 +394,11 @@ const runOpenCodeMessage = async (input: {
     taskId: input.taskId,
     usageEvents,
   });
+
+  const parsedOutput = await parseAgentOutput(input.taskId, input.messageId, response.output);
+  if (parsedOutput.hadError) {
+    throw new Error(parsedOutput.errorMessage ?? "OpenCode reported an error.");
+  }
   await assertTaskNotCancelled(input.taskId);
 
   const changes = await runSandboxCommand(
@@ -461,7 +448,7 @@ export const runInitialMessage = async (taskId: string, messageId: string) => {
   const context = await loadTaskExecutionContext(taskId, messageId);
 
   if (!context) {
-    return;
+    throw new Error("Task execution context is unavailable.");
   }
 
   await updateTaskRecord(taskId, {
@@ -509,7 +496,7 @@ export const runFollowUpMessage = async (taskId: string, messageId: string) => {
   const context = await loadTaskExecutionContext(taskId, messageId);
 
   if (!context) {
-    return;
+    throw new Error("Task execution context is unavailable.");
   }
 
   const prepared = await SandboxWorkspace.getOrCreateFollowUp({
