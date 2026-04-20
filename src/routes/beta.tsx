@@ -58,6 +58,13 @@ function BetaLandingPage() {
               Features
             </a>
             <Link
+              to="/pricing"
+              className="hidden transition-colors hover:text-white sm:block"
+              style={{ fontSize: 13, color: "rgba(255,255,255,0.45)" }}
+            >
+              Pricing
+            </Link>
+            <Link
               to="/login"
               className="flex items-center gap-1.5 rounded-full px-5 py-2 text-sm font-medium transition-opacity hover:opacity-80"
               style={{ background: LIGHT, color: "#0e0e0e" }}
@@ -453,6 +460,13 @@ function BetaLandingPage() {
               >
                 Features
               </a>
+              <Link
+                to="/pricing"
+                className="transition-colors hover:text-white"
+                style={{ fontSize: 13, color: "rgba(255,255,255,0.4)" }}
+              >
+                Pricing
+              </Link>
               <a
                 href="#how-it-works"
                 className="transition-colors hover:text-white"
