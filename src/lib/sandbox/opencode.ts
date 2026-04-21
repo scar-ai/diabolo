@@ -348,19 +348,22 @@ const extractOutputText = (payload) => {
     return "";
   }
 
-  if (typeof payload.output_text === "string" && payload.output_text.trim()) {
-    return payload.output_text.trim();
-  }
-
   const output = payload.output;
 
   if (!Array.isArray(output)) {
-    return "";
+    return typeof payload.output_text === "string" && payload.output_text.trim()
+      ? payload.output_text.trim()
+      : "";
   }
 
-  return output
+  const text = [...output]
+    .reverse()
     .flatMap((entry) => {
-      if (!entry || typeof entry !== "object" || !Array.isArray(entry.content)) {
+      if (!entry || typeof entry !== "object") {
+        return [];
+      }
+
+      if (entry.type !== "message" || entry.role !== "assistant" || !Array.isArray(entry.content)) {
         return [];
       }
 
@@ -368,7 +371,7 @@ const extractOutputText = (payload) => {
         if (
           part &&
           typeof part === "object" &&
-          part.type === "output_text" &&
+          (part.type === "output_text" || part.type === "text") &&
           typeof part.text === "string"
         ) {
           return [part.text];
@@ -379,10 +382,23 @@ const extractOutputText = (payload) => {
     })
     .join("\n")
     .trim();
+
+  if (text) {
+    return text;
+  }
+
+  return typeof payload.output_text === "string" && payload.output_text.trim()
+    ? payload.output_text.trim()
+    : "";
 };
 
 const extractToolCalls = (payload) => {
-  if (!payload || typeof payload !== "object" || !Array.isArray(payload.output)) {
+  if (
+    !payload ||
+    typeof payload !== "object" ||
+    !Array.isArray(payload.output) ||
+    extractOutputText(payload)
+  ) {
     return [];
   }
 
@@ -491,6 +507,12 @@ const parseSsePayload = async (response) => {
           (!Array.isArray(completedResponse?.output) || completedResponse.output.length === 0)
         ) {
           completedResponse.output = Array.from(outputItems.values());
+        }
+        if (
+          outputTextParts.length > 0 &&
+          (typeof completedResponse?.output_text !== "string" || !completedResponse.output_text.trim())
+        ) {
+          completedResponse.output_text = outputTextParts.join("");
         }
         if (typeof completedResponse?.id === "string") {
           responseId = completedResponse.id;

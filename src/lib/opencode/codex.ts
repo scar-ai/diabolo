@@ -83,7 +83,7 @@ type CodexResponsesRequestBody = {
   instructions: string;
   input: Array<
     | {
-        content: string | Array<{ text: string; type: "input_text" }>;
+        content: string | Array<{ text: string; type: "input_text" | "output_text" }>;
         role: "assistant" | "developer" | "user";
         type: "message";
       }
@@ -351,30 +351,28 @@ const extractCodexOutputText = (payload: Record<string, unknown> | null) => {
     return "";
   }
 
-  if (typeof payload.output_text === "string" && payload.output_text.trim()) {
-    return payload.output_text.trim();
-  }
-
   const output = payload.output;
 
   if (Array.isArray(output)) {
-    const text = output
+    const text = [...output]
+      .reverse()
       .flatMap((entry) => {
         if (!entry || typeof entry !== "object") {
           return [];
         }
 
-        const content = (entry as { content?: unknown }).content;
+        const item = entry as { content?: unknown; role?: unknown; type?: unknown };
 
-        if (!Array.isArray(content)) {
+        if (item.type !== "message" || item.role !== "assistant" || !Array.isArray(item.content)) {
           return [];
         }
 
-        return content.flatMap((part) => {
+        return item.content.flatMap((part) => {
           if (
             part &&
             typeof part === "object" &&
-            (part as { type?: unknown }).type === "output_text" &&
+            ((part as { type?: unknown }).type === "output_text" ||
+              (part as { type?: unknown }).type === "text") &&
             typeof (part as { text?: unknown }).text === "string"
           ) {
             return [(part as { text: string }).text];
@@ -389,6 +387,10 @@ const extractCodexOutputText = (payload: Record<string, unknown> | null) => {
     if (text) {
       return text;
     }
+  }
+
+  if (typeof payload.output_text === "string" && payload.output_text.trim()) {
+    return payload.output_text.trim();
   }
 
   return "";
@@ -483,6 +485,13 @@ const parseCodexSseResponse = async (response: Response) => {
         ) {
           completedResponse.output = Array.from(outputItems.values());
         }
+        if (
+          outputTextParts.length > 0 &&
+          (typeof completedResponse.output_text !== "string" ||
+            !completedResponse.output_text.trim())
+        ) {
+          completedResponse.output_text = outputTextParts.join("");
+        }
         if (typeof completedResponse.id === "string") {
           responseId = completedResponse.id;
         }
@@ -559,7 +568,7 @@ const getCodexBackendModel = (model: string, providerId: string) => {
 };
 
 const extractCodexToolCalls = (payload: Record<string, unknown> | null) => {
-  if (!payload || !Array.isArray(payload.output)) {
+  if (!payload || !Array.isArray(payload.output) || extractCodexOutputText(payload)) {
     return [];
   }
 

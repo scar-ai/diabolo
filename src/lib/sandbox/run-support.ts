@@ -187,12 +187,6 @@ export const runSandboxCommand = async (
     taskId,
   });
 
-  op.info("sandbox command started", {
-    cwd: cwd ?? null,
-    envVarCount: Object.keys(envVars ?? {}).length,
-    timeoutSeconds: timeout,
-  });
-
   await SandboxRuntimeState.touchHeartbeat(taskId);
   let handledFailure = false;
   const heartbeatTimer = setInterval(() => {
