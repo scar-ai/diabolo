@@ -588,6 +588,13 @@ const getMessageCreatedAt = (info) => {
   return 0;
 };
 
+const getMessageText = (msg) =>
+  (Array.isArray(msg?.parts) ? msg.parts : [])
+    .filter((part) => part && typeof part === "object" && part.type === "text")
+    .map((part) => (typeof part.text === "string" ? part.text : ""))
+    .join("")
+    .trim();
+
 const fetchFinalMessageState = async (input) => {
   const response = await httpJson(serverBaseUrl + "/session/" + input.sessionId + "/message", {
     method: "GET",
@@ -606,12 +613,7 @@ const fetchFinalMessageState = async (input) => {
       continue;
     }
 
-    const parts = Array.isArray(msg?.parts) ? msg.parts : [];
-    const text = parts
-      .filter((part) => part && typeof part === "object" && part.type === "text")
-      .map((part) => (typeof part.text === "string" ? part.text : ""))
-      .join("")
-      .trim();
+    const text = getMessageText(msg);
     const createdAt = getMessageCreatedAt(info);
     const isCurrentRunAssistant =
       (typeof info?.id === "string" && input.allowedAssistantIds.has(info.id)) ||
@@ -622,7 +624,7 @@ const fetchFinalMessageState = async (input) => {
         finalAssistantMessageId = info.id;
       }
 
-      if (text.length > finalText.length) {
+      if (text && text.length >= finalText.length) {
         finalText = text;
       }
 
@@ -653,7 +655,7 @@ const waitForFinalMessageState = async (input) => {
     text: input.currentText || "",
   };
 
-  for (let attempt = 0; attempt < 10; attempt += 1) {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
     const nextState = await fetchFinalMessageState(input);
 
     if ((nextState.text || "").length >= (bestState.text || "").length) {
@@ -664,7 +666,7 @@ const waitForFinalMessageState = async (input) => {
       return bestState;
     }
 
-    await delay(300);
+    await delay(500);
   }
 
   return bestState;
@@ -741,11 +743,19 @@ const prompt = async () => {
   const allowedAssistantIds = new Set();
   const pendingParts = new Map();
   let assistantMessageId = null;
-  let sawCompletion = false;
   let sawRunActivity = false;
   let runtimeError = null;
+  let completionDeadlineAt = 0;
+
+  const extendCompletionDeadline = () => {
+    completionDeadlineAt = Date.now() + 1500;
+  };
 
   const handleAuthorizedPart = async (part, delta) => {
+    if (completionDeadlineAt) {
+      extendCompletionDeadline();
+    }
+
     if (part?.type === "text") {
       const nextText = mergeTextPart(textState, part, delta);
       if (nextText) {
@@ -786,7 +796,7 @@ const prompt = async () => {
 
     if (type === "session.idle") {
       if (props?.sessionID === sessionId && sawRunActivity) {
-        sawCompletion = true;
+        extendCompletionDeadline();
       }
       return;
     }
@@ -794,17 +804,22 @@ const prompt = async () => {
     if (type === "message.updated") {
       const info = props?.info && typeof props.info === "object" ? props.info : {};
       const createdAt = getMessageCreatedAt(info);
+      const messageId = typeof info?.id === "string" ? info.id : "";
       const isCurrentRunAssistant =
         info?.sessionID === sessionId &&
         info?.role === "assistant" &&
-        typeof info?.id === "string" &&
+        !!messageId &&
         (info?.parentID === opencodeMessageId || createdAt >= promptStartedAt);
 
       if (isCurrentRunAssistant) {
         sawRunActivity = true;
-        allowedAssistantIds.add(info.id);
-        assistantMessageId = info.id;
-        await flushPendingParts(info.id, pendingParts, handleAuthorizedPart);
+        allowedAssistantIds.add(messageId);
+        assistantMessageId = messageId;
+        await flushPendingParts(messageId, pendingParts, handleAuthorizedPart);
+
+        if (completionDeadlineAt) {
+          extendCompletionDeadline();
+        }
       }
 
       if (
@@ -813,7 +828,7 @@ const prompt = async () => {
         info.finish &&
         info.finish !== "tool-calls"
       ) {
-        sawCompletion = true;
+        extendCompletionDeadline();
       }
 
       return;
@@ -880,7 +895,22 @@ const prompt = async () => {
 
   try {
     while (true) {
-      const { done, value } = await reader.read();
+      const nextChunk = completionDeadlineAt
+        ? await Promise.race([
+            reader.read().then((result) => ({ ...result, timeout: false })),
+            delay(Math.max(0, completionDeadlineAt - Date.now())).then(() => ({
+              done: false,
+              timeout: true,
+              value: undefined,
+            })),
+          ])
+        : { ...(await reader.read()), timeout: false };
+
+      if (nextChunk.timeout) {
+        break;
+      }
+
+      const { done, value } = nextChunk;
       if (done) {
         break;
       }
@@ -904,12 +934,12 @@ const prompt = async () => {
 
         await flushEvent(raw);
 
-        if (runtimeError || sawCompletion) {
+        if (runtimeError) {
           break;
         }
       }
 
-      if (runtimeError || sawCompletion) {
+      if (runtimeError) {
         break;
       }
     }
@@ -929,7 +959,7 @@ const prompt = async () => {
     promptStartedAt,
     sessionId,
   });
-  const finalText = finalState.text || textState.combinedText;
+  let finalText = finalState.text || textState.combinedText;
 
   if (!finalText && (process.env.OPENCODE_PROXY_MODE || "").trim() === "codex") {
     const sessionMessages = await httpJson(serverBaseUrl + "/session/" + sessionId + "/message", {
