@@ -2,7 +2,7 @@ import path from "node:path";
 
 import { Github } from "@/lib/github";
 import { Log } from "@/lib/log";
-import { normalizeOpenCodeModelForProvider, resolveOpenCodeConfig } from "@/lib/opencode/config";
+import { type OpenCodeConfig } from "@/lib/opencode/config";
 import { findTaskWithProject } from "@/lib/project/data";
 import { parseStoredProjectSkills } from "@/lib/project/skills";
 import { resolveTaskTitle } from "@/lib/project/title";
@@ -33,7 +33,8 @@ import {
   resolveTaskAttachmentPath,
   TASK_ATTACHMENT_ARTIFACT_TYPE,
 } from "@/lib/task-attachments";
-import { findUserLlmProvider, listUserLlmProviders } from "@/lib/user/data";
+import { type UserLlmProviderRecord } from "@/lib/user/data";
+import { resolveUserProvider } from "@/lib/user/provider-resolution";
 import { parseProviderUsageLog, recordProviderUsageEvents } from "@/lib/user/provider-usage";
 
 import {
@@ -146,48 +147,34 @@ const loadTaskExecutionContext = async (taskId: string, messageId: string) => {
   }
 
   const executionUserId = taskRecord.createdByUserId ?? taskWithProject.project.userId;
+  const resolvedProvider = await resolveUserProvider({
+    model: taskRecord.opencodeModel ?? null,
+    providerRecordId: taskRecord.opencodeProviderId ?? null,
+    userId: executionUserId,
+  }).match(
+    (value) => value,
+    (error) => {
+      throw error;
+    },
+  );
 
-  const [repo, githubAccessToken, viewer, authenticatedRemoteUrl, llmProvider, userLlmProviders] =
-    await Promise.all([
-      unwrapResult(Github.getRepoForUser(taskRecord.repoId ?? "", executionUserId)),
-      unwrapResult(Github.getAccessTokenForUser(executionUserId)),
-      unwrapResult(Github.getViewerForUser(executionUserId)),
-      unwrapResult(
-        Github.getAuthenticatedRemoteUrlForUser(taskRecord.repoId ?? "", executionUserId),
-      ),
-      taskRecord.opencodeProviderId
-        ? findUserLlmProvider(executionUserId, taskRecord.opencodeProviderId)
-        : Promise.resolve(null),
-      listUserLlmProviders(executionUserId),
-    ]);
+  const [repo, githubAccessToken, viewer, authenticatedRemoteUrl] = await Promise.all([
+    unwrapResult(Github.getRepoForUser(taskRecord.repoId ?? "", executionUserId)),
+    unwrapResult(Github.getAccessTokenForUser(executionUserId)),
+    unwrapResult(Github.getViewerForUser(executionUserId)),
+    unwrapResult(Github.getAuthenticatedRemoteUrlForUser(taskRecord.repoId ?? "", executionUserId)),
+  ]);
 
   if (!repo) {
     throw new Error("Unknown repository selection.");
   }
 
-  if (taskRecord.opencodeProviderId && !llmProvider) {
-    throw new Error("The provider selected for this task no longer exists.");
-  }
-
-  const matchedProvider =
-    llmProvider ??
-    (taskRecord.opencodeModel?.trim()
-      ? (userLlmProviders.find(
-          (provider) =>
-            normalizeOpenCodeModelForProvider(provider.providerModel, provider.providerId) ===
-            taskRecord.opencodeModel,
-        ) ?? null)
-      : null);
-
-  if (!matchedProvider) {
-    throw new Error("No saved provider is available for this task.");
-  }
-
   return {
     authenticatedRemoteUrl,
     githubAccessToken,
-    llmProvider: matchedProvider,
+    llmProvider: resolvedProvider.provider,
     messageRecord,
+    openCodeConfig: resolvedProvider.openCodeConfig,
     repo,
     taskProjectSkills: parseStoredProjectSkills(taskWithProject.project.agentSkills),
     taskProjectEnvVars: getTaskProjectEnvVars(taskRecord.envVars),
@@ -207,16 +194,14 @@ const runOpenCodeMessage = async (input: {
   taskRecord: Awaited<ReturnType<typeof findTaskRecord>>;
   viewer: Viewer;
   githubAccessToken: string;
-  llmProvider: NonNullable<Awaited<ReturnType<typeof findUserLlmProvider>>>;
+  llmProvider: UserLlmProviderRecord;
+  openCodeConfig: OpenCodeConfig;
   messagePrompt: string;
   requiresSessionRecovery?: boolean;
 }) => {
   const op = log.child({ messageId: input.messageId, taskId: input.taskId });
   const runStartedAt = Date.now();
-  const openCode = await resolveOpenCodeConfig({
-    model: input.messageRecord.model?.trim() || input.taskRecord?.opencodeModel?.trim() || null,
-    provider: input.llmProvider,
-  });
+  const openCode = input.openCodeConfig;
   const model = openCode.model;
   const runtimeFingerprint = getOpenCodeRuntimeFingerprint(openCode);
   // Rehydrate follow-ups from recorded history instead of reusing a live OpenCode
@@ -496,6 +481,7 @@ export const runInitialMessage = async (taskId: string, messageId: string) => {
     messageRecord: context.messageRecord,
     llmProvider: context.llmProvider,
     messagePrompt: context.messageRecord.prompt,
+    openCodeConfig: context.openCodeConfig,
     prepared,
     repo: context.repo,
     taskId,
@@ -539,6 +525,7 @@ export const runFollowUpMessage = async (taskId: string, messageId: string) => {
     messageRecord: context.messageRecord,
     llmProvider: context.llmProvider,
     messagePrompt: context.messageRecord.prompt,
+    openCodeConfig: context.openCodeConfig,
     prepared,
     repo: context.repo,
     requiresSessionRecovery:

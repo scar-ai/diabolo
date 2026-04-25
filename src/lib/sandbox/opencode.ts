@@ -120,6 +120,32 @@ const extractChatCompletionsUsage = (payload) => {
   };
 };
 
+const extractSseDataEvents = (buffer) => {
+  const events = [];
+  const parts = buffer.split(/\r?\n\r?\n/);
+  const remainder = parts.pop() ?? "";
+
+  for (const chunk of parts) {
+    const raw = chunk
+      .split("\n")
+      .filter((line) => line.startsWith("data:"))
+      .map((line) => line.slice(5).trim())
+      .filter(Boolean)
+      .join("\n");
+
+    if (!raw || raw === "[DONE]") {
+      continue;
+    }
+
+    events.push(raw);
+  }
+
+  return {
+    events,
+    remainder,
+  };
+};
+
 const readJson = async (response) => {
   const contentType = response.headers.get("content-type") || "";
 
@@ -343,6 +369,17 @@ const getBackendModel = (model) => {
   return normalized.startsWith(prefix) ? normalized.slice(prefix.length) : normalized;
 };
 
+const getManualUpstreamModel = (model) => {
+  const normalized = typeof model === "string" ? model.trim() : "";
+  const prefix = providerId + "/";
+
+  if (!normalized) {
+    return normalized;
+  }
+
+  return normalized.startsWith(prefix) ? normalized.slice(prefix.length) : normalized;
+};
+
 const extractOutputText = (payload) => {
   if (!payload || typeof payload !== "object") {
     return "";
@@ -426,6 +463,78 @@ const extractToolCalls = (payload) => {
         },
       },
     ];
+  });
+};
+
+const extractChatCompletionText = (payload) => {
+  if (!payload || typeof payload !== "object" || !Array.isArray(payload.choices)) {
+    return "";
+  }
+
+  return payload.choices
+    .flatMap((choice) => {
+      const content = choice?.message?.content;
+
+      if (typeof content === "string") {
+        return [content];
+      }
+
+      if (!Array.isArray(content)) {
+        return [];
+      }
+
+      return content.flatMap((part) =>
+        part &&
+        typeof part === "object" &&
+        (part.type === "text" || part.type === "output_text") &&
+        typeof part.text === "string"
+          ? [part.text]
+          : [],
+      );
+    })
+    .join("\n")
+    .trim();
+};
+
+const extractChatCompletionToolCalls = (payload) => {
+  if (!payload || typeof payload !== "object" || !Array.isArray(payload.choices)) {
+    return [];
+  }
+
+  return payload.choices.flatMap((choice) => {
+    const toolCalls = choice?.message?.tool_calls;
+
+    if (!Array.isArray(toolCalls)) {
+      return [];
+    }
+
+    return toolCalls.flatMap((toolCall) => {
+      const id = typeof toolCall?.id === "string" && toolCall.id ? toolCall.id : "";
+      const type = toolCall?.type === "function" ? "function" : "";
+      const name =
+        typeof toolCall?.function?.name === "string" && toolCall.function.name.trim()
+          ? toolCall.function.name.trim()
+          : "";
+
+      if (!id || type !== "function" || !name) {
+        return [];
+      }
+
+      return [
+        {
+          id,
+          type,
+          function: {
+            name,
+            arguments:
+              typeof toolCall.function?.arguments === "string" &&
+              toolCall.function.arguments.trim()
+                ? toolCall.function.arguments
+                : "{}",
+          },
+        },
+      ];
+    });
   });
 };
 
@@ -573,6 +682,132 @@ const parseSsePayload = async (response) => {
   }
 
   return outputTextParts.length > 0 ? { id: responseId, output_text: outputTextParts.join(""), usage } : null;
+};
+
+const parseChatCompletionsSse = async (response) => {
+  const reader = response.body?.getReader();
+  const decoder = new TextDecoder();
+  let eventBuffer = "";
+  let id = null;
+  let model = null;
+  let usage = null;
+  const contentParts = [];
+  const toolCallsByIndex = new Map();
+
+  const applyEvent = (event) => {
+    if (!event || typeof event !== "object") {
+      return;
+    }
+
+    if (!id && typeof event.id === "string" && event.id) {
+      id = event.id;
+    }
+
+    if (!model && typeof event.model === "string" && event.model) {
+      model = event.model;
+    }
+
+    usage = extractChatCompletionsUsage(event) ?? usage;
+
+    for (const choice of Array.isArray(event.choices) ? event.choices : []) {
+      const delta = choice?.delta && typeof choice.delta === "object" ? choice.delta : {};
+
+      if (typeof delta.content === "string" && delta.content) {
+        contentParts.push(delta.content);
+      }
+
+      for (const toolCall of Array.isArray(delta.tool_calls) ? delta.tool_calls : []) {
+        const index =
+          typeof toolCall?.index === "number" && Number.isFinite(toolCall.index)
+            ? toolCall.index
+            : toolCallsByIndex.size;
+        const existing = toolCallsByIndex.get(index) ?? {
+          id: "",
+          type: "function",
+          function: {
+            name: "",
+            arguments: "",
+          },
+        };
+
+        if (typeof toolCall?.id === "string" && toolCall.id) {
+          existing.id = toolCall.id;
+        }
+
+        if (toolCall?.type === "function") {
+          existing.type = "function";
+        }
+
+        if (typeof toolCall?.function?.name === "string" && toolCall.function.name) {
+          existing.function.name += toolCall.function.name;
+        }
+
+        if (typeof toolCall?.function?.arguments === "string" && toolCall.function.arguments) {
+          existing.function.arguments += toolCall.function.arguments;
+        }
+
+        toolCallsByIndex.set(index, existing);
+      }
+    }
+  };
+
+  const flushEvents = () => {
+    const extracted = extractSseDataEvents(eventBuffer);
+    eventBuffer = extracted.remainder;
+
+    for (const rawEvent of extracted.events) {
+      try {
+        applyEvent(JSON.parse(rawEvent));
+      } catch {}
+    }
+  };
+
+  if (reader) {
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+
+        if (done) {
+          break;
+        }
+
+        if (!value) {
+          continue;
+        }
+
+        eventBuffer += decoder.decode(value, { stream: true });
+        flushEvents();
+      }
+
+      eventBuffer += decoder.decode();
+      flushEvents();
+    } finally {
+      await reader.cancel().catch(() => {});
+    }
+  } else {
+    eventBuffer = await response.text();
+    flushEvents();
+  }
+
+  return {
+    content: contentParts.join("").trim(),
+    id,
+    model,
+    toolCalls: Array.from(toolCallsByIndex.values()).flatMap((toolCall) =>
+      toolCall.id && toolCall.function.name
+        ? [
+            {
+              ...toolCall,
+              function: {
+                ...toolCall.function,
+                arguments: toolCall.function.arguments || "{}",
+              },
+            },
+          ]
+        : [],
+    ),
+    usage,
+  };
 };
 
 const createChatCompletion = ({ content, id, model, toolCalls, usage }) => ({
@@ -819,6 +1054,7 @@ const server = http.createServer(async (request, response) => {
       payload && typeof payload === "object" && payload.stream
         ? {
             ...payload,
+            model: getManualUpstreamModel(payload.model),
             stream_options: {
               ...(payload.stream_options && typeof payload.stream_options === "object"
                 ? payload.stream_options
@@ -826,7 +1062,10 @@ const server = http.createServer(async (request, response) => {
               include_usage: true,
             },
           }
-        : payload;
+        : {
+            ...payload,
+            model: getManualUpstreamModel(payload?.model),
+          };
 
     const upstream = await fetch(manualEndpoint, {
       method: "POST",
@@ -842,43 +1081,22 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
-    const responseHeaders = {
-      "cache-control": upstream.headers.get("cache-control") || "no-cache",
-      connection: upstream.headers.get("connection") || "keep-alive",
-      "content-type":
-        upstream.headers.get("content-type") || "text/event-stream; charset=utf-8",
-    };
-
     if (payload.stream) {
-      const text = await upstream.text();
-      const usage = text
-        .split("\n")
-        .flatMap((line) => {
-          const trimmed = line.trim();
+      const normalized = await parseChatCompletionsSse(upstream);
 
-          if (!trimmed.startsWith("data:")) {
-            return [];
-          }
+      if (!normalized.content && normalized.toolCalls.length === 0) {
+        sendJson(response, 502, { error: "Manual provider returned an empty response." });
+        return;
+      }
 
-          const rawEvent = trimmed.slice(5).trim();
-
-          if (!rawEvent || rawEvent === "[DONE]") {
-            return [];
-          }
-
-          try {
-            return [JSON.parse(rawEvent)];
-          } catch {
-            return [];
-          }
-        })
-        .map((event) => extractChatCompletionsUsage(event))
-        .find(Boolean);
-
-      await appendUsageRecord(usage);
-
-      response.writeHead(200, responseHeaders);
-      response.end(text);
+      await appendUsageRecord(normalized.usage);
+      sendStream(response, {
+        content: normalized.content,
+        id: normalized.id,
+        model: normalized.model || manualPayload.model,
+        toolCalls: normalized.toolCalls,
+        usage: normalized.usage,
+      });
       return;
     }
 
@@ -889,12 +1107,30 @@ const server = http.createServer(async (request, response) => {
       parsedPayload = rawPayload ? JSON.parse(rawPayload) : null;
     } catch {}
 
-    await appendUsageRecord(extractChatCompletionsUsage(parsedPayload));
+    const content = extractChatCompletionText(parsedPayload);
+    const toolCalls = extractChatCompletionToolCalls(parsedPayload);
+    const usage = extractChatCompletionsUsage(parsedPayload);
 
-    response.writeHead(200, {
-      "content-type": upstream.headers.get("content-type") || "application/json; charset=utf-8",
-    });
-    response.end(rawPayload);
+    if (!content && toolCalls.length === 0) {
+      sendJson(response, 502, { error: "Manual provider returned an empty response." });
+      return;
+    }
+
+    await appendUsageRecord(usage);
+    sendJson(
+      response,
+      200,
+      createChatCompletion({
+        content,
+        id: parsedPayload?.id,
+        model:
+          typeof parsedPayload?.model === "string" && parsedPayload.model
+            ? parsedPayload.model
+            : manualPayload.model,
+        toolCalls,
+        usage,
+      }),
+    );
   } catch (error) {
     sendJson(response, 500, {
       error: error instanceof Error ? error.message : "Failed to proxy provider request.",

@@ -19,7 +19,7 @@ import {
 import { OPENAI_CODEX_RESPONSES_PROVIDER_ID, normalizeProviderApiKey } from "@/lib/opencode/config";
 import { Org } from "@/lib/org";
 import { unwrap } from "@/lib/result";
-import { listUserLlmProviders, supportsCodexProviderSchema } from "@/lib/user/data";
+import { listUserLlmProviders } from "@/lib/user/data";
 import { listUserProviderUsageSummary } from "@/lib/user/provider-usage";
 
 const providerIdPattern = /^[a-z0-9]+(?:[-_][a-z0-9]+)*$/;
@@ -224,6 +224,31 @@ const normalizeProviders = (
   return normalized;
 };
 
+const getProviderWriteValues = (provider: ReturnType<typeof normalizeProviders>[number]) => ({
+  isDefault: provider.isDefault,
+  name: provider.name,
+  orgId: provider.orgId,
+  oauthAccessToken: provider.oauthAccessToken,
+  oauthAccessTokenExpiresAt: provider.oauthAccessTokenExpiresAt,
+  oauthAuthenticatedAt: provider.oauthAuthenticatedAt,
+  oauthDeviceCode: provider.oauthDeviceCode,
+  oauthDeviceCodeExpiresAt: provider.oauthDeviceCodeExpiresAt,
+  oauthError: provider.oauthError,
+  oauthPollingIntervalSeconds: provider.oauthPollingIntervalSeconds,
+  oauthRefreshToken: provider.oauthRefreshToken,
+  oauthRefreshTokenExpiresAt: provider.oauthRefreshTokenExpiresAt,
+  oauthScope: provider.oauthScope,
+  oauthUserCode: provider.oauthUserCode,
+  oauthVerificationUri: provider.oauthVerificationUri,
+  oauthVerificationUriComplete: provider.oauthVerificationUriComplete,
+  providerApiKey: provider.providerApiKey,
+  providerBaseUrl: provider.providerBaseUrl,
+  providerId: provider.providerId,
+  providerKind: provider.providerKind,
+  providerModel: provider.providerModel,
+  userId: provider.userId,
+});
+
 export const $listUserLlmProviders = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
   .handler(async ({ context }) => {
@@ -298,34 +323,19 @@ export const $saveUserLlmProviders = createServerFn({ method: "POST" })
     try {
       const membership = await unwrap(Org.getMembershipForUser(context.user.id));
       const isOrgOwner = membership?.role === "owner";
-      const hasCodexSchema = await supportsCodexProviderSchema();
 
       if (!isOrgOwner && data.providers.some((provider) => provider.scope === "organisation")) {
         throw new Error("Only organisation owners can manage organisation providers.");
       }
 
-      if (!hasCodexSchema && data.providers.some((provider) => provider.providerKind === "codex")) {
-        throw new Error(
-          "Codex providers require the latest database migration. Run `pnpm db migrate`.",
-        );
-      }
-
-      const existingPersonalProviders = hasCodexSchema
-        ? await db.query.userLlmProvider.findMany({
-            where: eq(userLlmProvider.userId, context.user.id),
-          })
-        : (await listUserLlmProviders(context.user.id)).filter(
-            (provider) => provider.userId === context.user.id,
-          );
+      const existingPersonalProviders = await db.query.userLlmProvider.findMany({
+        where: eq(userLlmProvider.userId, context.user.id),
+      });
       const existingOrganisationProviders =
         isOrgOwner && membership?.orgId
-          ? hasCodexSchema
-            ? await db.query.userLlmProvider.findMany({
-                where: eq(userLlmProvider.orgId, membership.orgId),
-              })
-            : (await listUserLlmProviders(context.user.id)).filter(
-                (provider) => provider.orgId === membership.orgId,
-              )
+          ? await db.query.userLlmProvider.findMany({
+              where: eq(userLlmProvider.orgId, membership.orgId),
+            })
           : [];
       const hiddenCodexSharedProviderId = getCodexSharedAuthProviderId(context.user.id);
       const visibleExistingPersonalProviders = existingPersonalProviders.filter(
@@ -350,41 +360,7 @@ export const $saveUserLlmProviders = createServerFn({ method: "POST" })
           const existingProviderIds = new Set(existingProviders.map((provider) => provider.id));
 
           for (const provider of nextProviders) {
-            const values = hasCodexSchema
-              ? {
-                  isDefault: provider.isDefault,
-                  name: provider.name,
-                  orgId: provider.orgId,
-                  oauthAccessToken: provider.oauthAccessToken,
-                  oauthAccessTokenExpiresAt: provider.oauthAccessTokenExpiresAt,
-                  oauthAuthenticatedAt: provider.oauthAuthenticatedAt,
-                  oauthDeviceCode: provider.oauthDeviceCode,
-                  oauthDeviceCodeExpiresAt: provider.oauthDeviceCodeExpiresAt,
-                  oauthError: provider.oauthError,
-                  oauthPollingIntervalSeconds: provider.oauthPollingIntervalSeconds,
-                  oauthRefreshToken: provider.oauthRefreshToken,
-                  oauthRefreshTokenExpiresAt: provider.oauthRefreshTokenExpiresAt,
-                  oauthScope: provider.oauthScope,
-                  oauthUserCode: provider.oauthUserCode,
-                  oauthVerificationUri: provider.oauthVerificationUri,
-                  oauthVerificationUriComplete: provider.oauthVerificationUriComplete,
-                  providerApiKey: provider.providerApiKey,
-                  providerBaseUrl: provider.providerBaseUrl,
-                  providerId: provider.providerId,
-                  providerKind: provider.providerKind,
-                  providerModel: provider.providerModel,
-                  userId: provider.userId,
-                }
-              : {
-                  isDefault: provider.isDefault,
-                  name: provider.name,
-                  orgId: provider.orgId,
-                  providerApiKey: provider.providerApiKey,
-                  providerBaseUrl: provider.providerBaseUrl,
-                  providerId: provider.providerId,
-                  providerModel: provider.providerModel,
-                  userId: provider.userId,
-                };
+            const values = getProviderWriteValues(provider);
 
             if (existingProviderIds.has(provider.id)) {
               await tx

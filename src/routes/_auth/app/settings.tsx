@@ -27,13 +27,19 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { OPENAI_CODEX_RESPONSES_PROVIDER_ID } from "@/lib/opencode/config";
 import {
   $completeCodexLogin,
   $disconnectCodexProvider,
   $saveUserLlmProviders,
   $startCodexDeviceAuthorization,
 } from "@/lib/user/functions";
+import {
+  createProviderDraft,
+  DEFAULT_CODEX_MODEL,
+  setProviderDraftKind,
+  toSerializableProviders,
+  type ProviderDraft,
+} from "@/lib/user/provider-drafts";
 import {
   codexModelsQueryOptions,
   codexSharedLoginStatusQueryOptions,
@@ -46,78 +52,12 @@ export const Route = createFileRoute("/_auth/app/settings")({
   component: SettingsPage,
 });
 
-type ProviderDraft = {
-  authStatus?: "connected" | "disconnected" | "pending";
-  canManage?: boolean;
-  codexAuthenticatedAt?: string | null;
-  codexAuthError?: string | null;
-  id: string;
-  isDefault: boolean;
-  name: string;
-  providerApiKey: string;
-  providerBaseUrl: string;
-  providerId: string;
-  providerKind: "codex" | "manual";
-  providerModel: string;
-  scope?: string;
-};
-
 type DeviceAuthState = {
   authorizeUrl: string;
   callbackServerStarted: boolean;
   expiresAt: string;
   redirectUri: string;
 };
-
-type SaveProviderInput = {
-  authStatus?: "connected" | "disconnected" | "pending";
-  codexAuthenticatedAt?: string | null;
-  codexAuthError?: string | null;
-  id: string;
-  isDefault: boolean;
-  name: string;
-  providerApiKey: string;
-  providerBaseUrl: string;
-  providerId: string;
-  providerKind: "codex" | "manual";
-  providerModel: string;
-  scope: "personal";
-};
-
-const toSaveProviderInput = (provider: ProviderDraft): SaveProviderInput => ({
-  authStatus: provider.authStatus,
-  codexAuthenticatedAt: provider.codexAuthenticatedAt ?? null,
-  codexAuthError: provider.codexAuthError ?? null,
-  id: provider.id,
-  isDefault: provider.isDefault,
-  name: provider.name,
-  providerApiKey: provider.providerApiKey,
-  providerBaseUrl: provider.providerBaseUrl,
-  providerId: provider.providerId,
-  providerKind: provider.providerKind,
-  providerModel: provider.providerModel,
-  scope: "personal" as const,
-});
-
-const toSerializableProviders = (providers: ProviderDraft[]): SaveProviderInput[] =>
-  JSON.parse(JSON.stringify(providers.map(toSaveProviderInput))) as SaveProviderInput[];
-
-const DEFAULT_CODEX_MODEL = "gpt-5-codex";
-
-const createProviderDraft = (overrides?: Partial<ProviderDraft>): ProviderDraft => ({
-  authStatus: "connected",
-  codexAuthenticatedAt: null,
-  codexAuthError: null,
-  id: crypto.randomUUID(),
-  isDefault: false,
-  name: "",
-  providerApiKey: "",
-  providerBaseUrl: "https://api.openai.com/v1",
-  providerId: "openai",
-  providerKind: "manual",
-  providerModel: "",
-  ...overrides,
-});
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
@@ -200,7 +140,9 @@ function SettingsPage() {
   const isProvidersLoading = providersQuery.isPending && !providersQuery.isFetched;
 
   const allProviders = providersQuery.data ?? [];
-  const personalProviders = allProviders.filter((provider) => provider.scope === "personal");
+  const personalProviders = allProviders.filter(
+    (provider) => provider.scope === "personal",
+  ) as ProviderDraft[];
   const providers = (draftProviders ?? personalProviders) as ProviderDraft[];
   const hasUnsavedChanges = draftProviders !== null;
   const codexProviders = providers.filter((provider) => provider.providerKind === "codex");
@@ -303,28 +245,9 @@ function SettingsPage() {
   const setProviderKind = (providerId: string, providerKind: "codex" | "manual") => {
     setDraftProviders((current) => {
       const source = (current ?? personalProviders) as ProviderDraft[];
-      return source.map((p) => {
-        if (p.id !== providerId) return p;
-        if (providerKind === "codex") {
-          return {
-            ...p,
-            authStatus: "disconnected" as const,
-            codexAuthError: null,
-            providerApiKey: "",
-            providerBaseUrl: "",
-            providerId: OPENAI_CODEX_RESPONSES_PROVIDER_ID,
-            providerKind,
-            providerModel: p.providerModel || DEFAULT_CODEX_MODEL,
-          };
-        }
-        return {
-          ...p,
-          providerApiKey: "",
-          providerBaseUrl: "https://api.openai.com/v1",
-          providerId: p.providerId === OPENAI_CODEX_RESPONSES_PROVIDER_ID ? "openai" : p.providerId,
-          providerKind,
-        };
-      });
+      return source.map((provider) =>
+        provider.id === providerId ? setProviderDraftKind(provider, providerKind) : provider,
+      );
     });
   };
 
@@ -338,17 +261,16 @@ function SettingsPage() {
   const addProvider = (providerKind: "codex" | "manual" = "manual") => {
     setDraftProviders((current) => {
       const source = (current ?? personalProviders) as ProviderDraft[];
+      const nextProvider = createProviderDraft("personal", {
+        authStatus: providerKind === "codex" ? "disconnected" : "connected",
+        isDefault: source.length === 0,
+        name: "",
+        providerModel: providerKind === "codex" ? DEFAULT_CODEX_MODEL : "",
+      });
+
       return [
         ...source,
-        createProviderDraft({
-          authStatus: providerKind === "codex" ? "disconnected" : "connected",
-          isDefault: source.length === 0,
-          name: "",
-          providerBaseUrl: providerKind === "codex" ? "" : "https://api.openai.com/v1",
-          providerId: providerKind === "codex" ? OPENAI_CODEX_RESPONSES_PROVIDER_ID : "openai",
-          providerKind,
-          providerModel: providerKind === "codex" ? DEFAULT_CODEX_MODEL : "",
-        }),
+        providerKind === "codex" ? setProviderDraftKind(nextProvider, "codex") : nextProvider,
       ];
     });
   };

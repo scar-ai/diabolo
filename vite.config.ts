@@ -9,7 +9,7 @@ import { defineConfig } from "vite";
 export default defineConfig({
   nitro: {
     features: {
-      websocket: true,
+      websocket: false,
     },
     serverDir: "./server",
   },

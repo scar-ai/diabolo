@@ -2,7 +2,6 @@ import "@tanstack/react-start/server-only";
 import { CronExpressionParser } from "cron-parser";
 
 import { Log } from "@/lib/log";
-import { resolveOpenCodeConfig } from "@/lib/opencode/config";
 import {
   claimNextScheduledTaskJob,
   insertScheduledTaskJobs,
@@ -16,7 +15,7 @@ import {
 } from "@/lib/project/data";
 import { parseStoredProjectEnvEntries, serializeProjectEnvEntries } from "@/lib/project/env";
 import { Sandbox } from "@/lib/sandbox";
-import { findUserLlmProvider, listUserLlmProviders } from "@/lib/user/data";
+import { resolveUserProvider } from "@/lib/user/provider-resolution";
 
 import { buildFallbackTaskTitle } from "./title";
 
@@ -147,24 +146,15 @@ const queueScheduledTaskRun = async (input: {
   scheduledTaskJobId: string;
 }) => {
   const executionUserId = input.scheduledTask.createdByUserId ?? input.project.userId;
-  const [selectedProvider, providers] = await Promise.all([
-    input.scheduledTask.providerId
-      ? findUserLlmProvider(executionUserId, input.scheduledTask.providerId)
-      : Promise.resolve(null),
-    listUserLlmProviders(executionUserId),
-  ]);
-  const openCodeProvider =
-    selectedProvider ?? providers.find((provider) => provider.isDefault) ?? providers[0];
-
-  if (input.scheduledTask.providerId && !selectedProvider) {
-    throw new Error("The configured provider for this scheduled task no longer exists.");
-  }
-
-  if (!openCodeProvider) {
-    throw new Error("No saved provider is available for this scheduled task.");
-  }
-
-  const openCodeConfig = await resolveOpenCodeConfig({ provider: openCodeProvider });
+  const { openCodeConfig } = await resolveUserProvider({
+    providerRecordId: input.scheduledTask.providerId ?? null,
+    userId: executionUserId,
+  }).match(
+    (value) => value,
+    (error) => {
+      throw error;
+    },
+  );
   const draft = await Sandbox.startTask(
     {
       envVars: serializeProjectEnvEntries(parseStoredProjectEnvEntries(input.project.envVars)),

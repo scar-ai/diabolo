@@ -37,6 +37,11 @@ import {
 import { $acceptProjectInvite, $declineProjectInvite } from "@/lib/project/functions";
 import { collaboratorKeys, myProjectInvitesQueryOptions } from "@/lib/project/queries";
 import { $saveUserLlmProviders } from "@/lib/user/functions";
+import {
+  createProviderDraft,
+  toSerializableProviders,
+  type ProviderDraft,
+} from "@/lib/user/provider-drafts";
 import { userLlmProvidersQueryOptions } from "@/lib/user/queries";
 
 export const Route = createFileRoute("/_auth/app/organisation")({
@@ -60,60 +65,9 @@ export const Route = createFileRoute("/_auth/app/organisation")({
   component: OrganisationPage,
 });
 
-type OrganisationProviderDraft = {
-  authStatus?: "connected" | "disconnected" | "pending";
-  canManage?: boolean;
-  codexAuthenticatedAt?: string | null;
-  codexAuthError?: string | null;
-  id: string;
-  isDefault: boolean;
-  name: string;
-  providerApiKey: string;
-  providerBaseUrl: string;
-  providerId: string;
-  providerKind: "codex" | "manual";
-  providerModel: string;
+type OrganisationProviderDraft = ProviderDraft & {
   scope: "organisation";
 };
-
-type OrganisationProviderSaveInput = {
-  authStatus?: "connected" | "disconnected" | "pending";
-  codexAuthenticatedAt?: string | null;
-  codexAuthError?: string | null;
-  id: string;
-  isDefault: boolean;
-  name: string;
-  providerApiKey: string;
-  providerBaseUrl: string;
-  providerId: string;
-  providerKind: "codex" | "manual";
-  providerModel: string;
-  scope: "organisation";
-};
-
-const toOrganisationProviderSaveInput = (
-  provider: OrganisationProviderDraft,
-): OrganisationProviderSaveInput => ({
-  authStatus: provider.authStatus,
-  codexAuthenticatedAt: provider.codexAuthenticatedAt ?? null,
-  codexAuthError: provider.codexAuthError ?? null,
-  id: provider.id,
-  isDefault: provider.isDefault,
-  name: provider.name,
-  providerApiKey: provider.providerApiKey,
-  providerBaseUrl: provider.providerBaseUrl,
-  providerId: provider.providerId,
-  providerKind: provider.providerKind,
-  providerModel: provider.providerModel,
-  scope: "organisation" as const,
-});
-
-const toSerializableOrganisationProviders = (
-  providers: OrganisationProviderDraft[],
-): OrganisationProviderSaveInput[] =>
-  JSON.parse(
-    JSON.stringify(providers.map(toOrganisationProviderSaveInput)),
-  ) as OrganisationProviderSaveInput[];
 
 function OrganisationPage() {
   const { user } = Route.useRouteContext();
@@ -259,7 +213,7 @@ function OrganisationPage() {
     mutationFn: () =>
       saveProviders({
         data: {
-          providers: toSerializableOrganisationProviders(providerDrafts),
+          providers: toSerializableProviders(providerDrafts),
         },
       }),
     onSuccess: async () => {
@@ -288,21 +242,16 @@ function OrganisationPage() {
       const source = (current ?? organisationProviders) as OrganisationProviderDraft[];
       return [
         ...source,
-        {
+        createProviderDraft("organisation", {
           authStatus: "connected",
           canManage: true,
           codexAuthenticatedAt: null,
           codexAuthError: null,
-          id: crypto.randomUUID(),
           isDefault: false,
           name: `Organisation provider ${source.length + 1}`,
-          providerApiKey: "",
-          providerBaseUrl: "https://api.openai.com/v1",
-          providerId: "openai",
           providerKind: "manual",
           providerModel: "",
-          scope: "organisation",
-        },
+        }) as OrganisationProviderDraft,
       ];
     });
   };

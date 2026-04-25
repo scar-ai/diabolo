@@ -7,11 +7,7 @@ import {
   modelSupportsReasoningEffort,
   normalizeReasoningEffort,
 } from "@/lib/models/reasoning-effort";
-import {
-  normalizeOpenCodeModelForProvider,
-  type OpenCodeConfig,
-  resolveOpenCodeConfig,
-} from "@/lib/opencode/config";
+import { type OpenCodeConfig } from "@/lib/opencode/config";
 import { Org } from "@/lib/org";
 import {
   normalizeProjectEnvEntries,
@@ -29,7 +25,7 @@ import { fromPromise } from "@/lib/result";
 import { Sandbox } from "@/lib/sandbox";
 import { findNextPendingTaskMessage, findProcessingTaskMessage } from "@/lib/sandbox/store";
 import { detectRepoSkills, type DetectedRepoSkillEntry } from "@/lib/skills/repository";
-import { findUserLlmProvider, listUserLlmProviders } from "@/lib/user/data";
+import { resolveUserProvider } from "@/lib/user/provider-resolution";
 
 import {
   deleteScheduledTask,
@@ -169,59 +165,39 @@ export namespace Project {
     providerRecordId?: string | null,
     model?: string | null,
   ): ResultAsync<OpenCodeConfig, Error> =>
-    fromPromise(
-      Promise.all([
-        providerRecordId ? findUserLlmProvider(userId, providerRecordId) : Promise.resolve(null),
-        listUserLlmProviders(userId),
-      ]),
-    ).andThen(([provider, providers]) => {
-      if (providerRecordId && !provider) {
-        return errAsync(new Error("Selected provider was not found."));
-      }
+    resolveUserProvider({
+      model: model ?? null,
+      providerRecordId: providerRecordId ?? null,
+      userId,
+    }).map(({ openCodeConfig }) => openCodeConfig);
 
-      const trimmedModel = model?.trim() || null;
-      const matchedProviderFromModel = trimmedModel
-        ? (providers.find((candidate) => {
-            if (!candidate.providerId?.trim() || !candidate.providerModel?.trim()) {
-              return false;
-            }
-
-            if (candidate.providerModel.trim() === trimmedModel) {
-              return true;
-            }
-
-            try {
-              return (
-                normalizeOpenCodeModelForProvider(candidate.providerModel, candidate.providerId) ===
-                trimmedModel
-              );
-            } catch {
-              return false;
-            }
-          }) ?? null)
-        : null;
-      const resolvedProvider =
-        provider ??
-        matchedProviderFromModel ??
-        providers.find((value) => value.isDefault) ??
-        providers[0] ??
-        null;
-
-      if (!resolvedProvider) {
-        return errAsync(new Error("Add at least one provider in Settings before starting a task."));
-      }
-
-      try {
-        return fromPromise(
-          resolveOpenCodeConfig({
-            model,
-            provider: resolvedProvider,
-          }),
-        );
-      } catch (error) {
-        return errAsync(error instanceof Error ? error : new Error(String(error)));
-      }
-    });
+  const startTaskSandboxDraft = (input: {
+    model?: string | null;
+    project: ProjectRecord;
+    prompt: string;
+    providerRecordId?: string | null;
+    sourceBranch: string;
+    userId: string;
+  }) =>
+    resolveUserProvider({
+      model: input.model ?? null,
+      providerRecordId: input.providerRecordId ?? null,
+      userId: input.userId,
+    }).andThen(({ openCodeConfig }) =>
+      Sandbox.startTask(
+        {
+          envVars: serializeProjectEnvEntries(parseStoredProjectEnvEntries(input.project.envVars)),
+          openCodeConfig,
+          prompt: input.prompt,
+          repoId: input.project.repoId,
+          sourceBranch: input.sourceBranch,
+        },
+        input.userId,
+      ).map((draft) => ({
+        draft,
+        openCodeConfig,
+      })),
+    );
 
   const requireTaskReadyForQueuedPrompt = (taskId: string): ResultAsync<void, Error> =>
     fromPromise(
@@ -363,23 +339,14 @@ export namespace Project {
     const op = log.child({ projectId: input.projectId, userId: input.userId });
 
     return requireUserProject(input.projectId, input.userId)
-      .andThen((value) =>
-        resolveTaskOpenCodeConfig(input.userId, input.providerId ?? null).map((openCodeConfig) => ({
-          openCodeConfig,
-          project: value,
-        })),
-      )
-      .andThen(({ openCodeConfig, project }) =>
-        Sandbox.startTask(
-          {
-            envVars: serializeProjectEnvEntries(parseStoredProjectEnvEntries(project.envVars)),
-            openCodeConfig,
-            prompt: input.prompt,
-            repoId: project.repoId,
-            sourceBranch: input.sourceBranch,
-          },
-          input.userId,
-        ).map((draft) => ({ draft, openCodeConfig })),
+      .andThen((project) =>
+        startTaskSandboxDraft({
+          project,
+          prompt: input.prompt,
+          providerRecordId: input.providerId ?? null,
+          sourceBranch: input.sourceBranch,
+          userId: input.userId,
+        }),
       )
       .andThen(({ draft, openCodeConfig }) => {
         const messageOverrides = resolveTaskMessageOverrides(openCodeConfig, {
@@ -439,23 +406,17 @@ export namespace Project {
         ),
       )
       .andThen(({ project, scheduledTask }) =>
-        resolveTaskOpenCodeConfig(input.userId).map((openCodeConfig) => ({
-          openCodeConfig,
+        startTaskSandboxDraft({
           project,
+          prompt: input.prompt,
+          providerRecordId: scheduledTask.providerId ?? null,
+          sourceBranch: input.sourceBranch,
+          userId: input.userId,
+        }).map(({ draft, openCodeConfig }) => ({
+          draft,
+          openCodeConfig,
           scheduledTask,
         })),
-      )
-      .andThen(({ openCodeConfig, project, scheduledTask }) =>
-        Sandbox.startTask(
-          {
-            envVars: serializeProjectEnvEntries(parseStoredProjectEnvEntries(project.envVars)),
-            openCodeConfig,
-            prompt: input.prompt,
-            repoId: project.repoId,
-            sourceBranch: input.sourceBranch,
-          },
-          input.userId,
-        ).map((draft) => ({ draft, openCodeConfig, scheduledTask })),
       )
       .andThen(({ draft, openCodeConfig }) => {
         const messageOverrides = resolveTaskMessageOverrides(openCodeConfig);
@@ -593,23 +554,14 @@ export namespace Project {
     userId: string;
   }): ResultAsync<{ messageId: string; task: TaskRecord }, Error> =>
     requireUserProject(input.projectId, input.userId)
-      .andThen((value) =>
-        resolveTaskOpenCodeConfig(input.userId, input.providerId ?? null).map((openCodeConfig) => ({
-          openCodeConfig,
-          project: value,
-        })),
-      )
-      .andThen(({ openCodeConfig, project }) =>
-        Sandbox.startTask(
-          {
-            envVars: serializeProjectEnvEntries(parseStoredProjectEnvEntries(project.envVars)),
-            openCodeConfig,
-            prompt: input.prompt,
-            repoId: project.repoId,
-            sourceBranch: input.sourceBranch,
-          },
-          input.userId,
-        ).map((draft) => ({ draft, openCodeConfig })),
+      .andThen((project) =>
+        startTaskSandboxDraft({
+          project,
+          prompt: input.prompt,
+          providerRecordId: input.providerId ?? null,
+          sourceBranch: input.sourceBranch,
+          userId: input.userId,
+        }),
       )
       .andThen(({ draft, openCodeConfig }) =>
         fromPromise(

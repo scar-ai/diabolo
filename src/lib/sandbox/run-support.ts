@@ -21,6 +21,26 @@ import { buildTaskScreenshotMetadata, TASK_SCREENSHOT_ARTIFACT_TYPE } from "@/li
 const read = (value: string) => value.trim();
 const log = Log.create({ ns: "sandbox.command" });
 
+const extractStructuredCommandError = (output: string) =>
+  output
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .flatMap((line) => {
+      try {
+        return [JSON.parse(line) as { error?: unknown; success?: unknown }];
+      } catch {
+        return [];
+      }
+    })
+    .find(
+      (entry) =>
+        entry &&
+        entry.success === false &&
+        typeof entry.error === "string" &&
+        entry.error.trim().length > 0,
+    )?.error as string | undefined;
+
 export const unwrapResult = async <T>(result: ResultAsync<T, Error>): Promise<T> => {
   const res = await result;
 
@@ -235,13 +255,16 @@ export const runSandboxCommand = async (
 
     if (response.exitCode !== 0) {
       handledFailure = true;
+      const structuredError = extractStructuredCommandError(response.output);
       op.warn("sandbox command failed", {
         durationMs: Date.now() - startedAt,
         exitCode: response.exitCode,
         outputChars: response.output.length,
       });
       throw new Error(
-        read(response.output) || `Command failed with exit code ${response.exitCode}.`,
+        structuredError ||
+          read(response.output) ||
+          `Command failed with exit code ${response.exitCode}.`,
       );
     }
 

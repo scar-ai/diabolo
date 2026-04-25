@@ -382,6 +382,43 @@ const extractSessionTitle = (payload) => {
   return null;
 };
 
+const DEFAULT_SESSION_TITLE_PATTERNS = [
+  /^new session(?:\s*[-:]\s*[\dTZ:.\-+]+)?$/i,
+  /^untitled session$/i,
+];
+
+const isDefaultSessionTitle = (value) =>
+  DEFAULT_SESSION_TITLE_PATTERNS.some((pattern) => pattern.test(value.trim()));
+
+const waitForGeneratedSessionTitle = async (sessionId) => {
+  let latestTitle = null;
+
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    const session = await httpJson(serverBaseUrl + "/session/" + sessionId, {
+      method: "GET",
+    }).catch(() => null);
+    const title = extractSessionTitle(session);
+
+    if (title) {
+      latestTitle = title;
+
+      if (!isDefaultSessionTitle(title)) {
+        return {
+          session,
+          title,
+        };
+      }
+    }
+
+    await delay(500);
+  }
+
+  return {
+    session: latestTitle ? { title: latestTitle } : null,
+    title: latestTitle && !isDefaultSessionTitle(latestTitle) ? latestTitle : null,
+  };
+};
+
 const buildModelSpec = (model, reasoningEffort) => {
   const trimmed = typeof model === "string" ? model.trim() : "";
   if (!trimmed) {
@@ -1034,28 +1071,51 @@ const abortPrompt = async () => {
 const sessionMetadata = async () => {
   await ensureServer();
   const session = await resolveExistingSessionId();
+  const generated = session?.sessionId
+    ? await waitForGeneratedSessionTitle(session.sessionId)
+    : { session: null, title: null };
 
   process.stdout.write(
     JSON.stringify({
       sessionId: session?.sessionId ?? null,
       success: true,
-      title: extractSessionTitle(session?.payload),
+      title: generated.title,
     }) + "\n",
   );
 };
 
 const command = process.argv[2];
+const serializeErrorMessage = (error) => {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message;
+  }
 
-if (command === "ensure-server") {
-  await ensureServer();
-} else if (command === "prompt") {
-  await prompt();
-} else if (command === "abort") {
-  await abortPrompt();
-} else if (command === "session-metadata") {
-  await sessionMetadata();
-} else {
-  throw new Error("Unknown opencode runtime command: " + command);
+  return String(error || "OpenCode runtime failed.");
+};
+
+try {
+  if (command === "ensure-server") {
+    await ensureServer();
+  } else if (command === "prompt") {
+    await prompt();
+  } else if (command === "abort") {
+    await abortPrompt();
+  } else if (command === "session-metadata") {
+    await sessionMetadata();
+  } else {
+    throw new Error("Unknown opencode runtime command: " + command);
+  }
+} catch (error) {
+  const message = serializeErrorMessage(error);
+
+  process.stdout.write(
+    JSON.stringify({
+      command,
+      error: message,
+      success: false,
+    }) + "\n",
+  );
+  process.exit(1);
 }
 `;
 
