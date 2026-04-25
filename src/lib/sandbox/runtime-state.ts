@@ -54,7 +54,7 @@ export namespace SandboxRuntimeState {
       return null;
     }
 
-    log.info("sandbox status updated", {
+    log.debug("sandbox status updated", {
       nextSandboxStatus: taskRecord.sandboxStatus,
       previousSandboxStatus: previous?.sandboxStatus ?? null,
       stage: taskRecord.stage,
@@ -94,7 +94,7 @@ export namespace SandboxRuntimeState {
       return null;
     }
 
-    log.info("task stage updated", {
+    log.debug("task stage updated", {
       messageId: input.messageId ?? null,
       nextStage: taskRecord.stage,
       previousStage: previous?.stage ?? null,

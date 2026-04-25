@@ -66,7 +66,7 @@ export const getRequiredBrowserSnapshot = async (daytona: Daytona) => {
   }
 
   if (snapshot.state?.toLowerCase() !== "active") {
-    log.info("activating snapshot", { snapshotName, state: snapshot.state });
+    log.debug("activating snapshot", { snapshotName, state: snapshot.state });
     snapshot = await daytona.snapshot.activate(snapshot);
 
     if (snapshot.state?.toLowerCase() !== "active") {

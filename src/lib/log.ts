@@ -5,7 +5,7 @@ type Extra = Record<string, unknown>;
 
 const root = pino({
   base: undefined,
-  level: process.env.LOG_LEVEL ?? "info",
+  level: process.env.LOG_LEVEL ?? "warn",
   redact: {
     censor: "[redacted]",
     paths: [

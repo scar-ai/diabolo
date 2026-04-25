@@ -85,7 +85,7 @@ export const getSandboxProvider = (): Sandbox.Provider => {
       };
       const snapshot = await getRequiredBrowserSnapshot(daytona);
 
-      log.info("creating sandbox", { name, snapshot });
+      log.debug("creating sandbox", { name, snapshot });
 
       const snapshotParams: CreateSandboxFromSnapshotParams = {
         ...baseParams,

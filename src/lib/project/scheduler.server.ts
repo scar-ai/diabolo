@@ -127,7 +127,7 @@ const dispatchDueScheduledTaskJobs = async () => {
         : {}),
     });
 
-    log.info("scheduled task jobs dispatched", {
+    log.debug("scheduled task jobs dispatched", {
       dueCount: dueDates.length,
       lastDueAt: dueDates.at(-1)?.toISOString() ?? null,
       projectId: project.id,
@@ -213,7 +213,7 @@ const queueScheduledTaskRun = async (input: {
     await updateScheduledTask(input.scheduledTask.id, { enabled: 0 });
   }
 
-  log.info("scheduled task job queued", {
+  log.debug("scheduled task job queued", {
     dueAt: input.dueAt.toISOString(),
     projectId: input.project.id,
     scheduledTaskId: input.scheduledTask.id,
@@ -323,7 +323,7 @@ export const ensureScheduledTaskScheduler = () => {
     void runWorkerTickSafely();
   }, WORKER_POLL_MS);
 
-  log.info("scheduled task worker started", {
+  log.debug("scheduled task worker started", {
     lockStaleMs: JOB_LOCK_STALE_MS,
     maxCatchUpRuns: MAX_CATCH_UP_RUNS,
     pollMs: WORKER_POLL_MS,

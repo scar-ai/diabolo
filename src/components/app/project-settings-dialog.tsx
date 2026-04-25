@@ -16,6 +16,7 @@ import {
   useId,
   useMemo,
   useRef,
+  startTransition,
   useState,
   type ChangeEvent,
   type DragEvent,
@@ -170,25 +171,26 @@ export function ProjectSettingsDialog({
   });
   const { isPending: isSearchingSkills, mutate: runSkillSearch } = searchSkillsMutation;
 
-  // oxlint-disable-next-line react-hooks-js/set-state-in-effect
   useEffect(() => {
     if (!open) return;
     const envEntries = projectQuery.data?.envEntries ?? [];
-    setActiveTab("environment");
-    setManualEntries(
-      envEntries.length > 0
-        ? envEntries.map((entry) => createDraftEntry(entry))
-        : [createDraftEntry()],
-    );
-    setSelectedSkills(projectQuery.data?.skills ?? []);
-    setSkillSearch("");
-    setHasSearchedSkills(false);
-    setSkillSearchResults([]);
-    setShareWithOrganisation(Boolean(projectQuery.data?.sharedWithOrgId));
-    setUploadPreview("");
-    setDeleteDialogOpen(false);
-    setDeleteConfirmationStep("confirm");
-    setDeleteProjectNameConfirmation("");
+    startTransition(() => {
+      setActiveTab("environment");
+      setManualEntries(
+        envEntries.length > 0
+          ? envEntries.map((entry) => createDraftEntry(entry))
+          : [createDraftEntry()],
+      );
+      setSelectedSkills(projectQuery.data?.skills ?? []);
+      setSkillSearch("");
+      setHasSearchedSkills(false);
+      setSkillSearchResults([]);
+      setShareWithOrganisation(Boolean(projectQuery.data?.sharedWithOrgId));
+      setUploadPreview("");
+      setDeleteDialogOpen(false);
+      setDeleteConfirmationStep("confirm");
+      setDeleteProjectNameConfirmation("");
+    });
   }, [
     open,
     projectQuery.data?.envEntries,

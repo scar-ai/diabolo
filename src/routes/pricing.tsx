@@ -5,7 +5,6 @@ export const Route = createFileRoute("/pricing")({
   component: PricingPage,
 });
 
-const DARK = "#0e0e0e";
 const BODY_BG = "#0e0e0e";
 const LIGHT = "#f0ece6";
 const BORDER_LIGHT = "rgba(255,255,255,0.07)";
@@ -128,7 +127,6 @@ function PricingPage() {
             <PricingCard
               name="Free"
               tagline="Try it out"
-              price={null}
               cta="Get started"
               ctaHref="/login"
               highlight={false}
@@ -154,7 +152,6 @@ function PricingPage() {
             <PricingCard
               name="Pro"
               tagline="For small teams"
-              price={null}
               cta="Get started"
               ctaHref="/login"
               highlight={true}
@@ -179,7 +176,6 @@ function PricingPage() {
             <PricingCard
               name="Max"
               tagline="For growing orgs"
-              price={null}
               cta="Get started"
               ctaHref="/login"
               highlight={false}
@@ -457,7 +453,6 @@ function PricingPage() {
 function PricingCard({
   name,
   tagline,
-  price,
   cta,
   ctaHref,
   highlight,
@@ -466,7 +461,6 @@ function PricingCard({
 }: {
   name: string;
   tagline: string;
-  price: string | null;
   cta: string;
   ctaHref: string;
   highlight: boolean;
@@ -597,6 +591,37 @@ function PricingCard({
   );
 }
 
+function CompareCell({
+  background,
+  isMiddle,
+  value,
+}: {
+  background: string;
+  isMiddle?: boolean;
+  value: string | boolean;
+}) {
+  return (
+    <td
+      className="p-5 text-center"
+      style={{
+        borderLeft: `1px solid ${BORDER_LIGHT}`,
+        background: isMiddle ? `rgba(255,255,255,0.02)` : background,
+        fontSize: 13,
+      }}
+    >
+      {typeof value === "boolean" ? (
+        value ? (
+          <RiCheckLine className="mx-auto h-3.5 w-3.5" style={{ color: "rgba(18,201,5,0.65)" }} />
+        ) : (
+          <span style={{ color: TEXT_DIM }}>—</span>
+        )
+      ) : (
+        <span style={{ color: value === "—" ? TEXT_DIM : TEXT_SECONDARY }}>{value}</span>
+      )}
+    </td>
+  );
+}
+
 function CompareRow({
   feature,
   free,
@@ -612,37 +637,14 @@ function CompareRow({
 }) {
   const bg = dimmed ? "rgba(255,255,255,0.015)" : "transparent";
 
-  function Cell({ value, isMiddle }: { value: string | boolean; isMiddle?: boolean }) {
-    return (
-      <td
-        className="p-5 text-center"
-        style={{
-          borderLeft: `1px solid ${BORDER_LIGHT}`,
-          background: isMiddle ? `rgba(255,255,255,0.02)` : bg,
-          fontSize: 13,
-        }}
-      >
-        {typeof value === "boolean" ? (
-          value ? (
-            <RiCheckLine className="mx-auto h-3.5 w-3.5" style={{ color: "rgba(18,201,5,0.65)" }} />
-          ) : (
-            <span style={{ color: TEXT_DIM }}>—</span>
-          )
-        ) : (
-          <span style={{ color: value === "—" ? TEXT_DIM : TEXT_SECONDARY }}>{value}</span>
-        )}
-      </td>
-    );
-  }
-
   return (
     <tr style={{ borderBottom: `1px solid ${BORDER_DARK}`, background: bg }}>
       <td className="p-5" style={{ fontSize: 13, color: TEXT_SECONDARY }}>
         {feature}
       </td>
-      <Cell value={free} />
-      <Cell value={pro} isMiddle />
-      <Cell value={max} />
+      <CompareCell background={bg} value={free} />
+      <CompareCell background={bg} value={pro} isMiddle />
+      <CompareCell background={bg} value={max} />
     </tr>
   );
 }

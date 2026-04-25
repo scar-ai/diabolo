@@ -13,7 +13,6 @@ const BORDER_DARK = "rgba(255,255,255,0.04)";
 const TEXT_PRIMARY = "rgba(255,255,255,0.82)";
 const TEXT_SECONDARY = "rgba(255,255,255,0.42)";
 const TEXT_MUTED = "rgba(255,255,255,0.28)";
-const TEXT_DIM = "rgba(255,255,255,0.18)";
 
 const serif = {
   fontFamily: "var(--font-serif)",

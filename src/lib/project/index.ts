@@ -140,7 +140,7 @@ export namespace Project {
     if (value.sandboxId) {
       await Sandbox.destroySandbox(value.sandboxId).match(
         () => {
-          log.info("task sandbox destroyed before task deletion", {
+          log.debug("task sandbox destroyed before task deletion", {
             projectId: value.projectId,
             sandboxId: value.sandboxId,
             taskId: value.id,
@@ -232,6 +232,33 @@ export namespace Project {
     };
   };
 
+  const insertSandboxTask = (input: {
+    createdByUserId?: string | null;
+    draft: Sandbox.TaskJob;
+    openCodeConfig: OpenCodeConfig;
+    projectId: string;
+    values?: Partial<Parameters<typeof insertTask>[0]>;
+  }) =>
+    fromPromise(
+      insertTask({
+        branchName: input.draft.sourceBranch,
+        createdByUserId: input.createdByUserId ?? null,
+        envVars: input.draft.envVars ? JSON.stringify(input.draft.envVars) : null,
+        id: input.draft.id,
+        opencodeModel: input.openCodeConfig.model,
+        opencodeProviderId: input.openCodeConfig.selectedProviderId,
+        projectId: input.projectId,
+        prompt: input.draft.prompt,
+        repoId: input.draft.repoId,
+        sandboxStatus: "pending",
+        stage: input.draft.stage,
+        startedAt: new Date(input.draft.startedAt),
+        status: input.draft.status,
+        title: buildFallbackTaskTitle(input.draft.prompt),
+        ...input.values,
+      }),
+    );
+
   export const createProjectForUser = (input: {
     name: string;
     repoId: string;
@@ -245,7 +272,7 @@ export namespace Project {
         userId: input.userId,
       }),
     ).map((value) => {
-      log.info("project created", { projectId: value.id });
+      log.debug("project created", { projectId: value.id });
       return value;
     });
 
@@ -302,7 +329,7 @@ export namespace Project {
       })
       .andThen(() => fromPromise(deleteProject(projectId)))
       .map(() => {
-        log.info("project deleted", { projectId });
+        log.debug("project deleted", { projectId });
       });
 
   export const updateProjectSettingsForUser = (input: {
@@ -353,24 +380,12 @@ export namespace Project {
           reasoningEffort: input.reasoningEffort ?? null,
         });
 
-        return fromPromise(
-          insertTask({
-            branchName: draft.sourceBranch,
-            createdByUserId: input.userId,
-            envVars: draft.envVars ? JSON.stringify(draft.envVars) : null,
-            id: draft.id,
-            opencodeModel: openCodeConfig.model,
-            opencodeProviderId: openCodeConfig.selectedProviderId,
-            projectId: input.projectId,
-            prompt: draft.prompt,
-            repoId: draft.repoId,
-            sandboxStatus: "pending",
-            stage: draft.stage,
-            startedAt: new Date(draft.startedAt),
-            status: draft.status,
-            title: buildFallbackTaskTitle(draft.prompt),
-          }),
-        ).andThen((createdTask) =>
+        return insertSandboxTask({
+          createdByUserId: input.userId,
+          draft,
+          openCodeConfig,
+          projectId: input.projectId,
+        }).andThen((createdTask) =>
           Sandbox.enqueueTaskMessage(createdTask.id, draft.prompt, "initial", {
             createdByUserId: input.userId,
             ...messageOverrides,
@@ -378,7 +393,7 @@ export namespace Project {
         );
       })
       .map((value) => {
-        op.info("task created", { taskId: value.id });
+        op.debug("task created", { taskId: value.id });
         return value;
       });
   };
@@ -421,26 +436,16 @@ export namespace Project {
       .andThen(({ draft, openCodeConfig }) => {
         const messageOverrides = resolveTaskMessageOverrides(openCodeConfig);
 
-        return fromPromise(
-          insertTask({
-            branchName: draft.sourceBranch,
-            createdByUserId: input.userId,
-            envVars: draft.envVars ? JSON.stringify(draft.envVars) : null,
-            id: draft.id,
-            opencodeModel: openCodeConfig.model,
-            opencodeProviderId: openCodeConfig.selectedProviderId,
-            projectId: input.projectId,
-            prompt: draft.prompt,
-            repoId: draft.repoId,
+        return insertSandboxTask({
+          createdByUserId: input.userId,
+          draft,
+          openCodeConfig,
+          projectId: input.projectId,
+          values: {
             scheduledTaskId: input.scheduledTaskId,
-            sandboxStatus: "pending",
             spawnSource: "scheduled",
-            stage: draft.stage,
-            startedAt: new Date(draft.startedAt),
-            status: draft.status,
-            title: buildFallbackTaskTitle(draft.prompt),
-          }),
-        ).andThen((createdTask) =>
+          },
+        }).andThen((createdTask) =>
           Sandbox.enqueueTaskMessage(createdTask.id, draft.prompt, "initial", {
             createdByUserId: input.userId,
             ...messageOverrides,
@@ -448,7 +453,7 @@ export namespace Project {
         );
       })
       .map((value) => {
-        op.info("scheduled task run created", { taskId: value.id });
+        op.debug("scheduled task run created", { taskId: value.id });
         return value;
       });
   };
@@ -542,7 +547,7 @@ export namespace Project {
       .andThen(() => requireScheduledTaskForProject(projectId, scheduledTaskId))
       .andThen(() => fromPromise(deleteScheduledTask(scheduledTaskId, projectId)))
       .map(() => {
-        log.info("scheduled task deleted", { projectId, scheduledTaskId });
+        log.debug("scheduled task deleted", { projectId, scheduledTaskId });
       });
 
   export const createTaskDraftForUser = (input: {
@@ -564,24 +569,12 @@ export namespace Project {
         }),
       )
       .andThen(({ draft, openCodeConfig }) =>
-        fromPromise(
-          insertTask({
-            branchName: draft.sourceBranch,
-            createdByUserId: input.userId,
-            envVars: draft.envVars ? JSON.stringify(draft.envVars) : null,
-            id: draft.id,
-            opencodeModel: openCodeConfig.model,
-            opencodeProviderId: openCodeConfig.selectedProviderId,
-            projectId: input.projectId,
-            prompt: draft.prompt,
-            repoId: draft.repoId,
-            sandboxStatus: "pending",
-            stage: draft.stage,
-            startedAt: new Date(draft.startedAt),
-            status: draft.status,
-            title: buildFallbackTaskTitle(draft.prompt),
-          }),
-        ).andThen((task) => {
+        insertSandboxTask({
+          createdByUserId: input.userId,
+          draft,
+          openCodeConfig,
+          projectId: input.projectId,
+        }).andThen((task) => {
           const messageOverrides = resolveTaskMessageOverrides(openCodeConfig, {
             reasoningEffort: input.reasoningEffort ?? null,
           });
@@ -641,29 +634,23 @@ export namespace Project {
             },
             executionUserId,
           ).andThen((draft) =>
-            fromPromise(
-              insertTask({
+            insertSandboxTask({
+              createdByUserId: executionUserId,
+              draft,
+              openCodeConfig,
+              projectId: parentTask.projectId,
+              values: {
                 branchName,
-                createdByUserId: executionUserId,
-                envVars: draft.envVars ? JSON.stringify(draft.envVars) : null,
-                id: draft.id,
-                opencodeModel: openCodeConfig.model,
-                opencodeProviderId: openCodeConfig.selectedProviderId,
                 parentTaskId: input.parentTaskId,
-                projectId: parentTask.projectId,
-                prompt: input.prompt,
                 repoId: childRepoId,
-                sandboxStatus: "pending",
                 spawnDepth: parentTask.spawnDepth + 1,
                 spawnSource: "agent",
                 stage: input.title.trim()
                   ? `Queued child task: ${input.title.trim()}`
                   : draft.stage,
-                startedAt: new Date(draft.startedAt),
-                status: draft.status,
                 title: buildFallbackTaskTitle(input.prompt),
-              }),
-            ).andThen((createdTask) =>
+              },
+            }).andThen((createdTask) =>
               Sandbox.enqueueTaskMessage(createdTask.id, input.prompt, "initial", {
                 ...messageOverrides,
               }).andThen(() =>
@@ -716,14 +703,14 @@ export namespace Project {
       .andThen(() => requireTaskForProject(projectId, taskId))
       .andThen((value) => fromPromise(deleteTaskWithSandboxCleanup(value)))
       .map(() => {
-        log.info("task deleted", { projectId, taskId });
+        log.debug("task deleted", { projectId, taskId });
       });
 
   export const deleteTaskForUser = (taskId: string, userId: string): ResultAsync<void, Error> =>
     requireTaskForUser(taskId, userId)
       .andThen(({ task: value }) => fromPromise(deleteTaskWithSandboxCleanup(value)))
       .map(() => {
-        log.info("task deleted by user", { taskId });
+        log.debug("task deleted by user", { taskId });
       });
 
   export const terminateTaskForProject = (
@@ -735,7 +722,7 @@ export namespace Project {
       .andThen(() => requireTaskForProject(projectId, taskId))
       .andThen(() => fromPromise(terminateTaskRecord(taskId)))
       .map((value) => {
-        log.info("task terminated", { projectId, taskId });
+        log.debug("task terminated", { projectId, taskId });
         return value;
       });
 
@@ -760,7 +747,7 @@ export namespace Project {
   ): ResultAsync<TaskRecord, Error> =>
     requireTaskForUser(taskId, userId).andThen(() =>
       fromPromise(terminateTaskRecord(taskId)).map((value) => {
-        log.info("task terminated by user", { taskId });
+        log.debug("task terminated by user", { taskId });
         return value;
       }),
     );
@@ -785,7 +772,7 @@ export namespace Project {
     requireTaskForUser(taskId, userId).andThen(({ task: value }) =>
       requireTaskReadyForQueuedPrompt(value.id).andThen(() =>
         fromPromise(queueFollowUpPrompt(value, prompt, options, userId)).map((updated) => {
-          log.info("follow-up queued", { taskId });
+          log.debug("follow-up queued", { taskId });
           return updated;
         }),
       ),

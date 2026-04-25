@@ -141,7 +141,7 @@ export namespace Github {
           visibility: "all",
         })) as GithubRepoApiItem[];
 
-        log.info("repos listed", { count: repos.length });
+        log.debug("repos listed", { count: repos.length });
         return R.map(repos, mapRepo);
       })(),
     );
@@ -157,7 +157,7 @@ export namespace Github {
           visibility: "all",
         })) as GithubRepoApiItem[];
 
-        log.info("repos listed", { count: repos.length });
+        log.debug("repos listed", { count: repos.length });
         return R.map(repos, mapRepo);
       })(),
     );

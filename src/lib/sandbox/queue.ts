@@ -256,7 +256,7 @@ const drainTaskQueue = async (taskId: string) => {
 
   activeProcessors.add(taskId);
   const startedAt = Date.now();
-  log.info("task queue drain started", { taskId });
+  log.debug("task queue drain started", { taskId });
 
   try {
     for (;;) {
@@ -266,7 +266,7 @@ const drainTaskQueue = async (taskId: string) => {
         break;
       }
 
-      log.info("task message claimed for processing", {
+      log.debug("task message claimed for processing", {
         messageId: claimed.id,
         model: claimed.model,
         queuePosition: claimed.queuePosition,
@@ -281,13 +281,13 @@ const drainTaskQueue = async (taskId: string) => {
     }
   } finally {
     activeProcessors.delete(taskId);
-    log.info("task queue drain finished", {
+    log.debug("task queue drain finished", {
       durationMs: Date.now() - startedAt,
       taskId,
     });
 
     if (await hasWorkRemaining(taskId)) {
-      log.info("task queue still has work; scheduling another drain", { taskId });
+      log.debug("task queue still has work; scheduling another drain", { taskId });
       queueMicrotask(() => {
         void drainTaskQueue(taskId);
       });
@@ -297,7 +297,7 @@ const drainTaskQueue = async (taskId: string) => {
 
 export namespace SandboxQueue {
   export const enqueue = async (taskId: string) => {
-    log.info("enqueue requested", { taskId });
+    log.debug("enqueue requested", { taskId });
     await clearTaskCancellation(taskId);
     await recoverStaleProcessing(taskId);
     await recomputeTaskMessageQueuePositions(taskId);
@@ -313,7 +313,7 @@ export namespace SandboxQueue {
   };
 
   export const resume = async (taskId: string) => {
-    log.info("resume requested", { taskId });
+    log.debug("resume requested", { taskId });
     await recoverStaleProcessing(taskId);
 
     if (await hasWorkRemaining(taskId)) {
@@ -325,7 +325,7 @@ export namespace SandboxQueue {
 
   export const terminate = async (taskId: string) => {
     const now = new Date();
-    log.info("termination requested", { taskId });
+    log.debug("termination requested", { taskId });
 
     await cancelPendingTaskMessages(taskId, "Task was terminated by user.");
 
@@ -357,6 +357,6 @@ export namespace SandboxQueue {
     await recomputeTaskMessageQueuePositions(taskId);
     await SandboxRuntimeState.publishChildSnapshot(taskId);
 
-    log.info("task terminated", { taskId });
+    log.debug("task terminated", { taskId });
   };
 }

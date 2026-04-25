@@ -215,7 +215,7 @@ export namespace Sandbox {
 
   export const terminateTask = (jobId: string): ResultAsync<void, Error> =>
     fromPromise(SandboxQueue.terminate(jobId)).map(() => {
-      log.info("task terminated", { jobId });
+      log.debug("task terminated", { jobId });
     });
 
   export const destroyTaskSandbox = (jobId: string): ResultAsync<void, Error> =>
@@ -226,7 +226,7 @@ export namespace Sandbox {
       sandboxProvider.destroyWorkspace(sandboxId).catch(() => {}),
       toError,
     ).map(() => {
-      log.info("sandbox destroyed", { sandboxId });
+      log.debug("sandbox destroyed", { sandboxId });
     });
 
   export const runTaskFollowUp = (

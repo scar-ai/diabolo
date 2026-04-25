@@ -202,4 +202,4 @@ const selectParsedTaskDetail = (task: Project.TaskDetailRecord) => {
 
 export type TaskDetailResult = ReturnType<typeof selectParsedTaskDetail>;
 export { selectParsedTaskDetail };
-export type { ParsedTaskArtifact };
+export type { ParsedTaskArtifact, ParsedTaskEvent };

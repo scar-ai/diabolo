@@ -16,6 +16,7 @@ import {
   useId,
   useMemo,
   useRef,
+  startTransition,
   useState,
   type ChangeEvent,
   type DragEvent,
@@ -150,21 +151,22 @@ function ProjectSettingsPage() {
     currentOrg?.currentUserRole === "owner";
   const canDeleteProject = Boolean(projectQuery.data && (isOwner || isOrgOwnerForSharedProject));
 
-  // Initialise form state from project data
-  // oxlint-disable-next-line react-hooks-js/set-state-in-effect
+  // Initialise form state from project data.
   useEffect(() => {
     if (!projectQuery.data) return;
     const envEntries = projectQuery.data.envEntries ?? [];
-    setManualEntries(
-      envEntries.length > 0
-        ? envEntries.map((entry) => createDraftEntry(entry))
-        : [createDraftEntry()],
-    );
-    setSelectedSkills(projectQuery.data.skills ?? []);
-    setShareWithOrganisation(Boolean(projectQuery.data.sharedWithOrgId));
-    setDeleteDialogOpen(false);
-    setDeleteConfirmationStep("confirm");
-    setDeleteProjectNameConfirmation("");
+    startTransition(() => {
+      setManualEntries(
+        envEntries.length > 0
+          ? envEntries.map((entry) => createDraftEntry(entry))
+          : [createDraftEntry()],
+      );
+      setSelectedSkills(projectQuery.data.skills ?? []);
+      setShareWithOrganisation(Boolean(projectQuery.data.sharedWithOrgId));
+      setDeleteDialogOpen(false);
+      setDeleteConfirmationStep("confirm");
+      setDeleteProjectNameConfirmation("");
+    });
   }, [projectQuery.data]);
 
   const { isPending: isSearchingSkills, mutate: runSkillSearch } = useMutation({
