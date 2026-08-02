@@ -540,6 +540,8 @@ const transformPartToEvent = (part, messageId, cumulativeText, delta) => {
                 ? JSON.stringify(state.output)
                 : "",
           status: typeof state?.status === "string" ? state.status : "",
+          timestamp: Date.now(),
+          title: typeof state?.title === "string" ? state.title : "",
           tool: typeof part?.tool === "string" ? part.tool : "",
         },
         type: completed ? "tool_result" : "tool_call",

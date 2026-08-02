@@ -16,6 +16,7 @@ export function FollowUpAgentBubble({ followUp }: { followUp: ParsedFollowUp }) 
       error={followUp.error}
       isRunning={isRunning}
       logs={followUp.logs}
+      runtimeEvents={followUp.runtimeEvents}
       stage={followUp.stage}
       startedAt={followUp.startedAt}
     />

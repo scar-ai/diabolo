@@ -34,7 +34,9 @@ export function AgentBubble({ task, isRunning }: { task: TaskData; isRunning: bo
       error={task.error}
       isRunning={isRunning}
       logs={task.logs}
+      runtimeEvents={initialMessage?.runtimeEvents ?? []}
       stage={task.stage}
+      startedAt={initialMessage?.startedAt ?? task.startedAt}
     />
   );
 }

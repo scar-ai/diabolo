@@ -254,6 +254,7 @@ const runOpenCodeMessage = async (input: {
       ? null
       : (input.taskRecord?.opencodeSessionId ?? null);
   const openCodeEnvironment = buildRuntimeEnvironment(persistedSessionId);
+  await updateMessageStage(input.taskId, input.messageId, "Starting agent");
   await runSandboxCommand(
     input.prepared.sandbox,
     input.taskId,
@@ -282,6 +283,7 @@ const runOpenCodeMessage = async (input: {
   let runtimeResult: OpenCodePromptResult | null = null;
 
   try {
+    await updateMessageStage(input.taskId, input.messageId, "Agent is working");
     response = await runOpenCodePrompt({
       environment: openCodeEnvironment,
       messageId: input.messageId,
@@ -331,6 +333,8 @@ const runOpenCodeMessage = async (input: {
   if (!runtimeResult) {
     throw new Error("OpenCode prompt completed without a parseable runtime result.");
   }
+
+  await updateMessageStage(input.taskId, input.messageId, "Reviewing agent results");
 
   await updateTaskRecord(input.taskId, {
     opencodeRuntimeFingerprint: runtimeFingerprint,
@@ -398,6 +402,8 @@ const runOpenCodeMessage = async (input: {
     usageEvents,
   });
   await assertTaskNotCancelled(input.taskId);
+
+  await updateMessageStage(input.taskId, input.messageId, "Preparing task handoff");
 
   const changes = await runSandboxCommand(
     input.prepared.sandbox,
@@ -472,8 +478,6 @@ export const runInitialMessage = async (taskId: string, messageId: string) => {
     viewer: context.viewer,
   });
 
-  await updateMessageStage(taskId, messageId, "Running task");
-
   await runOpenCodeMessage({
     defaultCompletionStage: "Task completed",
     githubAccessToken: context.githubAccessToken,
@@ -515,8 +519,6 @@ export const runFollowUpMessage = async (taskId: string, messageId: string) => {
   if (!prepared.sandboxPath) {
     throw new Error("No sandbox workspace available for follow-up.");
   }
-
-  await updateMessageStage(taskId, messageId, "Running OpenCode task");
 
   await runOpenCodeMessage({
     defaultCompletionStage: "Follow-up completed",

@@ -16,6 +16,7 @@ import {
   updateTaskRecord,
   type TaskRecord,
 } from "@/lib/sandbox/store";
+import { formatToolActivity } from "@/lib/task-activity";
 import { buildTaskScreenshotMetadata, TASK_SCREENSHOT_ARTIFACT_TYPE } from "@/lib/task-artifacts";
 
 const read = (value: string) => value.trim();
@@ -308,6 +309,12 @@ export const recordRuntimeAgentEvent = async (input: {
     if (message?.kind === "initial" || message?.sequence === 0) {
       await setTaskAgentResponse(input.taskId, input.payload.text, timestamp);
     }
+  }
+
+  if (input.type === "tool_call") {
+    await updateMessageStage(input.taskId, input.messageId, formatToolActivity(input.payload));
+  } else if (input.type === "step_start") {
+    await updateMessageStage(input.taskId, input.messageId, "Agent is working");
   }
 
   await SandboxEvents.publish({
