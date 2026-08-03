@@ -7,16 +7,29 @@ import {
   ChevronsUpDownIcon,
   HistoryIcon,
   LayoutDashboardIcon,
+  LoaderIcon,
   LogOutIcon,
   PlusIcon,
   SettingsIcon,
+  Trash2Icon,
   ZapIcon,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { CreateProjectDialog } from "@/components/app/home/create-project-dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -27,11 +40,12 @@ import { Separator } from "@/components/ui/separator";
 import authClient from "@/lib/auth/auth-client";
 import { authQueryOptions } from "@/lib/auth/queries";
 import { githubReposQueryOptions } from "@/lib/github/queries";
-import { $createProject } from "@/lib/project/functions";
+import { $createProject, $deleteTask } from "@/lib/project/functions";
 import {
   allUserTaskSummariesQueryOptions,
   projectKeys,
   projectsQueryOptions,
+  taskKeys,
   type ProjectsResult,
   type TaskSummaryResult,
 } from "@/lib/project/queries";
@@ -52,12 +66,14 @@ export function AppSidebar({ user }: { user: AppUser }) {
   const router = useRouter();
   const navigate = useNavigate();
   const createProject = useServerFn($createProject);
+  const deleteTask = useServerFn($deleteTask);
 
   const [createProjectOpen, setCreateProjectOpen] = useState(false);
   const [createProjectSearch, setCreateProjectSearch] = useState("");
   const [createProjectRepoId, setCreateProjectRepoId] = useState("");
   const [createProjectName, setCreateProjectName] = useState("");
   const [projectPickerOpen, setProjectPickerOpen] = useState(false);
+  const [taskToDelete, setTaskToDelete] = useState<TaskSummaryResult | null>(null);
 
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const searchStr = useRouterState({ select: (s) => s.location.searchStr });
@@ -168,6 +184,25 @@ export function AppSidebar({ user }: { user: AppUser }) {
     },
     onError: (error) => {
       toast.error(error instanceof Error ? error.message : "Failed to create project.");
+    },
+  });
+
+  const deleteTaskMutation = useMutation({
+    mutationFn: (task: TaskSummaryResult) =>
+      deleteTask({ data: { projectId: task.projectId, taskId: task.id } }),
+    onSuccess: async (_, task) => {
+      setTaskToDelete(null);
+      toast.success("Chat deleted.");
+
+      if (currentTaskId === task.id) {
+        await navigate({ to: "/app", search: { projectId: task.projectId } });
+      }
+
+      queryClient.removeQueries({ queryKey: taskKeys.detail(task.id) });
+      await queryClient.invalidateQueries({ queryKey: taskKeys.all });
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Failed to delete chat.");
     },
   });
 
@@ -322,23 +357,40 @@ export function AppSidebar({ user }: { user: AppUser }) {
                   const isActiveTask = task.id === currentTaskId;
 
                   return (
-                    <Link
-                      key={task.id}
-                      to="/app/tasks/$taskId"
-                      params={{ taskId: task.id }}
-                      search={{ projectId: task.projectId }}
-                      className={cn(
-                        "flex items-center gap-2 rounded-lg px-2.5 py-2 text-sm transition-colors outline-none",
-                        "focus-visible:ring-2 focus-visible:ring-sidebar-ring",
-                        isActiveTask
-                          ? "bg-sidebar-accent font-medium text-sidebar-foreground"
-                          : "text-sidebar-foreground hover:bg-sidebar-accent/40",
-                      )}
-                    >
-                      <span className="min-w-0 flex-1 truncate">
-                        {task.promptPreview || "Untitled task"}
-                      </span>
-                    </Link>
+                    <div key={task.id} className="group relative">
+                      <Link
+                        to="/app/tasks/$taskId"
+                        params={{ taskId: task.id }}
+                        search={{ projectId: task.projectId }}
+                        className={cn(
+                          "flex items-center gap-2 rounded-lg py-2 pr-8 pl-2.5 text-sm transition-colors outline-none",
+                          "focus-visible:ring-2 focus-visible:ring-sidebar-ring",
+                          isActiveTask
+                            ? "bg-sidebar-accent font-medium text-sidebar-foreground"
+                            : "text-sidebar-foreground hover:bg-sidebar-accent/40",
+                        )}
+                      >
+                        <span className="min-w-0 flex-1 truncate">
+                          {task.promptPreview || "Untitled task"}
+                        </span>
+                      </Link>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-xs"
+                        className="absolute top-1/2 right-1.5 -translate-y-1/2 text-sidebar-foreground/40 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100 hover:bg-destructive/15 hover:text-destructive focus-visible:opacity-100"
+                        disabled={deleteTaskMutation.isPending}
+                        onClick={() => setTaskToDelete(task)}
+                        aria-label={`Delete ${task.promptPreview || "untitled chat"}`}
+                      >
+                        {deleteTaskMutation.isPending &&
+                        deleteTaskMutation.variables.id === task.id ? (
+                          <LoaderIcon className="size-3 animate-spin" aria-hidden="true" />
+                        ) : (
+                          <Trash2Icon className="size-3" aria-hidden="true" />
+                        )}
+                      </Button>
+                    </div>
                   );
                 })}
               </div>
@@ -446,6 +498,42 @@ export function AppSidebar({ user }: { user: AppUser }) {
         selectedRepoId={createProjectRepoId}
         selectedRepoName={createProjectRepo?.fullName ?? null}
       />
+
+      <AlertDialog
+        open={taskToDelete !== null}
+        onOpenChange={(open) => {
+          if (!open && !deleteTaskMutation.isPending) setTaskToDelete(null);
+        }}
+      >
+        <AlertDialogContent size="sm">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete chat?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This permanently deletes “{taskToDelete?.promptPreview || "Untitled chat"}” and its
+              task data. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteTaskMutation.isPending}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              disabled={!taskToDelete || deleteTaskMutation.isPending}
+              onClick={() => {
+                if (taskToDelete) deleteTaskMutation.mutate(taskToDelete);
+              }}
+            >
+              {deleteTaskMutation.isPending ? (
+                <>
+                  <LoaderIcon className="size-4 animate-spin" aria-hidden="true" />
+                  Deleting...
+                </>
+              ) : (
+                "Delete"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }

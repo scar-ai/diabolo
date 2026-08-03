@@ -69,7 +69,7 @@ export function TaskConversation({
                   timestamp={followUp.startedAt}
                   user={followUpCreator}
                 />
-                <FollowUpAgentBubble followUp={followUp} />
+                <FollowUpAgentBubble followUp={followUp} taskId={task.id} />
               </div>
             );
           })}

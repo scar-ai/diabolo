@@ -319,6 +319,45 @@ export namespace Github {
       })(),
     );
 
+  export const createBranch = (input: {
+    branchName: string;
+    fromBranch: string;
+    repoFullName: string;
+  }): ResultAsync<{ name: string }, Error> =>
+    fromPromise(
+      (async () => {
+        const [owner, ...repoSegments] = input.repoFullName.split("/");
+        const repo = repoSegments.join("/");
+
+        if (!owner || !repo) {
+          throw new Error("Invalid repository selection.");
+        }
+
+        const { accessToken } = await getAccount();
+        const octokit = await getOctokitForAccessToken(accessToken);
+        const sourceRef = await octokit.rest.git.getRef({
+          owner,
+          ref: `heads/${input.fromBranch}`,
+          repo,
+        });
+
+        await octokit.rest.git.createRef({
+          owner,
+          ref: `refs/heads/${input.branchName}`,
+          repo,
+          sha: sourceRef.data.object.sha,
+        });
+
+        log.info("branch created", {
+          branch: input.branchName,
+          fromBranch: input.fromBranch,
+          repo: input.repoFullName,
+        });
+
+        return { name: input.branchName };
+      })(),
+    );
+
   export const getRepoFileContentForUser = (input: {
     path: string;
     ref?: string;

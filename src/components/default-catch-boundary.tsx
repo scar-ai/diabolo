@@ -9,14 +9,20 @@ import {
 
 import { Button } from "./ui/button";
 
+export const isAbortError = (error: unknown) =>
+  typeof error === "object" && error !== null && "name" in error && error.name === "AbortError";
+
 export function DefaultCatchBoundary({ error }: Readonly<ErrorComponentProps>) {
   const router = useRouter();
   const isRoot = useMatch({
     strict: false,
     select: (state) => state.id === rootRouteId,
   });
+  const wasAborted = isAbortError(error);
 
-  console.error(error);
+  if (wasAborted) {
+    return null;
+  }
 
   return (
     <div className="flex min-w-0 flex-1 flex-col items-center justify-center gap-6 p-4">

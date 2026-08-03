@@ -1,17 +1,16 @@
 import { createFileRoute } from "@tanstack/react-router";
-import * as z from "zod";
 
-import type { JsonObject } from "@/lib/json";
+import { parseRuntimeEventEnvelope } from "@/lib/opencode/protocol";
 import { verifyRuntimeEventToken } from "@/lib/opencode/runtime-events";
-import { recordRuntimeAgentEvent } from "@/lib/sandbox/run-support";
+import { ingestRuntimeEvent } from "@/lib/sandbox/run-support";
 
-const runtimeEventSchema = z.object({
-  messageId: z.string().min(1),
-  payload: z.record(z.string(), z.unknown()),
-  taskId: z.string().min(1),
-  type: z.string().min(1),
-});
-
+/**
+ * Low-latency delivery path for sandbox runtime events.
+ *
+ * This is an optimisation, not a requirement: the same events also reach the app
+ * on the sandbox's stdout, and ingestion is idempotent, so a sandbox that cannot
+ * reach this endpoint loses only immediacy.
+ */
 export const Route = createFileRoute("/api/opencode/runtime-events")({
   server: {
     handlers: {
@@ -20,18 +19,18 @@ export const Route = createFileRoute("/api/opencode/runtime-events")({
         const token = authorization.startsWith("Bearer ")
           ? authorization.slice("Bearer ".length)
           : "";
-        const input = runtimeEventSchema.parse(await request.json());
 
-        if (!verifyRuntimeEventToken(input.taskId, token)) {
-          return Response.json({ error: "Unauthorized runtime event request." }, { status: 401 });
+        const envelope = parseRuntimeEventEnvelope(await request.json().catch(() => null));
+
+        if (!envelope) {
+          return Response.json({ error: "Malformed runtime event." }, { status: 400 });
         }
 
-        await recordRuntimeAgentEvent({
-          messageId: input.messageId,
-          payload: input.payload as JsonObject,
-          taskId: input.taskId,
-          type: input.type,
-        });
+        if (!verifyRuntimeEventToken(envelope.taskId, token)) {
+          return Response.json({ error: "Unauthorized runtime event." }, { status: 401 });
+        }
+
+        await ingestRuntimeEvent(envelope);
 
         return Response.json({ ok: true });
       },

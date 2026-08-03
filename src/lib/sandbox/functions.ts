@@ -17,10 +17,10 @@ const getRepoTaskInputSchema = z.object({
 
 export const $startRepoTask = createServerFn({ method: "POST" })
   .middleware([freshAuthMiddleware])
-  .inputValidator((data) => startRepoTaskInputSchema.parse(data))
+  .validator((data) => startRepoTaskInputSchema.parse(data))
   .handler(async ({ data, context }) => unwrap(Sandbox.startTask(data, context.user.id)));
 
 export const $getRepoTask = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
-  .inputValidator((data) => getRepoTaskInputSchema.parse(data))
+  .validator((data) => getRepoTaskInputSchema.parse(data))
   .handler(async ({ data }) => unwrap(Sandbox.getTask(data.jobId)));

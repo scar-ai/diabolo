@@ -1,30 +1,53 @@
 import { Buffer } from "node:buffer";
 
-export const OPENCODE_SERVER_PORT = 4096;
+import { RUNTIME_EVENT_PREFIX, RUNTIME_PROTOCOL_VERSION } from "@/lib/opencode/protocol";
 
+export const OPENCODE_SERVER_PORT = 4096;
+export const OPENCODE_AUTH_FILE_PATH = ".diabolo/opencode/data/opencode/auth.json";
+export const OPENCODE_USAGE_LOG_PATH = ".opencode/artifacts/opencode-usage.jsonl";
+
+/**
+ * The agent runtime that runs inside the sandbox.
+ *
+ * Completion is driven by a single authoritative signal: `POST /session/:id/message`
+ * blocks until the whole prompt is done and returns the finished assistant
+ * message. The `/event` stream is used only to mirror progress to the user while
+ * that call is in flight, so losing it degrades liveness and nothing else.
+ */
 export const OPENCODE_RUNTIME_SCRIPT = String.raw`import fs from "node:fs";
 import fsp from "node:fs/promises";
+import http from "node:http";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { Buffer } from "node:buffer";
+import { createHash, randomUUID } from "node:crypto";
+
+const EVENT_PREFIX = ${JSON.stringify(RUNTIME_EVENT_PREFIX)};
+const PROTOCOL_VERSION = ${RUNTIME_PROTOCOL_VERSION};
 
 const repoPath = process.cwd();
 const stateDir = path.join(repoPath, ".diabolo", "opencode");
+const dataDir = path.join(stateDir, "data");
 const artifactsDir = path.join(repoPath, ".opencode", "artifacts");
+const authPath = path.join(dataDir, "opencode", "auth.json");
 const configPath = path.join(repoPath, ".opencode.generated.json");
-const proxyScriptPath = path.join(repoPath, ".diabolo", "codex-openai-proxy.mjs");
 const sessionPath = path.join(stateDir, "session.json");
 const runtimeStatePath = path.join(stateDir, "runtime-state.json");
 const serverPidPath = path.join(stateDir, "server.pid");
-const proxyPidPath = path.join(stateDir, "proxy.pid");
 const serverLogPath = path.join(artifactsDir, "opencode-serve.log");
-const proxyLogPath = path.join(artifactsDir, "codex-proxy.log");
 const usageLogPath = path.join(artifactsDir, "opencode-usage.jsonl");
 const serverPort = Number(process.env.OPENCODE_SERVER_PORT || "4096");
 const serverBaseUrl = "http://127.0.0.1:" + serverPort;
-const proxyBaseUrl = (process.env.OPENCODE_CODEX_PROXY_BASE_URL || "http://127.0.0.1:4312").replace(/\/+$/, "");
-const serverHealthUrl = serverBaseUrl + "/global/health";
-const proxyHealthUrl = process.env.OPENCODE_CODEX_PROXY_HEALTH_URL || proxyBaseUrl + "/health";
+
+// How long the recovery path keeps waiting for a run whose blocking request
+// lost its socket, before giving up and reporting failure.
+const RECOVERY_TIMEOUT_MS = 3600000;
+const RECOVERY_POLL_MS = 5000;
+
+// Recovery assumes the run is still executing on a live server. If the server
+// itself is gone, waiting out the full timeout only delays a failure that has
+// already happened, so give up after this many consecutive unreachable polls.
+const RECOVERY_UNHEALTHY_POLL_LIMIT = 6;
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -36,9 +59,10 @@ const decodeEnvBase64 = (name) => {
     return "";
   }
 
-  return Buffer.from(normalized + "=".repeat((4 - (normalized.length % 4 || 4)) % 4), "base64").toString(
-    "utf8",
-  );
+  return Buffer.from(
+    normalized + "=".repeat((4 - (normalized.length % 4 || 4)) % 4),
+    "base64",
+  ).toString("utf8");
 };
 
 const readJson = async (targetPath) => {
@@ -53,6 +77,143 @@ const writeJson = async (targetPath, value) => {
   await fsp.mkdir(path.dirname(targetPath), { recursive: true });
   await fsp.writeFile(targetPath, JSON.stringify(value, null, 2) + "\n", "utf8");
 };
+
+const writeTextFile = async (targetPath, content) => {
+  await fsp.mkdir(path.dirname(targetPath), { recursive: true });
+  await fsp.writeFile(targetPath, content, "utf8");
+};
+
+const isRecord = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
+
+// ---------------------------------------------------------------------------
+// Protocol
+// ---------------------------------------------------------------------------
+
+const taskId = process.env.OPENCODE_RUNTIME_TASK_ID || "";
+const promptMessageId = process.env.OPENCODE_PROMPT_MESSAGE_ID || "";
+const eventEndpoint = process.env.OPENCODE_RUNTIME_EVENT_ENDPOINT || "";
+const eventToken = process.env.OPENCODE_RUNTIME_EVENT_TOKEN || "";
+const runId = randomUUID();
+
+let eventSeq = 0;
+// The HTTP fast path is best-effort, but it is chained so events cannot arrive
+// out of order relative to each other.
+let postChain = Promise.resolve();
+
+// Every event goes to stdout, which is ordered, durable and always readable by
+// the host. The HTTP POST is an optional latency shortcut for deployments where
+// the sandbox can reach the app; the host dedupes on (runId, seq), so an event
+// arriving twice is a no-op.
+const emit = (type, payload) => {
+  const envelope = {
+    messageId: promptMessageId,
+    payload: payload || {},
+    runId,
+    seq: eventSeq++,
+    taskId,
+    type,
+    v: PROTOCOL_VERSION,
+  };
+
+  process.stdout.write(EVENT_PREFIX + JSON.stringify(envelope) + "\n");
+
+  if (!eventEndpoint || !eventToken || !taskId) {
+    return;
+  }
+
+  postChain = postChain.then(() =>
+    fetch(eventEndpoint, {
+      body: JSON.stringify(envelope),
+      headers: {
+        authorization: "Bearer " + eventToken,
+        "content-type": "application/json",
+      },
+      method: "POST",
+      signal: AbortSignal.timeout(10000),
+    }).catch(() => {}),
+  );
+};
+
+const flushEvents = () => postChain;
+
+// ---------------------------------------------------------------------------
+// HTTP to the local OpenCode server
+// ---------------------------------------------------------------------------
+
+// node's fetch aborts a request whose headers take longer than five minutes, so
+// the blocking prompt call has to go through a raw request with timeouts off.
+const request = ({ body, method, path: requestPath, timeoutMs = 0 }) =>
+  new Promise((resolve, reject) => {
+    const payload = body === undefined ? null : Buffer.from(JSON.stringify(body), "utf8");
+    const req = http.request(
+      {
+        headers: {
+          accept: "application/json",
+          ...(payload
+            ? { "content-length": String(payload.length), "content-type": "application/json" }
+            : {}),
+        },
+        host: "127.0.0.1",
+        method,
+        path: requestPath,
+        port: serverPort,
+      },
+      (response) => {
+        let text = "";
+        response.setEncoding("utf8");
+        response.on("data", (chunk) => {
+          text += chunk;
+        });
+        response.on("end", () => resolve({ status: response.statusCode || 0, text }));
+        response.on("error", reject);
+      },
+    );
+
+    req.on("error", reject);
+    req.setTimeout(timeoutMs);
+
+    if (timeoutMs > 0) {
+      req.on("timeout", () => {
+        req.destroy(new Error("OpenCode request timed out after " + timeoutMs + "ms."));
+      });
+    }
+
+    if (payload) {
+      req.write(payload);
+    }
+
+    req.end();
+  });
+
+const httpJson = async (options) => {
+  const response = await request(options);
+  let payload = null;
+
+  try {
+    payload = response.text ? JSON.parse(response.text) : null;
+  } catch {}
+
+  if (response.status < 200 || response.status >= 300) {
+    const message =
+      (isRecord(payload) && typeof payload.error === "string" && payload.error) ||
+      (isRecord(payload) && typeof payload.message === "string" && payload.message) ||
+      response.text ||
+      "HTTP " + response.status;
+    throw new Error(message);
+  }
+
+  return payload;
+};
+
+const getJson = (requestPath, timeoutMs = 30000) =>
+  httpJson({ method: "GET", path: requestPath, timeoutMs });
+
+const tryGetJson = (requestPath, timeoutMs = 30000) =>
+  getJson(requestPath, timeoutMs).catch(() => null);
+
+// ---------------------------------------------------------------------------
+// Server lifecycle
+// ---------------------------------------------------------------------------
 
 const pidIsRunning = (pid) => {
   if (!Number.isFinite(pid) || pid <= 0) {
@@ -76,11 +237,7 @@ const killPidFile = async (pidPath) => {
       process.kill(pid, "SIGTERM");
     } catch {}
 
-    for (let i = 0; i < 25; i += 1) {
-      if (!pidIsRunning(pid)) {
-        break;
-      }
-
+    for (let i = 0; i < 25 && pidIsRunning(pid); i += 1) {
       await delay(200);
     }
 
@@ -94,53 +251,29 @@ const killPidFile = async (pidPath) => {
   await fsp.rm(pidPath, { force: true }).catch(() => {});
 };
 
-const writeTextFile = async (targetPath, content) => {
-  await fsp.mkdir(path.dirname(targetPath), { recursive: true });
-  await fsp.writeFile(targetPath, content, "utf8");
-};
-
 const ensureRuntimeFiles = async () => {
   await fsp.mkdir(stateDir, { recursive: true });
   await fsp.mkdir(artifactsDir, { recursive: true });
   await writeTextFile(configPath, decodeEnvBase64("OPENCODE_CONFIG_CONTENT_B64"));
 
-  const proxyScript = decodeEnvBase64("OPENCODE_CODEX_PROXY_SCRIPT_B64");
-  if (proxyScript) {
-    await writeTextFile(proxyScriptPath, proxyScript);
+  const authJson = decodeEnvBase64("OPENCODE_AUTH_JSON_B64");
+
+  if (authJson) {
+    await writeTextFile(authPath, authJson);
   }
 };
 
-const httpJson = async (url, init = {}) => {
-  const response = await fetch(url, init);
-  const text = await response.text();
-  let payload = null;
+const waitForHealth = async (timeoutMs) => {
+  const startedAt = Date.now();
 
-  try {
-    payload = text ? JSON.parse(text) : null;
-  } catch {}
+  while (Date.now() - startedAt < timeoutMs) {
+    const healthy = await request({ method: "GET", path: "/global/health", timeoutMs: 1000 })
+      .then((response) => response.status >= 200 && response.status < 300)
+      .catch(() => false);
 
-  if (!response.ok) {
-    const message =
-      (payload && typeof payload.error === "string" && payload.error) ||
-      (payload && typeof payload.message === "string" && payload.message) ||
-      text ||
-      ("HTTP " + response.status);
-    throw new Error(message);
-  }
-
-  return payload;
-};
-
-const waitForHealth = async (url, timeoutMs = 10000) => {
-  const start = Date.now();
-
-  while (Date.now() - start < timeoutMs) {
-    try {
-      const response = await fetch(url);
-      if (response.ok) {
-        return true;
-      }
-    } catch {}
+    if (healthy) {
+      return true;
+    }
 
     await delay(200);
   }
@@ -163,22 +296,24 @@ const spawnDetached = async ({ args, command, env, logPath, pidPath }) => {
 };
 
 const fingerprintConfig = () =>
-  JSON.stringify({
-    apiKey: process.env.OPENCODE_PROVIDER_API_KEY || "",
-    config: decodeEnvBase64("OPENCODE_CONFIG_CONTENT_B64"),
-    proxyMode: process.env.OPENCODE_PROXY_MODE || "",
-    proxyScript: decodeEnvBase64("OPENCODE_CODEX_PROXY_SCRIPT_B64"),
-  });
+  createHash("sha256")
+    .update(
+      JSON.stringify({
+        apiKey: process.env.OPENCODE_PROVIDER_API_KEY || "",
+        config: decodeEnvBase64("OPENCODE_CONFIG_CONTENT_B64"),
+        providerKind: process.env.OPENCODE_PROVIDER_KIND || "",
+      }),
+    )
+    .digest("hex");
 
-const readRuntimeState = async () => (await readJson(runtimeStatePath)) || {};
-
-const restartRuntimeIfNeeded = async () => {
-  const state = await readRuntimeState();
+// A changed provider or config cannot be picked up by a server that is already
+// running, so retire it (and the session bound to it) before reusing the port.
+const retireStaleServer = async () => {
+  const state = (await readJson(runtimeStatePath)) || {};
   const nextFingerprint = fingerprintConfig();
 
   if (state.configFingerprint && state.configFingerprint !== nextFingerprint) {
     await killPidFile(serverPidPath);
-    await killPidFile(proxyPidPath);
     await fsp.rm(sessionPath, { force: true }).catch(() => {});
   }
 
@@ -188,35 +323,11 @@ const restartRuntimeIfNeeded = async () => {
   });
 };
 
-const ensureProxy = async () => {
-  if (process.env.OPENCODE_CODEX_USE_LOCAL_PROXY !== "1") {
-    return;
-  }
-
-  if (await waitForHealth(proxyHealthUrl, 300)) {
-    return;
-  }
-
-  await killPidFile(proxyPidPath);
-  await spawnDetached({
-    args: [proxyScriptPath],
-    command: "node",
-    env: {},
-    logPath: proxyLogPath,
-    pidPath: proxyPidPath,
-  });
-
-  if (!(await waitForHealth(proxyHealthUrl, 10000))) {
-    throw new Error("Codex proxy failed to become healthy.");
-  }
-};
-
 const ensureServer = async () => {
   await ensureRuntimeFiles();
-  await restartRuntimeIfNeeded();
-  await ensureProxy();
+  await retireStaleServer();
 
-  if (await waitForHealth(serverHealthUrl, 300)) {
+  if (await waitForHealth(300)) {
     return;
   }
 
@@ -227,115 +338,75 @@ const ensureServer = async () => {
     env: {
       OPENCODE_CLIENT: "serve",
       OPENCODE_CONFIG: configPath,
+      XDG_DATA_HOME: dataDir,
     },
     logPath: serverLogPath,
     pidPath: serverPidPath,
   });
 
-  if (!(await waitForHealth(serverHealthUrl, 10000))) {
-    throw new Error("OpenCode server failed to become healthy.");
+  if (!(await waitForHealth(30000))) {
+    throw new Error(
+      "OpenCode server failed to become healthy. See .opencode/artifacts/opencode-serve.log.",
+    );
   }
 };
 
-let lastAscendingTimestamp = 0;
-let lastAscendingCounter = 0;
+// ---------------------------------------------------------------------------
+// Sessions
+// ---------------------------------------------------------------------------
 
-const makeAscendingMessageId = () => {
-  const now = Date.now();
-
-  if (now === lastAscendingTimestamp) {
-    lastAscendingCounter += 1;
-  } else {
-    lastAscendingTimestamp = now;
-    lastAscendingCounter = 0;
-  }
-
-  return (
-    "msg_" +
-    now.toString(36) +
-    "_" +
-    lastAscendingCounter.toString(36).padStart(2, "0")
-  );
-};
-
-const readSessionId = async () => {
+const readStoredSessionId = async () => {
   const session = await readJson(sessionPath);
   return typeof session?.id === "string" && session.id ? session.id : null;
 };
 
-const resolveExistingSessionId = async () => {
-  const candidates = [
-    typeof process.env.OPENCODE_SESSION_ID === "string" ? process.env.OPENCODE_SESSION_ID : "",
-    (await readSessionId()) ?? "",
-  ];
+const sessionExists = async (sessionId) =>
+  Boolean(sessionId) && Boolean(await tryGetJson("/session/" + sessionId));
 
-  for (const candidate of candidates) {
-    const sessionId = candidate.trim();
-
-    if (!sessionId) {
-      continue;
-    }
-
-    const existingSession = await httpJson(serverBaseUrl + "/session/" + sessionId, {
-      method: "GET",
-    }).catch(() => null);
-
-    if (existingSession) {
-      return {
-        payload: existingSession,
-        sessionId,
-      };
-    }
-  }
-
-  return null;
-};
-
-const ensureSessionId = async (preferredSessionId, allowCreateIfPreferredMissing = false) => {
-  const preferred =
-    typeof preferredSessionId === "string" && preferredSessionId.trim()
-      ? preferredSessionId.trim()
-      : null;
-
-  if (preferred) {
-    const existingPreferred = await httpJson(serverBaseUrl + "/session/" + preferred, {
-      method: "GET",
-    }).catch(() => null);
-
-    if (existingPreferred) {
-      await writeJson(sessionPath, { createdAt: Date.now(), id: preferred });
-      return preferred;
-    }
-
-    if (!allowCreateIfPreferredMissing) {
-      throw new Error("Persisted OpenCode session was not found on the server.");
-    }
-  }
-
-  const existing = preferred ? null : await readSessionId();
-  if (existing) {
-    const existingSession = await httpJson(serverBaseUrl + "/session/" + existing, {
-      method: "GET",
-    }).catch(() => null);
-
-    if (existingSession) {
-      return existing;
-    }
-  }
-
-  const created = await httpJson(serverBaseUrl + "/session", {
-    body: JSON.stringify({}),
-    headers: { "content-type": "application/json" },
-    method: "POST",
-  });
+const createSession = async () => {
+  const created = await httpJson({ body: {}, method: "POST", path: "/session", timeoutMs: 30000 });
   const id = typeof created?.id === "string" && created.id ? created.id : null;
 
   if (!id) {
-    throw new Error("Failed to create OpenCode session.");
+    throw new Error("Failed to create an OpenCode session.");
   }
 
   await writeJson(sessionPath, { createdAt: Date.now(), id });
   return id;
+};
+
+/**
+ * Resolves the session this run should use. The caller decides whether an
+ * unreachable preferred session is fatal (a resumed session that must exist) or
+ * simply means "start fresh" (a run that carries replayed history instead).
+ */
+const resolveSessionId = async ({ allowCreateWhenMissing, forceCreate, preferredSessionId }) => {
+  if (forceCreate) {
+    return createSession();
+  }
+
+  const preferred = (preferredSessionId || "").trim();
+
+  if (preferred) {
+    if (await sessionExists(preferred)) {
+      await writeJson(sessionPath, { createdAt: Date.now(), id: preferred });
+      return preferred;
+    }
+
+    if (!allowCreateWhenMissing) {
+      throw new Error("The persisted OpenCode session no longer exists on the server.");
+    }
+
+    return createSession();
+  }
+
+  const stored = await readStoredSessionId();
+
+  if (stored && (await sessionExists(stored))) {
+    return stored;
+  }
+
+  return createSession();
 };
 
 const readReplayMessages = () => {
@@ -347,15 +418,11 @@ const readReplayMessages = () => {
 
   try {
     const parsed = JSON.parse(decoded);
+
     return Array.isArray(parsed)
       ? parsed.filter(
           (entry) =>
-            entry &&
-            typeof entry === "object" &&
-            typeof entry.messageId === "string" &&
-            typeof entry.text === "string" &&
-            entry.messageId.trim() &&
-            entry.text.trim(),
+            isRecord(entry) && typeof entry.text === "string" && entry.text.trim().length > 0,
         )
       : [];
   } catch {
@@ -363,254 +430,15 @@ const readReplayMessages = () => {
   }
 };
 
-const extractSessionTitle = (payload) => {
-  const candidates = [
-    payload?.title,
-    payload?.name,
-    payload?.summary,
-    payload?.session?.title,
-    payload?.session?.name,
-    payload?.session?.summary,
-  ];
+// ---------------------------------------------------------------------------
+// Messages
+// ---------------------------------------------------------------------------
 
-  for (const candidate of candidates) {
-    if (typeof candidate === "string" && candidate.trim()) {
-      return candidate.trim();
-    }
-  }
-
-  return null;
-};
-
-const DEFAULT_SESSION_TITLE_PATTERNS = [
-  /^new session(?:\s*[-:]\s*[\dTZ:.\-+]+)?$/i,
-  /^untitled session$/i,
-];
-
-const isDefaultSessionTitle = (value) =>
-  DEFAULT_SESSION_TITLE_PATTERNS.some((pattern) => pattern.test(value.trim()));
-
-const waitForGeneratedSessionTitle = async (sessionId) => {
-  let latestTitle = null;
-
-  for (let attempt = 0; attempt < 30; attempt += 1) {
-    const session = await httpJson(serverBaseUrl + "/session/" + sessionId, {
-      method: "GET",
-    }).catch(() => null);
-    const title = extractSessionTitle(session);
-
-    if (title) {
-      latestTitle = title;
-
-      if (!isDefaultSessionTitle(title)) {
-        return {
-          session,
-          title,
-        };
-      }
-    }
-
-    await delay(500);
-  }
-
-  return {
-    session: latestTitle ? { title: latestTitle } : null,
-    title: latestTitle && !isDefaultSessionTitle(latestTitle) ? latestTitle : null,
-  };
-};
-
-const buildModelSpec = (model, reasoningEffort) => {
-  const trimmed = typeof model === "string" ? model.trim() : "";
-  if (!trimmed) {
-    return undefined;
-  }
-
-  const slash = trimmed.indexOf("/");
-  const providerID = slash === -1 ? "anthropic" : trimmed.slice(0, slash);
-  const modelID = slash === -1 ? trimmed : trimmed.slice(slash + 1);
-  const spec = { modelID, providerID };
-  const effort = typeof reasoningEffort === "string" ? reasoningEffort.trim() : "";
-
-  if (!effort) {
-    return spec;
-  }
-
-  if (providerID === "openai") {
-    spec.options = {
-      reasoningEffort: effort,
-      reasoningSummary: "auto",
-    };
-  } else if (providerID === "anthropic") {
-    const adaptiveModels = new Set(["claude-opus-4-6", "claude-sonnet-4-6"]);
-    if (adaptiveModels.has(modelID)) {
-      spec.options = {
-        outputConfig: { effort },
-        thinking: { type: "adaptive" },
-      };
-    } else {
-      const budgets = {
-        high: 16000,
-        max: 31999,
-      };
-      if (budgets[effort]) {
-        spec.options = {
-          thinking: { budgetTokens: budgets[effort], type: "enabled" },
-        };
-      }
-    }
-  }
-
-  return spec;
-};
-
-const postRuntimeEvent = async (event) => {
-  const endpoint = process.env.OPENCODE_RUNTIME_EVENT_ENDPOINT || "";
-  const token = process.env.OPENCODE_RUNTIME_EVENT_TOKEN || "";
-  const taskId = process.env.OPENCODE_RUNTIME_TASK_ID || "";
-
-  if (!endpoint || !token || !taskId) {
-    return;
-  }
-
-  await fetch(endpoint, {
-    body: JSON.stringify({
-      messageId: event.messageId,
-      payload: event.payload,
-      taskId,
-      type: event.type,
-    }),
-    headers: {
-      authorization: "Bearer " + token,
-      "content-type": "application/json",
-    },
-    method: "POST",
-  }).catch(() => {});
-};
-
-const transformPartToEvent = (part, messageId, cumulativeText, delta) => {
-  const partType = part?.type;
-
-  if (partType === "text") {
-    const text =
-      (typeof delta === "string" && delta) ||
-      (typeof part?.delta === "string" && part.delta) ||
-      (typeof part?.text === "string" ? part.text : "");
-    let next = cumulativeText;
-
-    if (typeof part?.text === "string" && part.text) {
-      next = part.text;
-    } else if (text) {
-      next = cumulativeText + text;
-    }
-
-    if (!next) {
-      return { cumulativeText, event: null };
-    }
-
-    return {
-      cumulativeText: next,
-      event: {
-        messageId,
-        payload: {
-          text: next,
-          timestamp: Date.now(),
-        },
-        type: "token",
-      },
-    };
-  }
-
-  if (partType === "tool" || partType === "tool-invocation" || partType === "tool-result") {
-    const state = part?.state && typeof part.state === "object" ? part.state : {};
-    const completed =
-      partType === "tool-result" ||
-      state?.status === "completed" ||
-      state?.status === "error";
-    return {
-      cumulativeText,
-      event: {
-        messageId,
-        payload: {
-          args: state?.input ?? {},
-          callId: typeof part?.callID === "string" ? part.callID : "",
-          output:
-            typeof state?.output === "string" || typeof state?.output === "number"
-              ? String(state.output)
-              : state?.output && typeof state.output === "object"
-                ? JSON.stringify(state.output)
-                : "",
-          status: typeof state?.status === "string" ? state.status : "",
-          timestamp: Date.now(),
-          title: typeof state?.title === "string" ? state.title : "",
-          tool: typeof part?.tool === "string" ? part.tool : "",
-        },
-        type: completed ? "tool_result" : "tool_call",
-      },
-    };
-  }
-
-  if (partType === "step-start") {
-    return {
-      cumulativeText,
-      event: {
-        messageId,
-        payload: {
-          timestamp: Date.now(),
-        },
-        type: "step_start",
-      },
-    };
-  }
-
-  if (partType === "step-finish") {
-    return {
-      cumulativeText,
-      event: {
-        messageId,
-        payload: {
-          cost: part?.cost ?? null,
-          reason: part?.reason ?? null,
-          timestamp: Date.now(),
-          tokens: part?.tokens ?? null,
-        },
-        type: "step_finish",
-      },
-    };
-  }
-
-  return { cumulativeText, event: null };
-};
-
-const mergeTextPart = (state, part, delta) => {
-  const partId = typeof part?.id === "string" && part.id ? part.id : "";
-  if (!partId) {
-    return state.combinedText || "";
-  }
-
-  const nextText =
-    typeof delta === "string" && delta
-      ? (state.partText.get(partId) || "") + delta
-      : typeof part?.text === "string"
-        ? part.text
-        : state.partText.get(partId) || "";
-
-  state.partText.set(partId, nextText);
-  if (!state.partOrder.includes(partId)) {
-    state.partOrder.push(partId);
-  }
-
-  state.combinedText = state.partOrder.map((id) => state.partText.get(id) || "").join("").trim();
-  return state.combinedText;
-};
-
-const flushPendingParts = async (messageId, pendingParts, handlePart) => {
-  const pending = pendingParts.get(messageId) || [];
-  pendingParts.delete(messageId);
-
-  for (const item of pending) {
-    await handlePart(item.part, item.delta);
-  }
-};
+const getTextBlocks = (parts) =>
+  (Array.isArray(parts) ? parts : [])
+    .filter((part) => isRecord(part) && part.type === "text")
+    .map((part) => (typeof part.text === "string" ? part.text.trim() : ""))
+    .filter(Boolean);
 
 const getMessageCreatedAt = (info) => {
   const created = info?.time?.created;
@@ -627,201 +455,272 @@ const getMessageCreatedAt = (info) => {
   return 0;
 };
 
-const getMessageText = (msg) =>
-  (Array.isArray(msg?.parts) ? msg.parts : [])
-    .filter((part) => part && typeof part === "object" && part.type === "text")
-    .map((part) => (typeof part.text === "string" ? part.text : ""))
-    .join("")
-    .trim();
-
-const fetchFinalMessageState = async (input) => {
-  const response = await httpJson(serverBaseUrl + "/session/" + input.sessionId + "/message", {
-    method: "GET",
-  }).catch(() => null);
-
-  const messages = Array.isArray(response) ? response : [];
-  let finalText = input.currentText || "";
-  let finalAssistantMessageId = input.assistantMessageId;
-  let fallbackText = input.currentText || "";
-  let fallbackAssistantMessageId = input.assistantMessageId;
-  let fallbackCreatedAt = 0;
-
-  for (const msg of messages) {
-    const info = msg?.info && typeof msg.info === "object" ? msg.info : {};
-    if (info?.role !== "assistant" || info?.sessionID !== input.sessionId) {
-      continue;
-    }
-
-    const text = getMessageText(msg);
-    const createdAt = getMessageCreatedAt(info);
-    const isCurrentRunAssistant =
-      (typeof info?.id === "string" && input.allowedAssistantIds.has(info.id)) ||
-      info?.parentID === input.opencodeMessageId;
-
-    if (isCurrentRunAssistant) {
-      if (!finalAssistantMessageId && typeof info?.id === "string" && info.id) {
-        finalAssistantMessageId = info.id;
-      }
-
-      if (text && text.length >= finalText.length) {
-        finalText = text;
-      }
-
-      continue;
-    }
-
-    if (
-      createdAt >= input.promptStartedAt &&
-      text &&
-      (!fallbackText || createdAt >= fallbackCreatedAt)
-    ) {
-      fallbackText = text;
-      fallbackCreatedAt = createdAt;
-      fallbackAssistantMessageId =
-        typeof info?.id === "string" && info.id ? info.id : fallbackAssistantMessageId;
-    }
+const extractErrorMessage = (error) => {
+  if (!isRecord(error)) {
+    return "";
   }
 
-  return {
-    assistantMessageId: finalAssistantMessageId || fallbackAssistantMessageId,
-    text: finalText || fallbackText,
-  };
+  const name = typeof error.name === "string" ? error.name : "";
+  const data = isRecord(error.data) ? error.data : {};
+  const message = (typeof data.message === "string" ? data.message : "") ||
+    (typeof error.message === "string" ? error.message : "");
+  const cleaned = message
+    .split("\n")
+    .filter((line) => !/^\s+at\s/.test(line))
+    .join("\n")
+    .trim()
+    .slice(0, 1000);
+
+  if (!cleaned) {
+    return name || "The agent run failed.";
+  }
+
+  return name && !cleaned.startsWith(name) ? name + ": " + cleaned : cleaned;
 };
 
-const waitForFinalMessageState = async (input) => {
-  let bestState = {
-    assistantMessageId: input.assistantMessageId || null,
-    text: input.currentText || "",
-  };
+const buildModelSpec = (model) => {
+  const trimmed = (model || "").trim();
 
-  for (let attempt = 0; attempt < 20; attempt += 1) {
-    const nextState = await fetchFinalMessageState(input);
-
-    if ((nextState.text || "").length >= (bestState.text || "").length) {
-      bestState = nextState;
-    }
-
-    if (bestState.text.trim()) {
-      return bestState;
-    }
-
-    await delay(500);
+  if (!trimmed) {
+    return undefined;
   }
 
-  return bestState;
+  const slash = trimmed.indexOf("/");
+
+  return slash === -1
+    ? { modelID: trimmed, providerID: "anthropic" }
+    : { modelID: trimmed.slice(slash + 1), providerID: trimmed.slice(0, slash) };
 };
 
-const summarizeMessageParts = (parts) =>
-  (Array.isArray(parts) ? parts : []).map((part) => {
-    if (!part || typeof part !== "object") {
-      return { type: "unknown" };
-    }
+// OpenCode selects reasoning effort through the model's named variant
+// ("low" / "medium" / "high"), not through per-request model options: the
+// request body accepts only { providerID, modelID } for "model" and silently
+// drops anything else, so effort passed there never reaches the model.
+const buildModelVariant = (reasoningEffort) => (reasoningEffort || "").trim().toLowerCase() || undefined;
 
-    const summary = {
-      id: typeof part.id === "string" ? part.id : undefined,
-      text:
-        typeof part.text === "string"
-          ? part.text.slice(0, 200)
-          : typeof part.delta === "string"
-            ? part.delta.slice(0, 200)
-            : undefined,
-      tool: typeof part.tool === "string" ? part.tool : undefined,
-      type: typeof part.type === "string" ? part.type : "unknown",
-    };
-
-    return summary;
-  });
-
-const prompt = async () => {
-  await ensureServer();
-  await fsp.rm(usageLogPath, { force: true }).catch(() => {});
-  const replayMessages = readReplayMessages();
-  const sessionId = await ensureSessionId(
-    process.env.OPENCODE_SESSION_ID || "",
-    replayMessages.length > 0,
-  );
-  const promptMessageId = process.env.OPENCODE_PROMPT_MESSAGE_ID || "unknown";
-  const opencodeMessageId = makeAscendingMessageId();
-  const replayFallbackText = replayMessages
-    .map((replayMessage) => "Recovered prior conversation context:\n" + replayMessage.text)
-    .join("\n\n");
-
-  const requestBody = {
-    messageID: opencodeMessageId,
-    model: buildModelSpec(process.env.OPENCODE_PROMPT_MODEL || "", process.env.OPENCODE_PROMPT_REASONING_EFFORT || ""),
-    parts: [
-      {
-        text:
-          replayFallbackText
-            ? replayFallbackText + "\n\n" + decodeEnvBase64("OPENCODE_PROMPT_USER_B64")
-            : decodeEnvBase64("OPENCODE_PROMPT_USER_B64"),
-        type: "text",
-      },
-    ],
-    system: decodeEnvBase64("OPENCODE_PROMPT_SYSTEM_B64") || undefined,
-  };
-  const promptStartedAt = Date.now();
-  const response = await fetch(serverBaseUrl + "/event");
-  if (!response.ok || !response.body) {
-    throw new Error("Failed to connect to OpenCode event stream.");
+const appendUsageRecord = (part) => {
+  if (part?.type !== "step-finish") {
+    return;
   }
 
-  await httpJson(serverBaseUrl + "/session/" + sessionId + "/prompt_async", {
-    body: JSON.stringify(requestBody),
-    headers: { "content-type": "application/json" },
-    method: "POST",
-  });
-  const decoder = new TextDecoder();
-  const reader = response.body.getReader();
-  let buffer = "";
-  const textState = {
-    combinedText: "",
-    partOrder: [],
-    partText: new Map(),
+  const tokens = isRecord(part.tokens) ? part.tokens : {};
+  const cache = isRecord(tokens.cache) ? tokens.cache : {};
+  const asCount = (value) => (typeof value === "number" && Number.isFinite(value) ? value : 0);
+  const record = {
+    cacheCreationTokens: asCount(cache.write),
+    cacheReadTokens: asCount(cache.read),
+    inputTokens: asCount(tokens.input),
+    outputTokens: asCount(tokens.output),
+    reasoningTokens: asCount(tokens.reasoning),
+    timestamp: Date.now(),
+    type: "usage",
   };
-  const allowedAssistantIds = new Set();
-  const pendingParts = new Map();
-  let assistantMessageId = null;
-  let sawRunActivity = false;
-  let runtimeError = null;
-  let completionDeadlineAt = 0;
+  record.totalTokens =
+    record.inputTokens +
+    record.outputTokens +
+    record.reasoningTokens +
+    record.cacheCreationTokens +
+    record.cacheReadTokens;
 
-  const extendCompletionDeadline = () => {
-    completionDeadlineAt = Date.now() + 1500;
-  };
+  if (record.totalTokens <= 0) {
+    return;
+  }
 
-  const handleAuthorizedPart = async (part, delta) => {
-    if (completionDeadlineAt) {
-      extendCompletionDeadline();
-    }
+  try {
+    fs.mkdirSync(path.dirname(usageLogPath), { recursive: true });
+    fs.appendFileSync(usageLogPath, JSON.stringify(record) + "\n", "utf8");
+  } catch {}
+};
 
-    if (part?.type === "text") {
-      const nextText = mergeTextPart(textState, part, delta);
-      if (nextText) {
-        await postRuntimeEvent({
-          messageId: promptMessageId,
-          payload: {
-            text: nextText,
-            timestamp: Date.now(),
-          },
-          type: "token",
-        });
-      }
+// ---------------------------------------------------------------------------
+// Progress stream
+// ---------------------------------------------------------------------------
+
+/**
+ * Mirrors the server's event bus to the host while the prompt runs. This is
+ * advisory only: the run's outcome comes from the blocking prompt request, so a
+ * stream that drops or never reconnects costs liveness and nothing more.
+ */
+const startProgressStream = (sessionId, promptStartedAt) => {
+  let stopped = false;
+  let activeRequest = null;
+
+  // Assistant messages from earlier runs share this session, so parts are only
+  // forwarded once their message is confirmed to belong to this run. Parts that
+  // arrive first are held until that confirmation lands.
+  const runMessageIds = new Set();
+  const bufferedParts = new Map();
+  const textBlocks = new Map();
+  const blockOrder = [];
+  const reasoningBlocks = new Map();
+  const reasoningOrder = [];
+  const toolStatuses = new Map();
+  // Latest known token counts per step. A step-finish part is revised in place
+  // as it settles, so totals are recomputed from this rather than accumulated —
+  // adding each part as it arrives would count revisions twice.
+  const usageSteps = new Map();
+
+  // Text and reasoning stream identically — full current text of a block, keyed
+  // by its position — so they share one emitter and differ only in event type.
+  const emitBlockPart = (eventType, blocks, order, part, delta) => {
+    const blockId = typeof part.id === "string" ? part.id : "";
+
+    if (!blockId) {
       return;
     }
 
-    const transformed = transformPartToEvent(
-      part,
-      promptMessageId,
-      textState.combinedText,
-      typeof delta === "string" ? delta : "",
-    );
-    if (transformed.event) {
-      await postRuntimeEvent(transformed.event);
+    let block = blocks.get(blockId);
+
+    if (!block) {
+      block = { index: order.length, text: "" };
+      blocks.set(blockId, block);
+      order.push(blockId);
+    }
+
+    const next =
+      typeof part.text === "string" && part.text
+        ? part.text
+        : typeof delta === "string" && delta
+          ? block.text + delta
+          : block.text;
+
+    if (next === block.text) {
+      return;
+    }
+
+    block.text = next;
+    emit(eventType, { blockId, index: block.index, text: next });
+  };
+
+  const emitUsagePart = (part) => {
+    const tokens = isRecord(part.tokens) ? part.tokens : {};
+    const cache = isRecord(tokens.cache) ? tokens.cache : {};
+    const asCount = (value) => (typeof value === "number" && Number.isFinite(value) ? value : 0);
+    const stepId = typeof part.id === "string" ? part.id : "";
+    const step = {
+      cacheReadTokens: asCount(cache.read),
+      cacheWriteTokens: asCount(cache.write),
+      inputTokens: asCount(tokens.input),
+      outputTokens: asCount(tokens.output),
+      reasoningTokens: asCount(tokens.reasoning),
+    };
+    const stepTotal =
+      step.inputTokens +
+      step.outputTokens +
+      step.reasoningTokens +
+      step.cacheReadTokens +
+      step.cacheWriteTokens;
+
+    if (!stepId || stepTotal <= 0) {
+      return;
+    }
+
+    const previous = usageSteps.get(stepId);
+
+    if (previous && previous.totalTokens === stepTotal) {
+      return;
+    }
+
+    step.totalTokens = stepTotal;
+    usageSteps.set(stepId, step);
+
+    const totals = {
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      reasoningTokens: 0,
+      steps: usageSteps.size,
+      totalTokens: 0,
+    };
+
+    for (const counted of usageSteps.values()) {
+      for (const key of Object.keys(totals)) {
+        if (key !== "steps") {
+          totals[key] += counted[key];
+        }
+      }
+    }
+
+    emit("token_usage", totals);
+  };
+
+  const emitToolPart = (part) => {
+    const state = isRecord(part.state) ? part.state : {};
+    const callId =
+      (typeof part.callID === "string" && part.callID) || (typeof part.id === "string" && part.id);
+
+    if (!callId) {
+      return;
+    }
+
+    const status =
+      state.status === "error" ? "error" : state.status === "completed" ? "completed" : "running";
+
+    if (toolStatuses.get(callId) === status) {
+      return;
+    }
+
+    toolStatuses.set(callId, status);
+
+    const output = state.output;
+    emit(status === "running" ? "tool_start" : "tool_end", {
+      args: isRecord(state.input) ? state.input : {},
+      callId,
+      output:
+        typeof output === "string"
+          ? output
+          : output === undefined || output === null
+            ? ""
+            : JSON.stringify(output),
+      status,
+      title: typeof state.title === "string" ? state.title : "",
+      tool: typeof part.tool === "string" ? part.tool : "",
+    });
+  };
+
+  const handlePart = (part, delta) => {
+    if (part.type === "text") {
+      emitBlockPart("text", textBlocks, blockOrder, part, delta);
+      return;
+    }
+
+    if (part.type === "reasoning") {
+      emitBlockPart("reasoning", reasoningBlocks, reasoningOrder, part, delta);
+      return;
+    }
+
+    if (part.type === "tool" || part.type === "tool-invocation" || part.type === "tool-result") {
+      emitToolPart(part);
+      return;
+    }
+
+    // Usage is only broadcast from here, never written to the usage log: the
+    // same step-finish parts come back on the finished message, and recording
+    // both would double every run's billed usage.
+    if (part.type === "step-finish") {
+      emitUsagePart(part);
     }
   };
 
-  const flushEvent = async (raw) => {
+  const acceptPart = (part, delta) => {
+    if (!isRecord(part) || part.sessionID !== sessionId) {
+      return;
+    }
+
+    const messageId = typeof part.messageID === "string" ? part.messageID : "";
+
+    if (!runMessageIds.has(messageId)) {
+      const buffered = bufferedParts.get(messageId) || [];
+      buffered.push({ delta, part });
+      bufferedParts.set(messageId, buffered);
+      return;
+    }
+
+    handlePart(part, delta);
+  };
+
+  const handleFrame = (raw) => {
     let parsed;
 
     try {
@@ -831,269 +730,337 @@ const prompt = async () => {
     }
 
     const type = typeof parsed?.type === "string" ? parsed.type : "";
-    const props = parsed?.properties && typeof parsed.properties === "object" ? parsed.properties : {};
-
-    if (type === "session.idle") {
-      if (props?.sessionID === sessionId && sawRunActivity) {
-        extendCompletionDeadline();
-      }
-      return;
-    }
+    const props = isRecord(parsed?.properties) ? parsed.properties : {};
 
     if (type === "message.updated") {
-      const info = props?.info && typeof props.info === "object" ? props.info : {};
-      const createdAt = getMessageCreatedAt(info);
-      const messageId = typeof info?.id === "string" ? info.id : "";
-      const isCurrentRunAssistant =
-        info?.sessionID === sessionId &&
-        info?.role === "assistant" &&
-        !!messageId &&
-        (info?.parentID === opencodeMessageId || createdAt >= promptStartedAt);
+      const info = isRecord(props.info) ? props.info : {};
+      const messageId = typeof info.id === "string" ? info.id : "";
+      const belongsToRun =
+        info.sessionID === sessionId &&
+        info.role === "assistant" &&
+        Boolean(messageId) &&
+        getMessageCreatedAt(info) >= promptStartedAt - 1000;
 
-      if (isCurrentRunAssistant) {
-        sawRunActivity = true;
-        allowedAssistantIds.add(messageId);
-        assistantMessageId = messageId;
-        await flushPendingParts(messageId, pendingParts, handleAuthorizedPart);
-
-        if (completionDeadlineAt) {
-          extendCompletionDeadline();
-        }
+      if (!belongsToRun || runMessageIds.has(messageId)) {
+        return;
       }
 
-      if (
-        isCurrentRunAssistant &&
-        typeof info?.finish === "string" &&
-        info.finish &&
-        info.finish !== "tool-calls"
-      ) {
-        extendCompletionDeadline();
+      runMessageIds.add(messageId);
+
+      for (const buffered of bufferedParts.get(messageId) || []) {
+        handlePart(buffered.part, buffered.delta);
       }
 
+      bufferedParts.delete(messageId);
       return;
     }
 
-    if (type === "message.part.updated") {
-      const part = props?.part && typeof props.part === "object" ? props.part : {};
-      if (part?.sessionID !== sessionId) {
-        return;
-      }
-
-      if (!allowedAssistantIds.has(part?.messageID)) {
-        const pending = pendingParts.get(part.messageID) || [];
-        pending.push({
-          delta: props?.delta,
-          part,
-        });
-        pendingParts.set(part.messageID, pending);
-        return;
-      }
-      sawRunActivity = true;
-      await handleAuthorizedPart(part, props?.delta);
-      return;
-    }
-
-    if (type === "message.part.added") {
-      const part = props?.part && typeof props.part === "object" ? props.part : {};
-      if (part?.sessionID !== sessionId) {
-        return;
-      }
-
-      if (!allowedAssistantIds.has(part?.messageID)) {
-        const pending = pendingParts.get(part.messageID) || [];
-        pending.push({
-          delta: props?.delta,
-          part,
-        });
-        pendingParts.set(part.messageID, pending);
-        return;
-      }
-      sawRunActivity = true;
-      await handleAuthorizedPart(part, props?.delta);
-      return;
-    }
-
-    if (type === "message.error") {
-      const errorMessage =
-        (props?.error && typeof props.error === "object" && props.error && typeof props.error.message === "string"
-          ? props.error.message
-          : null) ||
-        (typeof props?.message === "string" ? props.message : null) ||
-        "OpenCode prompt failed.";
-      runtimeError = errorMessage;
-      await postRuntimeEvent({
-        messageId: promptMessageId,
-        payload: {
-          error: errorMessage,
-          timestamp: Date.now(),
-        },
-        type: "error",
-      });
+    if (type === "message.part.updated" || type === "message.part.added") {
+      acceptPart(props.part, props.delta);
     }
   };
 
-  try {
-    while (true) {
-      const nextChunk = completionDeadlineAt
-        ? await Promise.race([
-            reader.read().then((result) => ({ ...result, timeout: false })),
-            delay(Math.max(0, completionDeadlineAt - Date.now())).then(() => ({
-              done: false,
-              timeout: true,
-              value: undefined,
-            })),
-          ])
-        : { ...(await reader.read()), timeout: false };
-
-      if (nextChunk.timeout) {
-        break;
-      }
-
-      const { done, value } = nextChunk;
-      if (done) {
-        break;
-      }
-
-      buffer += decoder.decode(value, { stream: true });
-
-      while (buffer.includes("\n\n")) {
-        const index = buffer.indexOf("\n\n");
-        const chunk = buffer.slice(0, index);
-        buffer = buffer.slice(index + 2);
-        const raw = chunk
-          .split("\n")
-          .filter((line) => line.startsWith("data:"))
-          .map((line) => line.slice(5).trim())
-          .filter(Boolean)
-          .join("\n");
-
-        if (!raw || raw === "[DONE]") {
-          continue;
+  const consume = (response) =>
+    new Promise((resolve) => {
+      let buffer = "";
+      let settled = false;
+      const finish = () => {
+        if (!settled) {
+          settled = true;
+          resolve();
         }
+      };
 
-        await flushEvent(raw);
+      response.setEncoding("utf8");
+      response.on("data", (chunk) => {
+        buffer += chunk;
 
-        if (runtimeError) {
-          break;
+        for (let index = buffer.indexOf("\n\n"); index !== -1; index = buffer.indexOf("\n\n")) {
+          const frame = buffer.slice(0, index);
+          buffer = buffer.slice(index + 2);
+          const data = frame
+            .split("\n")
+            .filter((line) => line.startsWith("data:"))
+            .map((line) => line.slice(5).trim())
+            .filter(Boolean)
+            .join("\n");
+
+          if (data && data !== "[DONE]") {
+            handleFrame(data);
+          }
         }
-      }
-
-      if (runtimeError) {
-        break;
-      }
-    }
-  } finally {
-    await reader.cancel().catch(() => {});
-  }
-
-  if (runtimeError) {
-    throw new Error(runtimeError);
-  }
-
-  const finalState = await waitForFinalMessageState({
-    allowedAssistantIds,
-    assistantMessageId,
-    currentText: textState.combinedText,
-    opencodeMessageId,
-    promptStartedAt,
-    sessionId,
-  });
-  let finalText = finalState.text || textState.combinedText;
-
-  if (!finalText && (process.env.OPENCODE_PROXY_MODE || "").trim() === "codex") {
-    const sessionMessages = await httpJson(serverBaseUrl + "/session/" + sessionId + "/message", {
-      method: "GET",
-    }).catch(() => null);
-
-    process.stdout.write(
-      JSON.stringify({
-        debug: {
-          finalState,
-          promptMessageId,
-          requestMessageId: opencodeMessageId,
-          sessionMessages: (Array.isArray(sessionMessages) ? sessionMessages : []).slice(-6).map((msg) => ({
-            info:
-              msg?.info && typeof msg.info === "object"
-                ? {
-                    finish: typeof msg.info.finish === "string" ? msg.info.finish : undefined,
-                    id: typeof msg.info.id === "string" ? msg.info.id : undefined,
-                    parentID:
-                      typeof msg.info.parentID === "string" ? msg.info.parentID : undefined,
-                    role: typeof msg.info.role === "string" ? msg.info.role : undefined,
-                    sessionID:
-                      typeof msg.info.sessionID === "string" ? msg.info.sessionID : undefined,
-                  }
-                : {},
-            parts: summarizeMessageParts(msg?.parts),
-          })),
-        },
-        messageId: promptMessageId,
-        type: "codex_empty_text_debug",
-      }) + "\n",
-    );
-  }
-
-  if (finalText) {
-    await postRuntimeEvent({
-      messageId: promptMessageId,
-      payload: {
-        text: finalText,
-        timestamp: Date.now(),
-      },
-      type: "token",
+      });
+      response.on("end", finish);
+      response.on("close", finish);
+      response.on("error", finish);
     });
+
+  const connect = () =>
+    new Promise((resolve, reject) => {
+      const req = http.request(
+        {
+          headers: { accept: "text/event-stream" },
+          host: "127.0.0.1",
+          method: "GET",
+          path: "/event",
+          port: serverPort,
+        },
+        (response) => {
+          if (response.statusCode !== 200) {
+            response.resume();
+            reject(new Error("Event stream returned HTTP " + response.statusCode));
+            return;
+          }
+
+          resolve({ req, response });
+        },
+      );
+
+      req.on("error", reject);
+      req.setTimeout(0);
+      req.end();
+    });
+
+  const pump = async () => {
+    let backoffMs = 250;
+
+    while (!stopped) {
+      let stream = null;
+
+      try {
+        stream = await connect();
+        backoffMs = 250;
+      } catch {
+        await delay(backoffMs);
+        backoffMs = Math.min(backoffMs * 2, 5000);
+        continue;
+      }
+
+      if (stopped) {
+        stream.req.destroy();
+        return;
+      }
+
+      activeRequest = stream.req;
+      await consume(stream.response);
+      activeRequest = null;
+    }
+  };
+
+  void pump();
+
+  return () => {
+    stopped = true;
+    activeRequest?.destroy();
+    activeRequest = null;
+  };
+};
+
+// ---------------------------------------------------------------------------
+// Prompt
+// ---------------------------------------------------------------------------
+
+const isTransportError = (error) => {
+  const message = error instanceof Error ? error.message.toLowerCase() : String(error || "");
+
+  return (
+    message.includes("socket hang up") ||
+    message.includes("econnreset") ||
+    message.includes("epipe") ||
+    message.includes("terminated") ||
+    message.includes("timed out")
+  );
+};
+
+/**
+ * Recovers a run whose blocking request lost its connection. The prompt itself
+ * keeps executing server-side, so wait for the session to go idle and then read
+ * the assistant message it produced.
+ */
+const recoverRunResult = async (sessionId, promptStartedAt) => {
+  const deadline = Date.now() + RECOVERY_TIMEOUT_MS;
+  let unhealthyPolls = 0;
+
+  while (Date.now() < deadline) {
+    await delay(RECOVERY_POLL_MS);
+
+    // Every read below swallows its errors, so without an explicit health check
+    // a dead server is indistinguishable from an idle one that has produced no
+    // message yet — and the loop would run to its full timeout.
+    if (!(await waitForHealth(1000))) {
+      unhealthyPolls += 1;
+
+      if (unhealthyPolls >= RECOVERY_UNHEALTHY_POLL_LIMIT) {
+        throw new Error(
+          "The OpenCode server stopped responding mid-run. It was most likely killed for exceeding the sandbox memory limit; see .opencode/artifacts/opencode-serve.log.",
+        );
+      }
+
+      continue;
+    }
+
+    unhealthyPolls = 0;
+
+    const statuses = await tryGetJson("/session/status");
+    const status = isRecord(statuses) && isRecord(statuses[sessionId]) ? statuses[sessionId].type : "idle";
+
+    if (status === "busy" || status === "retry") {
+      continue;
+    }
+
+    const messages = await tryGetJson("/session/" + sessionId + "/message");
+    const candidates = (Array.isArray(messages) ? messages : []).filter((message) => {
+      const info = isRecord(message?.info) ? message.info : {};
+      return (
+        info.sessionID === sessionId &&
+        info.role === "assistant" &&
+        getMessageCreatedAt(info) >= promptStartedAt - 1000
+      );
+    });
+    const latest = candidates.at(-1);
+
+    if (latest) {
+      return { info: latest.info, parts: latest.parts };
+    }
   }
 
-  process.stdout.write(
-    JSON.stringify({
-      assistantMessageId: finalState.assistantMessageId || null,
-      messageId: promptMessageId,
-      sessionId,
-      success: true,
-      text: finalText,
-      userMessageId: opencodeMessageId,
-      usageLogPath,
-    }) + "\n",
-  );
+  throw new Error("The agent run lost its connection and did not finish within the time limit.");
+};
+
+const prompt = async () => {
+  if (!promptMessageId) {
+    throw new Error("OPENCODE_PROMPT_MESSAGE_ID is required to run a prompt.");
+  }
+
+  await ensureServer();
+  await fsp.rm(usageLogPath, { force: true }).catch(() => {});
+
+  const replayMessages = readReplayMessages();
+  const sessionId = await resolveSessionId({
+    allowCreateWhenMissing: replayMessages.length > 0,
+    forceCreate: process.env.OPENCODE_FORCE_NEW_SESSION === "1",
+    preferredSessionId: process.env.OPENCODE_SESSION_ID || "",
+  });
+
+  const userPrompt = decodeEnvBase64("OPENCODE_PROMPT_USER_B64");
+  const replayPreamble = replayMessages
+    .map((message) => "Recovered prior conversation context:\n" + message.text)
+    .join("\n\n");
+  const body = {
+    model: buildModelSpec(process.env.OPENCODE_PROMPT_MODEL || ""),
+    parts: [{ text: replayPreamble ? replayPreamble + "\n\n" + userPrompt : userPrompt, type: "text" }],
+    system: decodeEnvBase64("OPENCODE_PROMPT_SYSTEM_B64") || undefined,
+    variant: buildModelVariant(process.env.OPENCODE_PROMPT_REASONING_EFFORT || ""),
+  };
+
+  const promptStartedAt = Date.now();
+  const stopProgressStream = startProgressStream(sessionId, promptStartedAt);
+  emit("run_started", { sessionId, timestamp: promptStartedAt });
+
+  let result;
+
+  try {
+    // Blocks for the entire run. This returning is the single authoritative
+    // signal that the agent is done, and its payload is the final message.
+    result = await httpJson({
+      body,
+      method: "POST",
+      path: "/session/" + sessionId + "/message",
+      timeoutMs: 0,
+    });
+  } catch (error) {
+    if (!isTransportError(error)) {
+      throw error;
+    }
+
+    result = await recoverRunResult(sessionId, promptStartedAt);
+  } finally {
+    stopProgressStream();
+  }
+
+  const info = isRecord(result?.info) ? result.info : {};
+
+  if (isRecord(info.error) && info.error.name !== "MessageAbortedError") {
+    throw new Error(extractErrorMessage(info.error));
+  }
+
+  const blocks = getTextBlocks(result?.parts);
+
+  for (const part of Array.isArray(result?.parts) ? result.parts : []) {
+    appendUsageRecord(part);
+  }
+
+  emit("run_completed", {
+    assistantMessageId: typeof info.id === "string" ? info.id : null,
+    blocks,
+    sessionId,
+    timestamp: Date.now(),
+    userMessageId: typeof info.parentID === "string" ? info.parentID : "",
+  });
+
+  await flushEvents();
 };
 
 const abortPrompt = async () => {
   await ensureServer();
-  const sessionId = await readSessionId();
+  const sessionId = await readStoredSessionId();
 
   if (!sessionId) {
     return;
   }
 
-  await httpJson(serverBaseUrl + "/session/" + sessionId + "/abort", {
-    method: "POST",
-  }).catch(() => {});
+  await httpJson({ method: "POST", path: "/session/" + sessionId + "/abort", timeoutMs: 30000 }).catch(
+    () => {},
+  );
 };
 
+const DEFAULT_TITLE_PATTERNS = [/^new session(?:\s*[-:]\s*[\dTZ:.\-+]+)?$/i, /^untitled session$/i];
+
+const extractSessionTitle = (payload) => {
+  const candidates = [payload?.title, payload?.name, payload?.summary];
+
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim()) {
+      return candidate.trim();
+    }
+  }
+
+  return null;
+};
+
+// The server generates a session title asynchronously after the first exchange,
+// so poll briefly rather than accepting the placeholder it starts with.
 const sessionMetadata = async () => {
   await ensureServer();
-  const session = await resolveExistingSessionId();
-  const generated = session?.sessionId
-    ? await waitForGeneratedSessionTitle(session.sessionId)
-    : { session: null, title: null };
+  const sessionId = (process.env.OPENCODE_SESSION_ID || "").trim() || (await readStoredSessionId());
+  let title = null;
+
+  for (let attempt = 0; sessionId && attempt < 30; attempt += 1) {
+    const candidate = extractSessionTitle(await tryGetJson("/session/" + sessionId));
+
+    if (candidate) {
+      title = candidate;
+
+      if (!DEFAULT_TITLE_PATTERNS.some((pattern) => pattern.test(candidate))) {
+        break;
+      }
+    }
+
+    await delay(500);
+  }
+
+  const isPlaceholder = title !== null && DEFAULT_TITLE_PATTERNS.some((pattern) => pattern.test(title));
 
   process.stdout.write(
     JSON.stringify({
-      sessionId: session?.sessionId ?? null,
+      sessionId: sessionId || null,
       success: true,
-      title: generated.title,
+      title: isPlaceholder ? null : title,
     }) + "\n",
   );
 };
 
 const command = process.argv[2];
-const serializeErrorMessage = (error) => {
-  if (error instanceof Error && error.message.trim()) {
-    return error.message;
-  }
-
-  return String(error || "OpenCode runtime failed.");
-};
 
 try {
   if (command === "ensure-server") {
@@ -1108,15 +1075,15 @@ try {
     throw new Error("Unknown opencode runtime command: " + command);
   }
 } catch (error) {
-  const message = serializeErrorMessage(error);
+  const message =
+    error instanceof Error && error.message.trim() ? error.message : String(error || "Runtime failed.");
 
-  process.stdout.write(
-    JSON.stringify({
-      command,
-      error: message,
-      success: false,
-    }) + "\n",
-  );
+  if (command === "prompt") {
+    emit("run_failed", { message, timestamp: Date.now() });
+    await flushEvents();
+  }
+
+  process.stdout.write(JSON.stringify({ command, error: message, success: false }) + "\n");
   process.exit(1);
 }
 `;

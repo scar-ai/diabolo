@@ -4,71 +4,64 @@ import {
   createTaskArtifact,
   createTaskEvent,
   type ParsedTaskArtifactRecord,
-  type ParsedTaskEventRecord,
 } from "@/lib/sandbox/store";
-import { createSandboxEvent, type SandboxEvent } from "@/lib/session/events";
+import { createSandboxEvent } from "@/lib/session/events";
 import { broadcastTaskEvent } from "@/lib/session/server";
+import type { EventType } from "@/lib/session/types";
 
-type TaskStreamListener = (event: ParsedTaskEventRecord) => void;
+/** Sequence used for events that live only on the wire and never in the database. */
+const TRANSIENT_SEQUENCE = -1;
 
-const listeners = new Map<string, Set<TaskStreamListener>>();
-
-const notify = (event: ParsedTaskEventRecord) => {
-  const bucket = listeners.get(event.taskId);
-
-  if (!bucket) {
-    return;
-  }
-
-  for (const listener of bucket) {
-    listener(event);
-  }
-
-  const sandboxEvent: SandboxEvent = createSandboxEvent(
-    event.type as any,
-    event.parsedPayload,
-    event.messageId,
-    event.sandboxId,
-  );
-
-  broadcastTaskEvent(event.taskId, {
-    event: sandboxEvent,
-    sequence: event.sequence,
-  });
+type PublishInput = {
+  createdAt?: Date;
+  messageId?: string | null;
+  payload: JsonObject;
+  sandboxId?: string;
+  taskId: string;
+  type: EventType;
 };
 
 export namespace SandboxEvents {
-  export const subscribe = (taskId: string, listener: TaskStreamListener) => {
-    const bucket = listeners.get(taskId) ?? new Set<TaskStreamListener>();
-    bucket.add(listener);
-    listeners.set(taskId, bucket);
+  /**
+   * Records an event and pushes it to connected clients. Use this for anything a
+   * client must still see after a reload.
+   */
+  export const publish = async (input: PublishInput) => {
+    const event = await createTaskEvent(input);
 
-    return () => {
-      const current = listeners.get(taskId);
+    if (!event) {
+      return null;
+    }
 
-      if (!current) {
-        return;
-      }
+    broadcastTaskEvent(event.taskId, {
+      event: createSandboxEvent(
+        event.type as EventType,
+        event.parsedPayload,
+        event.messageId,
+        event.sandboxId,
+      ),
+      sequence: event.sequence,
+    });
 
-      current.delete(listener);
-
-      if (current.size === 0) {
-        listeners.delete(taskId);
-      }
-    };
+    return event;
   };
 
-  export const publish = async (input: {
-    createdAt?: Date;
-    messageId?: string | null;
-    payload: JsonObject;
-    taskId: string;
-    type: string;
-    sandboxId?: string;
-  }) => {
-    const event = await createTaskEvent(input);
-    notify(event);
-    return event;
+  /**
+   * Pushes an event to connected clients without recording it. Use this for
+   * high-frequency updates whose durable state lives elsewhere — streamed agent
+   * text, for instance, is persisted on the message record itself, so writing an
+   * event row per update would be thousands of rows describing one string.
+   */
+  export const broadcast = (input: Omit<PublishInput, "createdAt">) => {
+    broadcastTaskEvent(input.taskId, {
+      event: createSandboxEvent(
+        input.type,
+        input.payload,
+        input.messageId ?? null,
+        input.sandboxId ?? null,
+      ),
+      sequence: TRANSIENT_SEQUENCE,
+    });
   };
 
   export const publishArtifact = async (input: {
@@ -81,7 +74,7 @@ export namespace SandboxEvents {
   }): Promise<ParsedTaskArtifactRecord> => {
     const artifact = await createTaskArtifact(input);
 
-    await SandboxEvents.publish({
+    await publish({
       messageId: input.messageId ?? null,
       payload: {
         artifactId: artifact.id,

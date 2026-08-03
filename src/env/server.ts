@@ -20,6 +20,10 @@ export const env = createEnv({
     DAYTONA_BROWSER_SNAPSHOT: z.string().optional(),
     OPENROUTER_API_KEY: z.string().optional(),
     OPENCODE_MODEL: z.string().optional(),
+    STRIPE_SECRET_KEY: z.string().optional(),
+    STRIPE_WEBHOOK_SECRET: z.string().optional(),
+    STRIPE_PRO_PRICE_ID: z.string().optional(),
+    STRIPE_MAX_PRICE_ID: z.string().optional(),
   },
   runtimeEnv: process.env,
 });

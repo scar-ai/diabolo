@@ -2,6 +2,7 @@ import { Buffer } from "node:buffer";
 
 import type { Github } from "@/lib/github";
 import { Log } from "@/lib/log";
+import { buildReportProgressOpenCodeSetupCommand } from "@/lib/opencode/spawn-task";
 import { formatProjectEnvVarsForDotEnv } from "@/lib/project/env";
 import type { ProjectSkillEntry } from "@/lib/project/skills";
 import type { Sandbox } from "@/lib/sandbox";
@@ -371,6 +372,17 @@ export namespace SandboxWorkspace {
           durationMs: Date.now() - reconnectStartedAt,
           sandboxPath: input.taskRecord.sandboxPath,
         });
+
+        await input.run(
+          sandbox,
+          input.taskId,
+          input.messageId,
+          buildReportProgressOpenCodeSetupCommand(),
+          input.taskRecord.sandboxPath,
+          undefined,
+          60,
+          "sync progress reporting tool",
+        );
 
         await syncProjectEnvFile({
           envVars: input.envVars,

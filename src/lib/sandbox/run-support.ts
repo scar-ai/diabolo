@@ -3,15 +3,20 @@ import { type ResultAsync } from "neverthrow";
 import { Github } from "@/lib/github";
 import type { JsonObject } from "@/lib/json";
 import { Log } from "@/lib/log";
+import {
+  isRuntimeEventLine,
+  parseRuntimeEventLine,
+  type RuntimeEventEnvelope,
+  type RuntimeRunCompletedPayload,
+} from "@/lib/opencode/protocol";
 import { Sandbox } from "@/lib/sandbox";
+import { AgentStream } from "@/lib/sandbox/agent-stream";
 import { SandboxEvents } from "@/lib/sandbox/events";
 import { SandboxRuntimeState } from "@/lib/sandbox/runtime-state";
 import {
   appendTaskMessageLog,
   findTaskMessage,
   isTaskCancellationRequested,
-  setTaskAgentResponse,
-  setTaskMessageAgentResponse,
   updateTaskMessageRecord,
   updateTaskRecord,
   type TaskRecord,
@@ -94,6 +99,9 @@ export const failMessageExecution = async (
     return;
   }
 
+  // Keep whatever text the agent had produced before it failed.
+  await AgentStream.finalize(messageId);
+
   const completedAt = new Date();
 
   await Promise.all([
@@ -144,6 +152,8 @@ export const completeMessageExecution = async (
   if (!currentMessage || currentMessage.status !== "processing") {
     return;
   }
+
+  await AgentStream.finalize(messageId);
 
   const completedAt = new Date();
 
@@ -293,37 +303,238 @@ export const runSandboxCommand = async (
   }
 };
 
-export const recordRuntimeAgentEvent = async (input: {
-  messageId: string;
-  payload: JsonObject;
-  taskId: string;
-  type: string;
-}) => {
-  const timestamp =
-    typeof input.payload.timestamp === "number" ? input.payload.timestamp : Date.now();
+export const runSandboxBackgroundCommand = async (
+  sandbox: Sandbox.Session,
+  taskId: string,
+  messageId: string,
+  command: string,
+  cwd?: string,
+  envVars?: Record<string, string>,
+  timeout = 0,
+  label = "sandbox background command",
+) => {
+  const startedAt = Date.now();
+  const pollIntervalMs = 2_000;
+  const op = log.child({
+    label,
+    messageId,
+    sandboxId: sandbox.id,
+    taskId,
+  });
+  let backgroundCommand: Sandbox.BackgroundCommand | null = null;
+  let handledFailure = false;
+  let lastOutput = "";
+  let pendingLine = "";
+  // Captured as the run's `run_completed` event streams past, so callers get the
+  // agent's result directly instead of re-parsing the command's whole output.
+  let runResult: RuntimeRunCompletedPayload | null = null;
 
-  if (input.type === "token" && typeof input.payload.text === "string") {
-    await setTaskMessageAgentResponse(input.messageId, input.payload.text, timestamp);
+  // stdout is the runtime's authoritative event channel: it is ordered, it
+  // survives an unreachable app, and the host already polls it. Separate the
+  // protocol lines from ordinary output so the UI advances during the run rather
+  // than only once the command exits.
+  const drainRuntimeEvents = async (chunk: string) => {
+    const lines = (pendingLine + chunk).split("\n");
+    pendingLine = lines.pop() ?? "";
+    const logLines: string[] = [];
 
-    const message = await findTaskMessage(input.messageId);
-    if (message?.kind === "initial" || message?.sequence === 0) {
-      await setTaskAgentResponse(input.taskId, input.payload.text, timestamp);
+    for (const line of lines) {
+      if (!isRuntimeEventLine(line)) {
+        logLines.push(line);
+        continue;
+      }
+
+      const envelope = parseRuntimeEventLine(line);
+
+      if (!envelope) {
+        op.warn("discarded malformed runtime event line");
+        continue;
+      }
+
+      const outcome = await ingestRuntimeEvent(envelope);
+
+      if (outcome?.result) {
+        runResult = outcome.result;
+      }
+    }
+
+    return logLines.length > 0 ? `${logLines.join("\n")}\n` : "";
+  };
+
+  const publishLog = async (chunk: string) => {
+    if (!chunk) {
+      return;
+    }
+
+    await appendTaskMessageLog(messageId, chunk);
+    await SandboxEvents.publish({
+      messageId,
+      payload: {
+        chunk,
+        stream: "output",
+      },
+      taskId,
+      type: "log",
+    });
+  };
+
+  const publishOutput = async (output: string) => {
+    if (output === lastOutput) {
+      return;
+    }
+
+    const rawChunk = output.startsWith(lastOutput) ? output.slice(lastOutput.length) : output;
+    lastOutput = output;
+
+    if (!rawChunk) {
+      return;
+    }
+
+    await publishLog(await drainRuntimeEvents(rawChunk));
+  };
+
+  // Output that never ended in a newline is still held back in the line buffer,
+  // so flush it once the command is done rather than dropping it.
+  const flushPendingOutput = async () => {
+    if (!pendingLine) {
+      return;
+    }
+
+    await publishLog(await drainRuntimeEvents("\n"));
+  };
+
+  await SandboxRuntimeState.touchHeartbeat(taskId);
+
+  try {
+    backgroundCommand = await sandbox.startBackgroundCommand(command, {
+      cwd,
+      envVars,
+      timeoutSeconds: timeout,
+    });
+
+    for (;;) {
+      await assertTaskNotCancelled(taskId);
+
+      if (timeout > 0 && Date.now() - startedAt >= timeout * 1_000) {
+        throw new Error(`Background command timed out after ${timeout} seconds.`);
+      }
+
+      const state = await sandbox.getBackgroundCommand(backgroundCommand);
+      await publishOutput(state.output);
+      await SandboxRuntimeState.touchHeartbeat(taskId);
+
+      if (typeof state.exitCode === "number") {
+        await flushPendingOutput();
+
+        if (state.exitCode !== 0) {
+          handledFailure = true;
+          const structuredError = extractStructuredCommandError(state.output);
+          op.warn("sandbox background command failed", {
+            durationMs: Date.now() - startedAt,
+            exitCode: state.exitCode,
+            outputChars: state.output.length,
+          });
+          throw new Error(
+            structuredError ||
+              read(state.output) ||
+              `Command failed with exit code ${state.exitCode}.`,
+          );
+        }
+
+        op.info("sandbox background command completed", {
+          durationMs: Date.now() - startedAt,
+          exitCode: state.exitCode,
+          outputChars: state.output.length,
+          hasRunResult: Boolean(runResult),
+        });
+
+        return {
+          exitCode: state.exitCode,
+          output: state.output,
+          runResult,
+        };
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+    }
+  } catch (error) {
+    if (!handledFailure) {
+      op.error("sandbox background command errored", {
+        durationMs: Date.now() - startedAt,
+        error,
+      });
+    }
+    throw error;
+  } finally {
+    if (backgroundCommand) {
+      await sandbox.stopBackgroundCommand(backgroundCommand);
     }
   }
+};
 
-  if (input.type === "tool_call") {
-    await updateMessageStage(input.taskId, input.messageId, formatToolActivity(input.payload));
-  } else if (input.type === "step_start") {
-    await updateMessageStage(input.taskId, input.messageId, "Agent is working");
+/**
+ * Applies one protocol event from the sandbox runtime.
+ *
+ * The runtime delivers every event twice on purpose — once on stdout, which is
+ * ordered and always readable, and once over HTTP where the sandbox can reach
+ * the app — so this is idempotent by design and safe to call for both copies.
+ */
+export const ingestRuntimeEvent = async (envelope: RuntimeEventEnvelope) => {
+  const outcome = await AgentStream.ingest(envelope);
+
+  if (!outcome) {
+    return null;
   }
 
-  await SandboxEvents.publish({
-    messageId: input.messageId,
-    payload: input.payload,
-    taskId: input.taskId,
-    type: input.type,
-  });
-  await detectArtifacts(input.taskId, input.messageId, input.payload);
+  switch (envelope.type) {
+    case "run_started": {
+      await updateMessageStage(envelope.taskId, envelope.messageId, "Agent is working");
+      break;
+    }
+
+    case "tool_start": {
+      await updateMessageStage(
+        envelope.taskId,
+        envelope.messageId,
+        formatToolActivity(envelope.payload),
+      );
+      await SandboxEvents.publish({
+        messageId: envelope.messageId,
+        payload: envelope.payload,
+        taskId: envelope.taskId,
+        type: "tool_call",
+      });
+      break;
+    }
+
+    case "token_usage": {
+      // Broadcast only. The authoritative, billable usage is reconciled from
+      // the usage log the runtime writes when the run finishes.
+      SandboxEvents.broadcast({
+        messageId: envelope.messageId,
+        payload: envelope.payload,
+        taskId: envelope.taskId,
+        type: "token_usage",
+      });
+      break;
+    }
+
+    case "tool_end": {
+      await SandboxEvents.publish({
+        messageId: envelope.messageId,
+        payload: envelope.payload,
+        taskId: envelope.taskId,
+        type: "tool_result",
+      });
+      await detectArtifacts(envelope.taskId, envelope.messageId, envelope.payload);
+      break;
+    }
+
+    default:
+      break;
+  }
+
+  return outcome;
 };
 
 const detectArtifacts = async (taskId: string, messageId: string, payload: JsonObject) => {

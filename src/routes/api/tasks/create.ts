@@ -52,7 +52,7 @@ export const Route = createFileRoute("/api/tasks/create")({
 
           await uploadTaskAttachments(formData, draft.task.id, draft.messageId);
 
-          void unwrap(Project.queueTaskMessageForTask(draft.task.id, draft.messageId, prompt));
+          await unwrap(Project.queueTaskMessageForTask(draft.task.id, draft.messageId, prompt));
 
           return Response.json(draft.task);
         } catch (error) {

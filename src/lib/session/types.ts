@@ -1,19 +1,30 @@
 export type EventType =
-  | "heartbeat"
-  | "token"
-  | "tool_call"
-  | "step_start"
-  | "step_finish"
-  | "tool_result"
-  | "git_sync"
+  /**
+   * The agent's text, as ordered blocks. Broadcast only — its durable home is
+   * the message record, so it never appears in event history.
+   */
+  | "agent_text"
+  /**
+   * The model's thinking, as ordered blocks. Broadcast only, and unlike
+   * `agent_text` it has no durable home at all — it exists to show live
+   * progress and is gone on reload by design.
+   */
+  | "agent_reasoning"
+  | "artifact"
+  | "child_task_update"
   | "error"
   | "execution_complete"
-  | "artifact"
-  | "push_complete"
-  | "push_error"
-  | "user_message"
+  | "heartbeat"
+  | "log"
+  | "prompt_dispatched"
   | "prompt_queued"
-  | "prompt_dispatched";
+  | "sandbox_status"
+  | "task_stage"
+  /** Running token totals. Broadcast only — billed usage is reconciled separately. */
+  | "token_usage"
+  | "tool_call"
+  | "tool_result"
+  | "user_message";
 
 export type SandboxStatus =
   | "pending"

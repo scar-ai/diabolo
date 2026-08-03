@@ -1,6 +1,6 @@
-import { OPENAI_CODEX_RESPONSES_PROVIDER_ID } from "@/lib/opencode/config";
+import { DEFAULT_CODEX_MODEL, OPENAI_CODEX_RESPONSES_PROVIDER_ID } from "@/lib/opencode/constants";
 
-export const DEFAULT_CODEX_MODEL = "gpt-5-codex";
+export { DEFAULT_CODEX_MODEL };
 const DEFAULT_MANUAL_BASE_URL = "https://api.openai.com/v1";
 
 export type ProviderDraft = {

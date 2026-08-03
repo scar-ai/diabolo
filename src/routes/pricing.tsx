@@ -1,6 +1,8 @@
 import { RiArrowRightLine, RiCheckLine, RiCloseLine, RiGithubFill } from "@remixicon/react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 
+import { BILLING_PLANS, type PaidBillingPlanId } from "@/lib/billing/plans";
+
 export const Route = createFileRoute("/pricing")({
   component: PricingPage,
 });
@@ -125,9 +127,11 @@ function PricingPage() {
             style={{ borderLeft: `1px solid ${BORDER_LIGHT}` }}
           >
             <PricingCard
-              name="Free"
-              tagline="Try it out"
-              cta="Get started"
+              name={BILLING_PLANS.free.name}
+              tagline={BILLING_PLANS.free.description}
+              price={BILLING_PLANS.free.price}
+              interval={BILLING_PLANS.free.interval}
+              cta={BILLING_PLANS.free.cta}
               ctaHref="/login"
               highlight={false}
               features={[
@@ -150,10 +154,12 @@ function PricingPage() {
               ]}
             />
             <PricingCard
-              name="Pro"
-              tagline="For small teams"
-              cta="Get started"
-              ctaHref="/login"
+              name={BILLING_PLANS.pro.name}
+              tagline={BILLING_PLANS.pro.description}
+              price={BILLING_PLANS.pro.price}
+              interval={BILLING_PLANS.pro.interval}
+              cta={BILLING_PLANS.pro.cta}
+              planId="pro"
               highlight={true}
               features={[
                 { label: "10 concurrent tasks", included: true },
@@ -174,10 +180,12 @@ function PricingPage() {
               ]}
             />
             <PricingCard
-              name="Max"
-              tagline="For growing orgs"
-              cta="Get started"
-              ctaHref="/login"
+              name={BILLING_PLANS.max.name}
+              tagline={BILLING_PLANS.max.description}
+              price={BILLING_PLANS.max.price}
+              interval={BILLING_PLANS.max.interval}
+              cta={BILLING_PLANS.max.cta}
+              planId="max"
               highlight={false}
               features={[
                 { label: "20 concurrent tasks", included: true },
@@ -453,16 +461,22 @@ function PricingPage() {
 function PricingCard({
   name,
   tagline,
+  price,
+  interval,
   cta,
   ctaHref,
+  planId,
   highlight,
   features,
   limits,
 }: {
   name: string;
   tagline: string;
+  price: string;
+  interval: string | null;
   cta: string;
-  ctaHref: string;
+  ctaHref?: "/login";
+  planId?: PaidBillingPlanId;
   highlight: boolean;
   features: { label: string; included: boolean }[];
   limits: { key: string; value: string }[];
@@ -517,6 +531,25 @@ function PricingCard({
           )}
         </div>
         <p style={{ fontSize: 13, color: TEXT_MUTED }}>{tagline}</p>
+      </div>
+
+      <div className="mb-6 flex items-end gap-2">
+        <span
+          style={{
+            color: TEXT_PRIMARY,
+            fontFamily: "var(--font-serif)",
+            fontSize: "clamp(2rem, 4vw, 2.75rem)",
+            fontWeight: 400,
+            lineHeight: 1,
+          }}
+        >
+          {price}
+        </span>
+        {interval && (
+          <span className="pb-1" style={{ color: TEXT_MUTED, fontSize: 13 }}>
+            / {interval}
+          </span>
+        )}
       </div>
 
       {/* Limits at a glance */}
@@ -575,18 +608,36 @@ function PricingCard({
       </ul>
 
       {/* CTA */}
-      <Link
-        to={ctaHref as "/login"}
-        className="flex items-center justify-center gap-2 rounded-full px-5 py-2.5 text-sm font-medium transition-opacity hover:opacity-80"
-        style={
-          highlight
-            ? { background: LIGHT, color: "#0e0e0e" }
-            : { background: "rgba(255,255,255,0.07)", color: TEXT_PRIMARY }
-        }
-      >
-        {cta}
-        <RiArrowRightLine className="h-3.5 w-3.5" />
-      </Link>
+      {planId ? (
+        <form action="/api/billing/checkout" method="post">
+          <input type="hidden" name="planId" value={planId} />
+          <button
+            className="flex w-full items-center justify-center gap-2 rounded-full px-5 py-2.5 text-sm font-medium transition-opacity hover:opacity-80"
+            style={
+              highlight
+                ? { background: LIGHT, color: "#0e0e0e" }
+                : { background: "rgba(255,255,255,0.07)", color: TEXT_PRIMARY }
+            }
+            type="submit"
+          >
+            {cta}
+            <RiArrowRightLine className="h-3.5 w-3.5" />
+          </button>
+        </form>
+      ) : (
+        <Link
+          to={ctaHref ?? "/login"}
+          className="flex items-center justify-center gap-2 rounded-full px-5 py-2.5 text-sm font-medium transition-opacity hover:opacity-80"
+          style={
+            highlight
+              ? { background: LIGHT, color: "#0e0e0e" }
+              : { background: "rgba(255,255,255,0.07)", color: TEXT_PRIMARY }
+          }
+        >
+          {cta}
+          <RiArrowRightLine className="h-3.5 w-3.5" />
+        </Link>
+      )}
     </div>
   );
 }

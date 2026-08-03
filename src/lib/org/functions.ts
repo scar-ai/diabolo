@@ -31,7 +31,7 @@ const memberActionInputSchema = z.object({
 
 export const $createOrg = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .inputValidator((data) => createOrgInputSchema.parse(data))
+  .validator((data) => createOrgInputSchema.parse(data))
   .handler(async ({ context, data }) =>
     unwrap(Org.createOrg({ name: data.name, userId: context.user.id })),
   );
@@ -63,7 +63,7 @@ export const $getOrganisationProviderUsageSummary = createServerFn({ method: "GE
 
 export const $inviteMember = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .inputValidator((data) => inviteMemberInputSchema.parse(data))
+  .validator((data) => inviteMemberInputSchema.parse(data))
   .handler(async ({ context, data }) =>
     unwrap(
       Org.inviteMember({
@@ -76,21 +76,21 @@ export const $inviteMember = createServerFn({ method: "POST" })
 
 export const $acceptInvite = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .inputValidator((data) => inviteIdInputSchema.parse(data))
+  .validator((data) => inviteIdInputSchema.parse(data))
   .handler(async ({ context, data }) =>
     unwrap(Org.acceptInvite({ inviteId: data.inviteId, userId: context.user.id })),
   );
 
 export const $declineInvite = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .inputValidator((data) => inviteIdInputSchema.parse(data))
+  .validator((data) => inviteIdInputSchema.parse(data))
   .handler(async ({ context, data }) =>
     unwrap(Org.declineInvite({ inviteId: data.inviteId, userId: context.user.id })),
   );
 
 export const $cancelInvite = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .inputValidator((data) => cancelInviteInputSchema.parse(data))
+  .validator((data) => cancelInviteInputSchema.parse(data))
   .handler(async ({ context, data }) =>
     unwrap(
       Org.cancelInvite({ inviteId: data.inviteId, orgId: data.orgId, userId: context.user.id }),
@@ -99,7 +99,7 @@ export const $cancelInvite = createServerFn({ method: "POST" })
 
 export const $kickMember = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .inputValidator((data) => memberActionInputSchema.parse(data))
+  .validator((data) => memberActionInputSchema.parse(data))
   .handler(async ({ context, data }) =>
     unwrap(
       Org.kickMember({
@@ -112,7 +112,7 @@ export const $kickMember = createServerFn({ method: "POST" })
 
 export const $promoteMember = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .inputValidator((data) => memberActionInputSchema.parse(data))
+  .validator((data) => memberActionInputSchema.parse(data))
   .handler(async ({ context, data }) =>
     unwrap(
       Org.promoteMember({

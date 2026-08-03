@@ -832,7 +832,9 @@ export namespace Project {
         fromPromise(
           Promise.all(
             R.map(values, (value) =>
-              RUNNING_TASK_STATUSES.has(value.status) ? syncTaskRuntime(value) : value,
+              RUNNING_TASK_STATUSES.has(value.status)
+                ? syncTaskRuntime(value)
+                : Promise.resolve(value),
             ),
           ),
         ),
@@ -853,7 +855,9 @@ export namespace Project {
         fromPromise(
           Promise.all(
             R.map(values, (value) =>
-              RUNNING_TASK_STATUSES.has(value.status) ? syncTaskSummaryRuntime(value) : value,
+              RUNNING_TASK_STATUSES.has(value.status)
+                ? syncTaskSummaryRuntime(value)
+                : Promise.resolve(value),
             ),
           ),
         ),

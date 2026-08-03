@@ -126,7 +126,7 @@ export function TaskToolCallList({ runtimeEvents }: { runtimeEvents: ParsedTaskE
         const isRunning = !isError && !isComplete;
 
         return (
-          <div key={toolCall.callId} className="rounded-xl border border-border/70 bg-muted/25 p-3">
+          <div key={toolCall.callId} className="rounded-xl bg-foreground/[0.03] p-3">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium text-foreground">
@@ -140,10 +140,10 @@ export function TaskToolCallList({ runtimeEvents }: { runtimeEvents: ParsedTaskE
 
               <span
                 className={cn(
-                  "inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[11px] font-medium",
-                  isError && "border-destructive/30 bg-destructive/8 text-destructive",
-                  isComplete && "border-emerald-500/25 bg-emerald-500/10 text-emerald-700",
-                  isRunning && "border-sky-500/25 bg-sky-500/10 text-sky-700",
+                  "inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] font-medium",
+                  isError && "bg-destructive/10 text-destructive",
+                  isComplete && "bg-success/10 text-success",
+                  isRunning && "bg-info/10 text-info",
                 )}
               >
                 {isError ? (

@@ -143,6 +143,39 @@
   background-color: #101010;
 }
 
+/* Agent status — light sweeping across the line the agent is working on now */
+@keyframes status-shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+.status-shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--muted-foreground) 0%,
+    var(--foreground) 40%,
+    var(--foreground) 60%,
+    var(--muted-foreground) 100%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: status-shimmer 3.5s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .status-shimmer {
+    animation: none;
+    background: none;
+    color: var(--foreground);
+  }
+}
+
 /* Thinking wave — opacity ripple across letters */
 @keyframes wave {
   0%,

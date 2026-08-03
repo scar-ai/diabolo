@@ -1,48 +1,65 @@
 import { ClientTimeText } from "@/components/app/client-time";
-import { Markdown } from "@/components/app/markdown";
-import type { ParsedTaskArtifact, ParsedTaskEvent } from "@/lib/project/task-detail-selector";
+import type {
+  ParsedAgentMessage,
+  ParsedTaskArtifact,
+  ParsedTaskEvent,
+} from "@/lib/project/task-detail-selector";
 
+import { AgentTextStream } from "./agent-text-stream";
 import { TaskActivityPanel } from "./task-activity-panel";
 import { TaskArtifactList } from "./task-artifact-list";
 
 type AgentMessageContentProps = {
   artifacts: ParsedTaskArtifact[];
-  combinedText: string;
   completedAt?: Date | string | null;
   error?: string | null;
   isRunning: boolean;
   logs?: string | null;
+  messageId?: string | null;
+  responseMessages: ParsedAgentMessage[];
   runtimeEvents: ParsedTaskEvent[];
   stage?: string | null;
   startedAt?: Date | string | null;
+  taskId: string;
 };
 
 export function AgentMessageContent({
   artifacts,
-  combinedText,
   completedAt,
   error,
   isRunning,
   logs,
+  messageId,
+  responseMessages,
   runtimeEvents,
   stage,
   startedAt,
+  taskId,
 }: AgentMessageContentProps) {
+  // A finished run with no text at all is a failure worth showing: without this
+  // the bubble renders blank and looks like the UI dropped the response.
+  const hasNoResponse =
+    !isRunning && !error && !responseMessages.some((message) => message.text.trim());
+
   return (
     <div className="flex w-full flex-col gap-3">
       <TaskActivityPanel
         error={error}
         isRunning={isRunning}
         logs={logs}
+        messageId={messageId}
         runtimeEvents={runtimeEvents}
         stage={stage}
         startedAt={startedAt}
+        taskId={taskId}
       />
 
-      {combinedText ? (
-        <div className="text-sm leading-relaxed text-foreground">
-          <Markdown content={combinedText} />
-        </div>
+      <AgentTextStream isRunning={isRunning} messages={responseMessages} />
+
+      {hasNoResponse ? (
+        <p className="text-sm text-muted-foreground italic">
+          The agent finished without returning a message.
+        </p>
       ) : null}
 
       {error ? (

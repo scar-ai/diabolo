@@ -123,9 +123,8 @@ export function ProviderUsageChart({
             <svg
               viewBox={`0 0 ${chartWidth} ${chartHeight}`}
               className="h-56 w-full overflow-visible"
-              role="img"
-              aria-label={`${title} token usage over time`}
             >
+              <title>{`${title} token usage over time`}</title>
               {[0, 0.5, 1].map((ratio) => {
                 const y = (1 - ratio) * chartHeight;
                 return (

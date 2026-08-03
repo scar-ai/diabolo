@@ -102,6 +102,8 @@ export const userLlmProvider = pgTable(
     providerBaseUrl: text("provider_base_url"),
     providerModel: text("provider_model").notNull(),
     providerApiKey: text("provider_api_key"),
+    opencodeAuth: text("opencode_auth"),
+    opencodeAuthSandboxId: text("opencode_auth_sandbox_id"),
     oauthAccessToken: text("oauth_access_token"),
     oauthRefreshToken: text("oauth_refresh_token"),
     oauthAccessTokenExpiresAt: timestamp("oauth_access_token_expires_at"),

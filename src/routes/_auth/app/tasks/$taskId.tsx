@@ -155,7 +155,7 @@ function TaskDetailPage() {
   const taskTitle = task?.title ?? task?.repoName ?? "Task";
   const _projectName = projectQuery.data?.name ?? null;
   const canSendFollowUp = Boolean(
-    isCompleted && followUpInput.trim().length >= 10 && !followUpMutation.isPending,
+    isCompleted && followUpInput.trim().length > 0 && !followUpMutation.isPending,
   );
 
   const scrollToBottom = useCallback(() => {

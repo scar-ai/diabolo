@@ -6,17 +6,21 @@ import { authMiddleware } from "@/lib/auth/middleware";
 import { db } from "@/lib/db";
 import { userLlmProvider } from "@/lib/db/schema/schema";
 import {
-  completeCodexLogin,
-  ensureCodexSharedAuthProvider,
   disconnectCodexProvider,
-  getUserSharedCodexAuthState,
+  ensureCodexSharedAuthProvider,
   getCodexSharedAuthProviderId,
+  getUserSharedCodexAuthState,
   isCodexProvider,
   listAvailableCodexModels,
-  startCodexCallbackServer,
+  pollCodexLogin,
   startCodexLogin,
 } from "@/lib/opencode/codex";
-import { OPENAI_CODEX_RESPONSES_PROVIDER_ID, normalizeProviderApiKey } from "@/lib/opencode/config";
+import { normalizeProviderApiKey } from "@/lib/opencode/config";
+import {
+  DEFAULT_CODEX_MODEL,
+  isCodexModelOption,
+  OPENAI_CODEX_RESPONSES_PROVIDER_ID,
+} from "@/lib/opencode/constants";
 import { Org } from "@/lib/org";
 import { unwrap } from "@/lib/result";
 import { listUserLlmProviders } from "@/lib/user/data";
@@ -83,24 +87,14 @@ const normalizeProviders = (
       (provider) =>
         provider.providerKind === "codex" &&
         provider.userId === input.userId &&
-        (provider.oauthAccessToken ||
-          provider.oauthRefreshToken ||
-          provider.oauthDeviceCode ||
-          provider.oauthUserCode ||
-          provider.oauthVerificationUri ||
-          provider.oauthVerificationUriComplete ||
+        (provider.opencodeAuth ||
+          provider.opencodeAuthSandboxId ||
           provider.oauthAuthenticatedAt ||
           provider.oauthError),
     )
     .sort((left, right) => {
-      const leftScore =
-        (left.oauthRefreshToken ? 4 : 0) +
-        (left.oauthAccessToken ? 2 : 0) +
-        (left.oauthDeviceCode ? 1 : 0);
-      const rightScore =
-        (right.oauthRefreshToken ? 4 : 0) +
-        (right.oauthAccessToken ? 2 : 0) +
-        (right.oauthDeviceCode ? 1 : 0);
+      const leftScore = (left.opencodeAuth ? 2 : 0) + (left.opencodeAuthSandboxId ? 1 : 0);
+      const rightScore = (right.opencodeAuth ? 2 : 0) + (right.opencodeAuthSandboxId ? 1 : 0);
 
       if (leftScore !== rightScore) {
         return rightScore - leftScore;
@@ -148,6 +142,8 @@ const normalizeProviders = (
         id: provider.id,
         isDefault: provider.scope === "personal" ? provider.isDefault : false,
         name: provider.name.trim(),
+        opencodeAuth: sourceProvider?.opencodeAuth ?? null,
+        opencodeAuthSandboxId: sourceProvider?.opencodeAuthSandboxId ?? null,
         oauthAccessToken: sourceProvider?.oauthAccessToken ?? null,
         oauthAccessTokenExpiresAt: sourceProvider?.oauthAccessTokenExpiresAt ?? null,
         oauthAuthenticatedAt: sourceProvider?.oauthAuthenticatedAt ?? null,
@@ -166,7 +162,9 @@ const normalizeProviders = (
         providerBaseUrl: null,
         providerId: OPENAI_CODEX_RESPONSES_PROVIDER_ID,
         providerKind: "codex" as const,
-        providerModel: provider.providerModel.trim(),
+        providerModel: isCodexModelOption(provider.providerModel.trim())
+          ? provider.providerModel.trim()
+          : DEFAULT_CODEX_MODEL,
         scope: provider.scope,
         userId: input.userId,
       };
@@ -207,6 +205,8 @@ const normalizeProviders = (
       oauthUserCode: null,
       oauthVerificationUri: null,
       oauthVerificationUriComplete: null,
+      opencodeAuth: null,
+      opencodeAuthSandboxId: null,
       providerApiKey: normalizedApiKey,
       providerBaseUrl: normalizedBaseUrl,
       providerId: provider.providerId.trim(),
@@ -228,6 +228,8 @@ const getProviderWriteValues = (provider: ReturnType<typeof normalizeProviders>[
   isDefault: provider.isDefault,
   name: provider.name,
   orgId: provider.orgId,
+  opencodeAuth: provider.opencodeAuth,
+  opencodeAuthSandboxId: provider.opencodeAuthSandboxId,
   oauthAccessToken: provider.oauthAccessToken,
   oauthAccessTokenExpiresAt: provider.oauthAccessTokenExpiresAt,
   oauthAuthenticatedAt: provider.oauthAuthenticatedAt,
@@ -258,9 +260,9 @@ export const $listUserLlmProviders = createServerFn({ method: "GET" })
     return providers.map((provider) => ({
       authStatus:
         provider.providerKind === "codex"
-          ? provider.oauthAccessToken && provider.oauthAuthenticatedAt
+          ? provider.opencodeAuth && provider.oauthAuthenticatedAt
             ? "connected"
-            : provider.oauthDeviceCode
+            : provider.opencodeAuthSandboxId
               ? "pending"
               : "disconnected"
           : "connected",
@@ -280,7 +282,10 @@ export const $listUserLlmProviders = createServerFn({ method: "GET" })
         provider.providerKind === "codex"
           ? OPENAI_CODEX_RESPONSES_PROVIDER_ID
           : provider.providerId,
-      providerModel: provider.providerModel,
+      providerModel:
+        provider.providerKind === "codex" && !isCodexModelOption(provider.providerModel)
+          ? DEFAULT_CODEX_MODEL
+          : provider.providerModel,
     }));
   });
 
@@ -293,11 +298,9 @@ export const $getCodexSharedLoginStatus = createServerFn({ method: "GET" })
 
     return {
       authStatus:
-        isCodexProvider(provider) &&
-        sharedState.oauthAccessToken &&
-        sharedState.oauthAuthenticatedAt
+        isCodexProvider(provider) && sharedState.opencodeAuth && sharedState.oauthAuthenticatedAt
           ? "connected"
-          : sharedState.oauthDeviceCode
+          : sharedState.opencodeAuthSandboxId
             ? "pending"
             : "disconnected",
       codexAuthenticatedAt: sharedState.oauthAuthenticatedAt?.toISOString() ?? null,
@@ -318,7 +321,7 @@ export const $getUserProviderUsageSummary = createServerFn({ method: "GET" })
 
 export const $saveUserLlmProviders = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .inputValidator((data) => saveUserLlmProvidersInputSchema.parse(data))
+  .validator((data) => saveUserLlmProvidersInputSchema.parse(data))
   .handler(async ({ context, data }) => {
     try {
       const membership = await unwrap(Org.getMembershipForUser(context.user.id));
@@ -399,27 +402,20 @@ export const $startCodexDeviceAuthorization = createServerFn({ method: "POST" })
   .handler(async ({ context }) => {
     try {
       const provider = await ensureCodexSharedAuthProvider(context.user.id);
-      const result = await startCodexLogin(provider);
-      const callbackServerStarted = await startCodexCallbackServer(provider.id);
-      return { ...result, callbackServerStarted };
+      return startCodexLogin(provider);
     } catch (error) {
       throw toSerializableError(error, "Failed to start Codex login.");
     }
   });
 
-const completeCodexLoginInputSchema = z.object({
-  callbackUrl: z.string().min(1),
-});
-
-export const $completeCodexLogin = createServerFn({ method: "POST" })
+export const $pollCodexDeviceAuthorization = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .inputValidator((data) => completeCodexLoginInputSchema.parse(data))
-  .handler(async ({ context, data }) => {
+  .handler(async ({ context }) => {
     try {
       const provider = await ensureCodexSharedAuthProvider(context.user.id);
-      return completeCodexLogin(provider, data.callbackUrl);
+      return pollCodexLogin(provider);
     } catch (error) {
-      throw toSerializableError(error, "Failed to complete Codex login.");
+      throw toSerializableError(error, "Failed to check Codex login.");
     }
   });
 
