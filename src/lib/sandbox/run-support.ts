@@ -379,7 +379,10 @@ export const runSandboxBackgroundCommand = async (
   };
 
   const publishOutput = async (output: string) => {
-    if (output === lastOutput) {
+    // A poll that came back empty failed to read the logs; it does not mean the
+    // command produced nothing. Taking it at face value would rewind the cursor
+    // and republish the whole run's output on the next successful read.
+    if (!output || output === lastOutput) {
       return;
     }
 

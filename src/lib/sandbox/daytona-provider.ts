@@ -120,18 +120,35 @@ const wrapSandbox = (sandbox: Awaited<ReturnType<Daytona["create"]>>): Sandbox.S
       throw error;
     }
 
-    if (typeof state.exitCode !== "number") {
-      return {
-        output: "",
-      };
+    // Logs are read on every poll, not just once the command exits. The runtime
+    // reports what the agent is doing on stdout as it happens, so waiting for an
+    // exit code here would hold back the whole run's events and deliver them in
+    // a single burst at the end.
+    let logs;
+
+    try {
+      logs = await sandbox.process.getSessionCommandLogs(command.sessionId, command.commandId);
+    } catch (error) {
+      if (typeof state.exitCode !== "number" && error instanceof DaytonaConnectionTimeoutError) {
+        log.debug("background command log poll timed out; retrying", {
+          commandId: command.commandId,
+          sandboxId: sandbox.id,
+          sessionId: command.sessionId,
+        });
+
+        // Logs come back cumulative, so the next poll picks up whatever this
+        // one missed. Only the final read has to succeed.
+        return {
+          output: "",
+        };
+      }
+
+      throw error;
     }
 
-    const logs = await sandbox.process.getSessionCommandLogs(command.sessionId, command.commandId);
+    const output = `${logs.stdout ?? ""}${logs.stderr ?? ""}`;
 
-    return {
-      exitCode: state.exitCode,
-      output: `${logs.stdout}${logs.stderr}`,
-    };
+    return typeof state.exitCode === "number" ? { exitCode: state.exitCode, output } : { output };
   },
   async getWorkspaceRoot() {
     return (await sandbox.getWorkDir()) ?? (await sandbox.getUserHomeDir()) ?? ".";
