@@ -544,7 +544,11 @@ export function AppSidebar({ user }: { user: AppUser }) {
                 <BuildingIcon className="size-4 shrink-0" aria-hidden="true" />
                 Organisation
               </Link>
-              <Link to="/app/settings" className={navLinkClass(isSettingsActive)}>
+              <Link
+                to="/app/settings"
+                search={selectedProject ? { projectId: selectedProject.id } : {}}
+                className={navLinkClass(isSettingsActive)}
+              >
                 <SettingsIcon className="size-4 shrink-0" aria-hidden="true" />
                 Settings
               </Link>
