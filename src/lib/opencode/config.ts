@@ -1,26 +1,12 @@
 import "@tanstack/react-start/server-only";
-import { ensureCodexAccessToken, isCodexProvider } from "./codex";
+import { getCodexOpenCodeAuth, isCodexProvider } from "./codex";
+import { OPENAI_CODEX_RESPONSES_PROVIDER_ID } from "./constants";
 
 const CUSTOM_OPENCODE_PROVIDER_PACKAGE = "@ai-sdk/openai-compatible";
 const CUSTOM_OPENCODE_API_KEY_ENV_VAR = "OPENCODE_PROVIDER_API_KEY";
-const OPENCODE_LOCAL_PROXY_BASE_URL = "http://127.0.0.1:4312";
-export const OPENAI_CODEX_RESPONSES_PROVIDER_ID = "openai-codex-responses";
 const OPENROUTER_BASE_URL_PATTERN = /^https?:\/\/(?:www\.)?openrouter\.ai\/api(?:\/v\d+)?\/?$/i;
 
 export type SavedOpenCodeProvider = {
-  oauthAccessToken?: string | null;
-  oauthAccessTokenExpiresAt?: Date | null;
-  oauthAuthenticatedAt?: Date | null;
-  oauthDeviceCode?: string | null;
-  oauthDeviceCodeExpiresAt?: Date | null;
-  oauthError?: string | null;
-  oauthPollingIntervalSeconds?: string | null;
-  oauthRefreshToken?: string | null;
-  oauthRefreshTokenExpiresAt?: Date | null;
-  oauthScope?: string | null;
-  oauthUserCode?: string | null;
-  oauthVerificationUri?: string | null;
-  oauthVerificationUriComplete?: string | null;
   id?: string | null;
   name?: string | null;
   providerApiKey?: string | null;
@@ -33,6 +19,7 @@ export type SavedOpenCodeProvider = {
 export type OpenCodeConfig = {
   apiKey: string;
   apiKeyEnvVar: string;
+  authJson?: string;
   baseUrl: string;
   model: string;
   providerId: string;
@@ -113,27 +100,20 @@ export const resolveOpenCodeConfig = async (input: {
 
   if (providerKind === "codex") {
     const codexProviderId = OPENAI_CODEX_RESPONSES_PROVIDER_ID;
-    const apiKey = await ensureCodexAccessToken({
+    const authJson = await getCodexOpenCodeAuth({
       id: selectedProviderId,
-      oauthAccessToken: input.provider.oauthAccessToken ?? null,
-      oauthAccessTokenExpiresAt: input.provider.oauthAccessTokenExpiresAt ?? null,
-      oauthRefreshToken: input.provider.oauthRefreshToken ?? null,
-      oauthRefreshTokenExpiresAt: input.provider.oauthRefreshTokenExpiresAt ?? null,
-      oauthScope: input.provider.oauthScope ?? null,
       providerKind: "codex",
     });
-    const runtimeBaseUrl = OPENCODE_LOCAL_PROXY_BASE_URL;
 
     return {
-      apiKey,
+      apiKey: "",
       apiKeyEnvVar: CUSTOM_OPENCODE_API_KEY_ENV_VAR,
-      baseUrl: runtimeBaseUrl,
+      authJson,
+      baseUrl: "https://api.openai.com/v1",
       model: normalizeOpenCodeModelForProvider(model, codexProviderId),
       providerId: codexProviderId,
       providerKind,
       providerName: trimToNull(input.provider.name) || codexProviderId,
-      runtimeApiKey: apiKey,
-      runtimeBaseUrl,
       selectedProviderId,
     };
   }
@@ -161,7 +141,6 @@ export const resolveOpenCodeConfig = async (input: {
     providerId,
     providerKind,
     providerName: trimToNull(input.provider.name) || providerId,
-    runtimeBaseUrl: OPENCODE_LOCAL_PROXY_BASE_URL,
     selectedProviderId,
   };
 };
@@ -194,20 +173,24 @@ export const buildOpenCodeConfigContent = (config: OpenCodeConfig) => {
       skill: "allow",
       webfetch: "allow",
     },
-    provider: {
-      [config.providerId]: {
-        models: {
-          [providerScopedModelId]: {},
-        },
-        name: config.providerName,
-        npm: CUSTOM_OPENCODE_PROVIDER_PACKAGE,
-        options: {
-          apiKey: `{env:${config.apiKeyEnvVar}}`,
-          baseURL: config.runtimeBaseUrl ?? config.baseUrl,
-          setCacheKey: true,
-        },
-      },
-    },
+    ...(config.providerKind === "manual"
+      ? {
+          provider: {
+            [config.providerId]: {
+              models: {
+                [providerScopedModelId]: {},
+              },
+              name: config.providerName,
+              npm: CUSTOM_OPENCODE_PROVIDER_PACKAGE,
+              options: {
+                apiKey: `{env:${config.apiKeyEnvVar}}`,
+                baseURL: config.runtimeBaseUrl ?? config.baseUrl,
+                setCacheKey: true,
+              },
+            },
+          },
+        }
+      : {}),
   };
 
   return JSON.stringify(output);

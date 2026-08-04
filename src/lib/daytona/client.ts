@@ -1,8 +1,10 @@
 import "@tanstack/react-start/server-only";
-import { Daytona, DaytonaNotFoundError } from "@daytonaio/sdk";
+import { Daytona, DaytonaNotFoundError } from "@daytona/sdk";
 
 import { env } from "@/env/server";
 import { formatMissingBrowserSnapshotError } from "@/lib/daytona/snapshot";
+
+const DAYTONA_REQUEST_TIMEOUT_MS = 30_000;
 
 export const getDaytonaClient = () => {
   if (!env.DAYTONA_API_KEY) {
@@ -12,6 +14,7 @@ export const getDaytonaClient = () => {
   return new Daytona({
     apiKey: env.DAYTONA_API_KEY,
     apiUrl: env.DAYTONA_API_URL || undefined,
+    requestTimeoutMs: DAYTONA_REQUEST_TIMEOUT_MS,
     target: env.DAYTONA_TARGET || undefined,
   });
 };

@@ -549,7 +549,7 @@ function OrganisationPage() {
                   {projectInvites.map((invite) => (
                     <div
                       key={invite.id}
-                      className="flex items-center gap-3 rounded-lg border bg-muted/30 px-4 py-3"
+                      className="flex items-center gap-3 rounded-2xl border bg-muted/30 px-4 py-3"
                     >
                       <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted">
                         <UserPlusIcon className="size-4 text-muted-foreground" />
@@ -657,7 +657,7 @@ function OrganisationPage() {
                 {invites.map((invite) => (
                   <div
                     key={invite.id}
-                    className="flex items-center gap-3 rounded-lg border bg-muted/30 px-4 py-3"
+                    className="flex items-center gap-3 rounded-2xl border bg-muted/30 px-4 py-3"
                   >
                     <BuildingIcon className="size-5 shrink-0 text-muted-foreground" />
                     <div className="min-w-0 flex-1">
@@ -705,7 +705,7 @@ function OrganisationPage() {
                 {projectInvites.map((invite) => (
                   <div
                     key={invite.id}
-                    className="flex items-center gap-3 rounded-lg border bg-muted/30 px-4 py-3"
+                    className="flex items-center gap-3 rounded-2xl border bg-muted/30 px-4 py-3"
                   >
                     <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted">
                       <UserPlusIcon className="size-4 text-muted-foreground" />

@@ -20,7 +20,7 @@ const SPAWN_TASK_PACKAGE_JSON = JSON.stringify(
     private: true,
     type: "module",
     dependencies: {
-      "@daytonaio/sdk": "latest",
+      "@daytona/sdk": "latest",
       "@opencode-ai/plugin": "latest",
       zod: "^4.3.6",
     },
@@ -119,6 +119,26 @@ export default {
 };
 `;
 
+const REPORT_PROGRESS_TOOL_CONTENT = String.raw`import { z } from "zod";
+
+export default {
+  description:
+    "Publish a short user-facing summary of your current focus. Call this when starting work and whenever you move to a meaningfully different phase. Report intent and progress, never private reasoning.",
+  args: {
+    summary: z
+      .string()
+      .min(10)
+      .max(180)
+      .describe(
+        "One plain-language sentence describing what you are doing now and why it matters to the task. Do not include hidden reasoning, markdown, or generic filler.",
+      ),
+  },
+  async execute() {
+    return "Progress update published.";
+  },
+};
+`;
+
 const hashSpawnTaskToken = (taskId: string) =>
   createHmac("sha256", env.BETTER_AUTH_SECRET).update(`spawn-task:${taskId}`).digest("hex");
 
@@ -138,12 +158,20 @@ export const verifySpawnTaskToken = (taskId: string, token: string) => {
 export const getSpawnTaskEndpoint = () =>
   new URL("/api/opencode/spawn-task", env.VITE_BASE_URL).toString();
 
+export const buildReportProgressOpenCodeSetupCommand = () =>
+  [
+    'OPENCODE_TOOLS_ROOT="${OPENCODE_TOOLS_ROOT:-$HOME/.config/opencode}"',
+    'mkdir -p "$OPENCODE_TOOLS_ROOT/tools"',
+    writeFileCommand("$OPENCODE_TOOLS_ROOT/tools/report-progress.ts", REPORT_PROGRESS_TOOL_CONTENT),
+  ].join("\n");
+
 export const buildSpawnTaskOpenCodeSetupCommand = () =>
   [
     'OPENCODE_TOOLS_ROOT="${OPENCODE_TOOLS_ROOT:-$HOME/.config/opencode}"',
     'mkdir -p "$OPENCODE_TOOLS_ROOT/tools"',
     writeFileCommand("$OPENCODE_TOOLS_ROOT/package.json", SPAWN_TASK_PACKAGE_JSON),
     writeFileCommand("$OPENCODE_TOOLS_ROOT/tools/spawn-task.ts", SPAWN_TASK_TOOL_CONTENT),
+    buildReportProgressOpenCodeSetupCommand(),
     'GLOBAL_NODE_MODULES="$(npm root -g)"',
     'if [ ! -e "$OPENCODE_TOOLS_ROOT/node_modules" ] && [ -d "$GLOBAL_NODE_MODULES" ]; then ln -s "$GLOBAL_NODE_MODULES" "$OPENCODE_TOOLS_ROOT/node_modules"; fi',
     'if [ ! -d "$OPENCODE_TOOLS_ROOT/node_modules/zod" ]; then echo "Global zod dependency is missing from the Daytona browser snapshot." >&2; exit 1; fi',

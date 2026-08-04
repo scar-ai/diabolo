@@ -14,8 +14,8 @@ import {
   $listAllUserTasks,
   $listProjects,
 } from "./functions";
-import { selectParsedTaskDetail, type TaskDetailResult } from "./task-detail-selector";
-import { selectTaskSummaries, type TaskSummaryResult } from "./task-summary-selector";
+import { selectParsedTaskDetail } from "./task-detail-selector";
+import { selectTaskSummaries } from "./task-summary-selector";
 
 export type { ParsedTaskArtifact, TaskDetailResult } from "./task-detail-selector";
 export type { TaskSummaryResult } from "./task-summary-selector";
@@ -43,6 +43,12 @@ export const serverTimeKeys = {
 export const taskKeys = {
   all: ["tasks"] as const,
   detail: (taskId: string) => [...taskKeys.all, "detail", taskId] as const,
+  /**
+   * Live-only state pushed by the websocket — reasoning and token totals that
+   * are never fetched or persisted. It is a query key purely so components can
+   * subscribe to it the same way they subscribe to everything else.
+   */
+  live: (taskId: string) => [...taskKeys.all, "live", taskId] as const,
   list: (userId: string) => [...taskKeys.all, "list", userId] as const,
   summaryList: (userId: string) => [...taskKeys.all, "summary-list", userId] as const,
 };

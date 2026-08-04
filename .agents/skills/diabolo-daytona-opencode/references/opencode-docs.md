@@ -21,8 +21,9 @@ Use this reference when changing OpenCode config generation, permissions, tools,
 
 - `src/lib/opencode/config.ts` generates a temporary OpenCode config instead of relying on a checked-in `opencode.json`. Preserve that approach unless the repo intentionally moves to committed project config.
 - The generated config already grants `bash`, `edit`, and `webfetch`; update permissions deliberately, because changing them changes what the coding agent can actually do inside the sandbox.
-- `src/lib/sandbox/opencode.ts` exports the generated config through `OPENCODE_CONFIG` and runs `opencode run --format json --model ...`.
-- `src/lib/opencode/config.ts` normalizes model ids to an OpenRouter-scoped format. Keep model handling compatible with the repo's provider assumptions.
+- `src/lib/sandbox/opencode-runtime.ts` exports the generated config through `OPENCODE_CONFIG` and runs the persistent OpenCode server used by task sessions.
+- `src/lib/opencode/config.ts` uses OpenCode's native `openai` provider for Codex and generates custom provider definitions only for API-key providers.
+- `src/lib/opencode/codex.ts` starts OpenCode's built-in headless OAuth flow through the provider auth API in an isolated Daytona sandbox. Do not reimplement OpenAI's OAuth or Codex Responses protocol in the app.
 
 ## Design bias
 

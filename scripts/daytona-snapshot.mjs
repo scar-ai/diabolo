@@ -1,6 +1,23 @@
-import { Daytona, DaytonaNotFoundError } from "@daytonaio/sdk";
+import { Daytona, DaytonaNotFoundError } from "@daytona/sdk";
 
-const SNAPSHOT_VERSION = "v1";
+const SNAPSHOT_VERSION = "v3";
+const OPENCODE_VERSION = "1.18.11";
+
+/**
+ * Resources for sandboxes created from this snapshot.
+ *
+ * Daytona's default is 1 GiB, which the OpenCode server does not survive: it is
+ * OOM-killed shortly after start, which silently kills the whole progress
+ * stream (no agent text, no tool calls) and leaves the run blocked until it
+ * times out. Sandboxes inherit these from the snapshot, so this is the only
+ * place the allocation can be set — `daytona.create` accepts `resources` for
+ * image-based sandboxes only.
+ */
+const SNAPSHOT_RESOURCES = {
+  cpu: 2,
+  disk: 10,
+  memory: 4,
+};
 const DEFAULT_BASE_IMAGE = "node:22-bookworm";
 const SNAPSHOT_READY_TIMEOUT_MS = 15 * 60 * 1000;
 const SNAPSHOT_READY_POLL_MS = 5000;
@@ -29,7 +46,7 @@ const isBuildingState = (state) => {
 };
 
 const createBrowserSnapshotImage = async () => {
-  const { Image } = await import("@daytonaio/sdk");
+  const { Image } = await import("@daytona/sdk");
 
   return Image.base(baseImage)
     .runCommands(
@@ -42,7 +59,7 @@ const createBrowserSnapshotImage = async () => {
       "rm -rf /var/lib/apt/lists/*",
       "corepack enable",
       "corepack prepare pnpm@10.33.0 --activate",
-      "npm install -g opencode-ai @opencode-ai/plugin @daytonaio/sdk agent-browser zod",
+      `npm install -g opencode-ai@${OPENCODE_VERSION} @opencode-ai/plugin@${OPENCODE_VERSION} @daytona/sdk agent-browser zod`,
       [
         "bash",
         "-lc",
@@ -82,6 +99,7 @@ try {
       {
         image: await createBrowserSnapshotImage(),
         name: snapshotName,
+        resources: SNAPSHOT_RESOURCES,
       },
       {
         onLogs: (chunk) => {

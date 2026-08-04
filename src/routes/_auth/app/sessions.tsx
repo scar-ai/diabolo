@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import { LoaderIcon, Trash2Icon } from "lucide-react";
+import { LoaderIcon, SearchIcon, Trash2Icon, XIcon } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -18,6 +18,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Empty,
   EmptyContent,
@@ -27,6 +28,7 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import { Frame } from "@/components/ui/frame";
+import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { $deleteTask } from "@/lib/project/functions";
 import {
@@ -66,6 +68,7 @@ function SessionsPage() {
   const deleteTask = useServerFn($deleteTask);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
+  const [query, setQuery] = useState("");
 
   const tasksQuery = useQuery({
     ...allUserTaskSummariesQueryOptions(user.id),
@@ -112,10 +115,23 @@ function SessionsPage() {
   const sessions = search.projectId
     ? (tasksQuery.data ?? []).filter((session) => session.projectId === search.projectId)
     : (tasksQuery.data ?? []);
-  const runningSessions = sessions.filter((s) => s.status === "queued" || s.status === "running");
-  const completedSessions = sessions.filter(
+
+  const normalizedQuery = query.trim().toLowerCase();
+  const matchesQuery = (session: (typeof sessions)[number]) => {
+    if (!normalizedQuery) return true;
+    return [session.promptPreview, session.repoName, session.branchName, session.stage].some(
+      (field) => field?.toLowerCase().includes(normalizedQuery),
+    );
+  };
+
+  const matchingSessions = sessions.filter(matchesQuery);
+  const runningSessions = matchingSessions.filter(
+    (s) => s.status === "queued" || s.status === "running",
+  );
+  const completedSessions = matchingSessions.filter(
     (s) => s.status === "succeeded" || s.status === "failed",
   );
+  const selectedVisibleIds = completedSessions.filter((s) => selectedIds.has(s.id));
 
   function toggleSelected(id: string) {
     setSelectedIds((prev) => {
@@ -126,23 +142,53 @@ function SessionsPage() {
     });
   }
 
+  const allSelected =
+    completedSessions.length > 0 && completedSessions.every((s) => selectedIds.has(s.id));
+
+  function toggleSelectAll() {
+    setSelectedIds(allSelected ? new Set() : new Set(completedSessions.map((s) => s.id)));
+  }
+
   function handleBulkDelete() {
-    const toDelete = completedSessions
-      .filter((s) => selectedIds.has(s.id))
-      .map((s) => ({ projectId: s.projectId, taskId: s.id }));
+    const toDelete = selectedVisibleIds.map((s) => ({ projectId: s.projectId, taskId: s.id }));
     if (toDelete.length > 0) bulkDeleteMutation.mutate(toDelete);
     setConfirmBulkDelete(false);
   }
 
   return (
     <>
-      <div className="flex h-14 shrink-0 items-center border-b border-border/60 px-6">
+      <div className="flex h-14 shrink-0 items-center gap-4 border-b border-border/60 px-6">
         <h1 className="text-base font-medium text-foreground">
           Sessions
           {currentProject ? (
             <span className="ml-1.5 text-muted-foreground/60">— {currentProject.name}</span>
           ) : null}
         </h1>
+        <div className="relative ml-auto w-full max-w-64">
+          <SearchIcon
+            className="pointer-events-none absolute top-1/2 left-3 size-3.5 -translate-y-1/2 text-muted-foreground"
+            aria-hidden="true"
+          />
+          <Input
+            type="search"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search sessions"
+            aria-label="Search sessions"
+            className="h-8 ps-8 pe-8 text-sm"
+          />
+          {query ? (
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              className="absolute top-1/2 right-1.5 -translate-y-1/2 text-muted-foreground"
+              onClick={() => setQuery("")}
+              aria-label="Clear search"
+            >
+              <XIcon className="size-3.5" aria-hidden="true" />
+            </Button>
+          ) : null}
+        </div>
       </div>
       <main className="flex flex-1 flex-col items-center overflow-y-auto px-4 pt-8 pb-16">
         <div className="w-full max-w-3xl">
@@ -195,22 +241,44 @@ function SessionsPage() {
             </Empty>
           ) : null}
 
+          {sessions.length > 0 && matchingSessions.length === 0 ? (
+            <Empty className="min-h-[48vh] border-0 bg-transparent py-16">
+              <EmptyContent>
+                <EmptyHeader>
+                  <EmptyMedia variant="icon" aria-hidden="true">
+                    <SearchIcon />
+                  </EmptyMedia>
+                  <EmptyTitle>No matching sessions</EmptyTitle>
+                </EmptyHeader>
+                <EmptyDescription>
+                  Nothing matches “{query.trim()}”. Try a different repo, branch, or title.
+                </EmptyDescription>
+                <Button variant="outline" size="sm" className="mt-4" onClick={() => setQuery("")}>
+                  Clear search
+                </Button>
+              </EmptyContent>
+            </Empty>
+          ) : null}
+
           {/* Running tasks section */}
           {runningSessions.length > 0 ? (
             <div className="mb-8">
               <div className="mb-3 flex items-center gap-2">
                 <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-500" />
-                <span className="text-sm font-semibold text-foreground">
-                  Running ({runningSessions.length})
+                <span className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+                  Running
+                </span>
+                <span className="rounded-full bg-muted px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground tabular-nums">
+                  {runningSessions.length}
                 </span>
               </div>
               <Frame className="w-full min-w-0">
                 <Table>
                   <TableHeader>
                     <TableRow className="hover:bg-transparent">
-                      <TableHead>Session</TableHead>
-                      <TableHead className="w-28">Status</TableHead>
-                      <TableHead className="w-28">Started</TableHead>
+                      <TableHead className="text-xs">Session</TableHead>
+                      <TableHead className="w-28 text-xs">Status</TableHead>
+                      <TableHead className="w-28 text-right text-xs">Started</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -230,11 +298,16 @@ function SessionsPage() {
           {/* Completed tasks section */}
           {completedSessions.length > 0 ? (
             <div>
-              <div className="mb-3 flex items-center justify-between">
-                <span className="text-sm font-semibold text-foreground">
-                  History ({completedSessions.length})
-                </span>
-                {selectedIds.size > 0 ? (
+              <div className="mb-3 flex h-8 items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+                    History
+                  </span>
+                  <span className="rounded-full bg-muted px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground tabular-nums">
+                    {completedSessions.length}
+                  </span>
+                </div>
+                {selectedVisibleIds.length > 0 ? (
                   <AlertDialog open={confirmBulkDelete} onOpenChange={setConfirmBulkDelete}>
                     <Button
                       variant="ghost"
@@ -248,17 +321,18 @@ function SessionsPage() {
                       ) : (
                         <Trash2Icon className="size-3.5" aria-hidden="true" />
                       )}
-                      Delete {selectedIds.size} selected
+                      Delete {selectedVisibleIds.length} selected
                     </Button>
                     <AlertDialogContent size="sm">
                       <AlertDialogHeader>
                         <AlertDialogTitle>
-                          Delete {selectedIds.size}{" "}
-                          {selectedIds.size === 1 ? "session" : "sessions"}?
+                          Delete {selectedVisibleIds.length}{" "}
+                          {selectedVisibleIds.length === 1 ? "session" : "sessions"}?
                         </AlertDialogTitle>
                         <AlertDialogDescription>
-                          You are about to permanently delete {selectedIds.size}{" "}
-                          {selectedIds.size === 1 ? "session" : "sessions"}. This cannot be undone.
+                          You are about to permanently delete {selectedVisibleIds.length}{" "}
+                          {selectedVisibleIds.length === 1 ? "session" : "sessions"}. This cannot be
+                          undone.
                         </AlertDialogDescription>
                       </AlertDialogHeader>
                       <AlertDialogFooter>
@@ -279,10 +353,17 @@ function SessionsPage() {
                 <Table>
                   <TableHeader>
                     <TableRow className="hover:bg-transparent">
-                      <TableHead className="w-10" />
-                      <TableHead>Session</TableHead>
-                      <TableHead className="w-28">Status</TableHead>
-                      <TableHead className="w-28">Date</TableHead>
+                      <TableHead className="w-10">
+                        <Checkbox
+                          checked={allSelected}
+                          indeterminate={selectedVisibleIds.length > 0 && !allSelected}
+                          onCheckedChange={toggleSelectAll}
+                          aria-label="Select all sessions"
+                        />
+                      </TableHead>
+                      <TableHead className="text-xs">Session</TableHead>
+                      <TableHead className="w-28 text-xs">Status</TableHead>
+                      <TableHead className="w-28 text-right text-xs">Date</TableHead>
                       <TableHead className="w-12" />
                     </TableRow>
                   </TableHeader>

@@ -60,6 +60,16 @@ export namespace Sandbox {
     output: string;
   };
 
+  export type BackgroundCommand = {
+    commandId: string;
+    sessionId: string;
+  };
+
+  export type BackgroundCommandResult = {
+    exitCode?: number;
+    output: string;
+  };
+
   export type CloneRepositoryOptions = {
     accessToken: string;
     branch: string;
@@ -73,15 +83,21 @@ export namespace Sandbox {
     delete(timeoutSeconds?: number): Promise<void>;
     downloadFile(remotePath: string, timeoutSeconds?: number): Promise<Buffer>;
     executeCommand(command: string, options?: CommandOptions): Promise<CommandResult>;
+    getBackgroundCommand(command: BackgroundCommand): Promise<BackgroundCommandResult>;
     getWorkspaceRoot(): Promise<string>;
     id: string;
     name: string;
+    startBackgroundCommand(command: string, options?: CommandOptions): Promise<BackgroundCommand>;
     stop(timeoutSeconds?: number): Promise<void>;
+    stopBackgroundCommand(command: BackgroundCommand): Promise<void>;
     uploadFile(localPath: string, remotePath: string, timeoutSeconds?: number): Promise<void>;
   }
 
   export interface Provider {
-    createWorkspace(repoName: string): Promise<Session>;
+    createWorkspace(
+      repoName: string,
+      options?: { autoDeleteInterval?: number; autoStopInterval?: number },
+    ): Promise<Session>;
     destroyWorkspace(id: string): Promise<void>;
     formatError(error: unknown): string;
     getWorkspace(id: string): Promise<Session>;
@@ -157,7 +173,7 @@ export namespace Sandbox {
           throw new Error("Prompt is required.");
         }
 
-        if (trimmedPrompt.length < 10) {
+        if (kind === "initial" && trimmedPrompt.length < 10) {
           throw new Error("Prompt must be at least 10 characters.");
         }
 

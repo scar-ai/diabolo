@@ -3,6 +3,8 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import {
   CheckCircle2Icon,
+  CopyIcon,
+  CreditCardIcon,
   ExternalLinkIcon,
   KeyRoundIcon,
   Loader2Icon,
@@ -12,7 +14,7 @@ import {
   WifiOffIcon,
   ZapIcon,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
 import { ProviderUsageChart } from "@/components/app/provider-usage-chart";
@@ -27,9 +29,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { BILLING_PLANS } from "@/lib/billing/plans";
+import { billingSummaryQueryOptions } from "@/lib/billing/queries";
 import {
-  $completeCodexLogin,
   $disconnectCodexProvider,
+  $pollCodexDeviceAuthorization,
   $saveUserLlmProviders,
   $startCodexDeviceAuthorization,
 } from "@/lib/user/functions";
@@ -53,10 +57,10 @@ export const Route = createFileRoute("/_auth/app/settings")({
 });
 
 type DeviceAuthState = {
-  authorizeUrl: string;
-  callbackServerStarted: boolean;
   expiresAt: string;
-  redirectUri: string;
+  intervalSeconds: number;
+  userCode: string;
+  verificationUrl: string;
 };
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -94,14 +98,14 @@ function ProviderTypeToggle({
   onChange: (v: "manual" | "codex") => void;
 }) {
   return (
-    <div className="inline-flex rounded-lg border border-border/60 bg-muted/40 p-0.5">
+    <div className="inline-flex rounded-full border border-border/60 bg-muted/40 p-1">
       {(["manual", "codex"] as const).map((kind) => (
         <button
           key={kind}
           type="button"
           onClick={() => onChange(kind)}
           className={cn(
-            "rounded-md px-3 py-1 text-xs font-medium transition-all",
+            "rounded-full px-3.5 py-1.5 text-xs font-medium transition-all",
             value === kind
               ? "bg-background text-foreground shadow-sm"
               : "text-muted-foreground hover:text-foreground",
@@ -149,9 +153,8 @@ function SettingsPage() {
 
   const saveFn = useServerFn($saveUserLlmProviders);
   const startCodexAuth = useServerFn($startCodexDeviceAuthorization);
-  const completeCodexAuth = useServerFn($completeCodexLogin);
+  const pollCodexAuth = useServerFn($pollCodexDeviceAuthorization);
   const disconnectCodexAuth = useServerFn($disconnectCodexProvider);
-  const [callbackUrlDraft, setCallbackUrlDraft] = useState("");
 
   const codexSharedLoginQuery = useQuery({
     ...codexSharedLoginStatusQueryOptions(),
@@ -160,6 +163,7 @@ function SettingsPage() {
     refetchInterval: hasPendingAuth ? 2000 : false,
   });
   const codexModelsQuery = useQuery(codexModelsQueryOptions());
+  const billingSummaryQuery = useQuery(billingSummaryQueryOptions());
 
   const activePendingDeviceAuth =
     pendingDeviceAuth && codexSharedLoginQuery.data?.authStatus !== "connected"
@@ -192,29 +196,56 @@ function SettingsPage() {
     mutationFn: () => startCodexAuth(),
     onSuccess: (payload) => {
       setPendingDeviceAuth(payload);
-      setCallbackUrlDraft("");
-      window.open(payload.authorizeUrl, "_blank", "noopener,noreferrer");
+      window.open(payload.verificationUrl, "_blank", "noopener,noreferrer");
     },
     onError: (error) => {
       toast.error(error instanceof Error ? error.message : "Failed to start Codex login.");
     },
   });
 
-  const completeCodexAuthMutation = useMutation({
-    mutationFn: (input: { callbackUrl: string }) =>
-      completeCodexAuth({ data: { callbackUrl: input.callbackUrl } }),
-    onSuccess: async () => {
-      setPendingDeviceAuth(null);
-      setCallbackUrlDraft("");
-      await queryClient.invalidateQueries(userLlmProvidersQueryOptions());
-      await queryClient.invalidateQueries({ queryKey: ["codex-shared-login-status"] });
-      await queryClient.invalidateQueries(codexModelsQueryOptions());
-      toast.success("Codex connected.");
-    },
-    onError: (error) => {
-      toast.error(error instanceof Error ? error.message : "Failed to complete Codex login.");
-    },
-  });
+  useEffect(() => {
+    if (!pendingDeviceAuth) return;
+
+    let cancelled = false;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+
+    const poll = async () => {
+      try {
+        const result = await pollCodexAuth();
+        if (cancelled) return;
+
+        if (result.status === "pending") {
+          timeout = setTimeout(poll, pendingDeviceAuth.intervalSeconds * 1000);
+          return;
+        }
+
+        setPendingDeviceAuth(null);
+
+        if (result.status === "expired") {
+          toast.error("The Codex login expired. Start sign-in again.");
+          return;
+        }
+
+        await Promise.all([
+          queryClient.invalidateQueries(userLlmProvidersQueryOptions()),
+          queryClient.invalidateQueries({ queryKey: ["codex-shared-login-status"] }),
+          queryClient.invalidateQueries(codexModelsQueryOptions()),
+        ]);
+        toast.success("Codex connected.");
+      } catch (error) {
+        if (cancelled) return;
+        setPendingDeviceAuth(null);
+        toast.error(error instanceof Error ? error.message : "Failed to complete Codex login.");
+      }
+    };
+
+    timeout = setTimeout(poll, pendingDeviceAuth.intervalSeconds * 1000);
+
+    return () => {
+      cancelled = true;
+      if (timeout) clearTimeout(timeout);
+    };
+  }, [pendingDeviceAuth, pollCodexAuth, queryClient]);
 
   const disconnectCodexAuthMutation = useMutation({
     mutationFn: () => disconnectCodexAuth(),
@@ -289,7 +320,6 @@ function SettingsPage() {
   const resetDrafts = () => {
     setDraftProviders(null);
     setPendingDeviceAuth(null);
-    setCallbackUrlDraft("");
   };
 
   return (
@@ -302,6 +332,62 @@ function SettingsPage() {
       {/* Scrollable content */}
       <div className="flex min-h-0 flex-1 flex-col items-center overflow-y-auto px-6 py-10">
         <div className="w-full max-w-2xl space-y-10">
+          <section>
+            <div className="mb-4">
+              <h2 className="text-sm font-semibold tracking-wide text-foreground uppercase">
+                Billing
+              </h2>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Manage your subscription, invoices, and payment method.
+              </p>
+            </div>
+
+            <div className="rounded-2xl border border-border/70 bg-card shadow-xs">
+              <div className="flex items-center justify-between gap-4 px-5 py-4">
+                <div className="flex items-center gap-3">
+                  <div className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-muted text-muted-foreground">
+                    <CreditCardIcon className="size-4.5" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium text-foreground">
+                        {billingSummaryQuery.isPending
+                          ? "Loading plan"
+                          : BILLING_PLANS[billingSummaryQuery.data?.plan ?? "free"].name}
+                      </span>
+                      {billingSummaryQuery.data?.stripeSubscriptionStatus ? (
+                        <Badge variant="outline">
+                          {billingSummaryQuery.data.stripeSubscriptionStatus}
+                        </Badge>
+                      ) : null}
+                    </div>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      {billingSummaryQuery.data?.currentPeriodEnd
+                        ? `Renews ${new Date(billingSummaryQuery.data.currentPeriodEnd).toLocaleDateString()}`
+                        : "Free plan"}
+                    </p>
+                  </div>
+                </div>
+
+                {billingSummaryQuery.data?.canManageBilling ? (
+                  <form action="/api/billing/portal" method="post">
+                    <Button type="submit" variant="outline" size="sm">
+                      <ExternalLinkIcon className="size-3.5" />
+                      Manage billing
+                    </Button>
+                  </form>
+                ) : (
+                  <a href="/pricing">
+                    <Button type="button" variant="outline" size="sm">
+                      <ExternalLinkIcon className="size-3.5" />
+                      View plans
+                    </Button>
+                  </a>
+                )}
+              </div>
+            </div>
+          </section>
+
           {/* ── Section: Codex ─────────────────────────────────────────────── */}
           <section>
             <div className="mb-4">
@@ -398,114 +484,52 @@ function SettingsPage() {
               {activePendingDeviceAuth ? (
                 <div className="border-t border-border/60 px-5 py-4">
                   <p className="mb-3 text-sm font-medium text-foreground">Complete sign-in</p>
-
-                  {activePendingDeviceAuth.callbackServerStarted ? (
-                    <div className="space-y-3">
-                      <div className="flex items-start gap-3 rounded-xl bg-muted/50 px-4 py-3">
-                        <Loader2Icon className="mt-0.5 size-4 shrink-0 animate-spin text-muted-foreground" />
-                        <div>
-                          <p className="text-sm text-foreground">
-                            A browser tab opened — approve access there.
-                          </p>
-                          <p className="mt-0.5 text-xs text-muted-foreground">
-                            This page will update automatically. Expires{" "}
-                            {new Date(activePendingDeviceAuth.expiresAt).toLocaleTimeString()}.
-                          </p>
+                  <div className="space-y-3">
+                    <div className="flex items-start gap-3 rounded-xl bg-muted/50 px-4 py-3">
+                      <Loader2Icon className="mt-0.5 size-4 shrink-0 animate-spin text-muted-foreground" />
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm text-foreground">
+                          Enter this one-time code in the OpenAI browser tab:
+                        </p>
+                        <div className="mt-2 flex items-center gap-2">
+                          <code className="rounded-xl border border-border/70 bg-background px-3 py-1.5 font-mono text-base font-semibold tracking-widest text-foreground">
+                            {activePendingDeviceAuth.userCode}
+                          </code>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            aria-label="Copy Codex login code"
+                            onClick={() => {
+                              void navigator.clipboard.writeText(activePendingDeviceAuth.userCode);
+                              toast.success("Login code copied.");
+                            }}
+                          >
+                            <CopyIcon className="size-3.5" />
+                          </Button>
                         </div>
+                        <p className="mt-2 text-xs text-muted-foreground">
+                          This page checks for approval automatically. Expires{" "}
+                          {new Date(activePendingDeviceAuth.expiresAt).toLocaleTimeString()}.
+                        </p>
                       </div>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() =>
-                          window.open(
-                            activePendingDeviceAuth.authorizeUrl,
-                            "_blank",
-                            "noopener,noreferrer",
-                          )
-                        }
-                      >
-                        <ExternalLinkIcon className="size-3.5" />
-                        Open browser tab again
-                      </Button>
                     </div>
-                  ) : (
-                    <div className="space-y-4">
-                      <div className="space-y-3">
-                        <div className="flex gap-3">
-                          <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-foreground text-xs font-semibold text-background">
-                            1
-                          </span>
-                          <div>
-                            <p className="text-sm text-foreground">Approve in the browser tab</p>
-                            <p className="mt-0.5 text-xs text-muted-foreground">
-                              After approving, your browser will redirect to{" "}
-                              <code className="font-mono">
-                                {activePendingDeviceAuth.redirectUri}
-                              </code>
-                            </p>
-                          </div>
-                        </div>
-                        <div className="flex gap-3">
-                          <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-foreground text-xs font-semibold text-background">
-                            2
-                          </span>
-                          <div className="w-full">
-                            <p className="text-sm text-foreground">
-                              Paste the full redirect URL here
-                            </p>
-                            <p className="mt-0.5 text-xs text-muted-foreground">
-                              Port 1455 is unavailable — copy the URL from your browser address bar.
-                            </p>
-                            <div className="mt-2 space-y-2">
-                              <Input
-                                value={callbackUrlDraft}
-                                onChange={(e) => setCallbackUrlDraft(e.target.value)}
-                                placeholder="http://localhost:1455/auth/callback?code=..."
-                                className="font-mono text-xs"
-                              />
-                              <Button
-                                type="button"
-                                size="sm"
-                                disabled={
-                                  completeCodexAuthMutation.isPending ||
-                                  callbackUrlDraft.trim().length === 0
-                                }
-                                onClick={() =>
-                                  completeCodexAuthMutation.mutate({
-                                    callbackUrl: callbackUrlDraft.trim(),
-                                  })
-                                }
-                              >
-                                {completeCodexAuthMutation.isPending ? (
-                                  <Loader2Icon className="size-3.5 animate-spin" />
-                                ) : (
-                                  <CheckCircle2Icon className="size-3.5" />
-                                )}
-                                Complete sign-in
-                              </Button>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() =>
-                          window.open(
-                            activePendingDeviceAuth.authorizeUrl,
-                            "_blank",
-                            "noopener,noreferrer",
-                          )
-                        }
-                      >
-                        <ExternalLinkIcon className="size-3.5" />
-                        Open browser tab again
-                      </Button>
-                    </div>
-                  )}
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() =>
+                        window.open(
+                          activePendingDeviceAuth.verificationUrl,
+                          "_blank",
+                          "noopener,noreferrer",
+                        )
+                      }
+                    >
+                      <ExternalLinkIcon className="size-3.5" />
+                      Open OpenAI sign-in
+                    </Button>
+                  </div>
                 </div>
               ) : null}
             </div>
@@ -589,7 +613,7 @@ function SettingsPage() {
                     <div className="flex items-center gap-3 border-b border-border/50 px-5 py-3.5">
                       <div
                         className={cn(
-                          "flex size-7 shrink-0 items-center justify-center rounded-lg",
+                          "flex size-7 shrink-0 items-center justify-center rounded-xl",
                           isCodex
                             ? "bg-violet-500/10 text-violet-600 dark:text-violet-400"
                             : "bg-blue-500/10 text-blue-600 dark:text-blue-400",
@@ -723,12 +747,7 @@ function SettingsPage() {
                                 <SelectValue placeholder="Select model" />
                               </SelectTrigger>
                               <SelectContent>
-                                {Array.from(
-                                  new Set([
-                                    ...availableCodexModels,
-                                    ...(provider.providerModel ? [provider.providerModel] : []),
-                                  ]),
-                                ).map((model) => (
+                                {availableCodexModels.map((model) => (
                                   <SelectItem key={model} value={model}>
                                     {model}
                                   </SelectItem>
@@ -750,7 +769,7 @@ function SettingsPage() {
 
                         {isCodex ? (
                           /* Codex auth note */
-                          <div className="flex items-center gap-2 rounded-lg bg-muted/50 px-3 py-2.5 sm:col-span-2">
+                          <div className="flex items-center gap-2 rounded-2xl bg-muted/50 px-3 py-2.5 sm:col-span-2">
                             <CheckCircle2Icon className="size-3.5 shrink-0 text-muted-foreground" />
                             <p className="text-xs text-muted-foreground">
                               Uses the shared Codex login above — no API key needed.

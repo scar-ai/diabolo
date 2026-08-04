@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import { LoaderIcon, Trash2Icon } from "lucide-react";
+import { GitBranchIcon, LoaderIcon, Trash2Icon } from "lucide-react";
 import { useState } from "react";
 
 import type { CollaboratorMap } from "@/components/app/task-detail/types";
@@ -44,11 +44,11 @@ export function SessionRow({
   const [deleteOpen, setDeleteOpen] = useState(false);
 
   return (
-    <TableRow className="group">
+    <TableRow className="group" data-state={selected ? "selected" : undefined}>
       {onToggleSelect ? (
         <TableCell className="w-10">
           <div
-            className={`transition-opacity ${selected ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}
+            className={`transition-opacity ${selected ? "opacity-100" : "opacity-0 group-hover:opacity-100 focus-within:opacity-100"}`}
           >
             <Checkbox
               checked={selected}
@@ -59,35 +59,49 @@ export function SessionRow({
           </div>
         </TableCell>
       ) : null}
-      <TableCell className="max-w-0">
+      <TableCell className="max-w-0 py-3">
         <Link
           to="/app/tasks/$taskId"
           params={{ taskId: session.id }}
           search={{ projectId: session.projectId }}
-          className="flex flex-col gap-1"
+          className="flex min-w-0 flex-col gap-1.5"
         >
-          <div className="flex items-center gap-1.5">
+          <div className="flex min-w-0 items-center gap-2">
             <span className="truncate text-sm font-medium text-foreground group-hover:underline">
               {session.promptPreview}
             </span>
             {session.spawnSource === "scheduled" ? (
-              <span className="rounded-sm border border-border bg-muted px-1.5 py-0.5 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
+              <span className="shrink-0 rounded-full border border-border bg-muted px-1.5 py-0.5 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
                 Scheduled
               </span>
             ) : null}
           </div>
-          <div className="flex items-center gap-1.5 text-xs text-muted-foreground/50">
-            {session.sessionSummaryLine ? <span>{session.sessionSummaryLine}</span> : null}
+          <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
             {creator ? (
-              <span className="flex items-center gap-1">
-                <span>·</span>
-                <Avatar className="size-3.5">
+              <span className="flex shrink-0 items-center gap-1.5">
+                <Avatar className="size-4">
                   {creator.image ? <AvatarImage src={creator.image} alt={creator.name} /> : null}
                   <AvatarFallback className="text-[8px]">
                     {creator.name.slice(0, 1).toUpperCase()}
                   </AvatarFallback>
                 </Avatar>
-                <span>{creator.name}</span>
+                <span className="max-w-24 truncate">{creator.name}</span>
+              </span>
+            ) : null}
+            {session.repoName ? (
+              <span className="min-w-0 shrink truncate font-mono text-[11px]">
+                {session.repoName}
+              </span>
+            ) : null}
+            {session.branchName ? (
+              <span className="flex min-w-0 shrink items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground/90">
+                <GitBranchIcon className="size-3 shrink-0" aria-hidden="true" />
+                <span className="truncate">{session.branchName}</span>
+              </span>
+            ) : null}
+            {session.stage ? (
+              <span className="min-w-0 flex-1 truncate text-muted-foreground/60">
+                {session.stage}
               </span>
             ) : null}
           </div>
@@ -96,16 +110,20 @@ export function SessionRow({
       <TableCell className="w-28">
         <TaskStatusBadge status={session.status} />
       </TableCell>
-      <TableCell className="w-28">
-        <span className="text-xs text-muted-foreground/60">{session.startedAtLabel}</span>
+      <TableCell className="w-28 text-right">
+        <span className="text-xs text-muted-foreground/70 tabular-nums">
+          {session.startedAtLabel}
+        </span>
       </TableCell>
-      <TableCell className="w-12 text-right">
-        {onDelete ? (
+      {onDelete ? (
+        <TableCell className="w-12 text-right">
           <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
             <Button
               variant="ghost"
               size="icon-xs"
-              className="text-destructive/70 hover:bg-destructive/10 hover:text-destructive"
+              className={`text-muted-foreground transition-opacity hover:bg-destructive/10 hover:text-destructive focus-visible:opacity-100 ${
+                deleteOpen || isDeleting ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+              }`}
               disabled={isDeleting}
               onClick={(event) => {
                 event.preventDefault();
@@ -143,8 +161,8 @@ export function SessionRow({
               </AlertDialogFooter>
             </AlertDialogContent>
           </AlertDialog>
-        ) : null}
-      </TableCell>
+        </TableCell>
+      ) : null}
     </TableRow>
   );
 }

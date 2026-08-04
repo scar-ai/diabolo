@@ -21,7 +21,13 @@ export function ProjectDashboard({
   if (projects.length === 0) {
     return (
       <main className="flex flex-1 items-center justify-center px-4 py-10">
-        <div className="flex max-w-md flex-col items-center gap-5 text-center">
+        <div className="flex max-w-md flex-col items-center gap-6 text-center">
+          <div
+            className="flex size-14 items-center justify-center rounded-3xl border border-border bg-card text-muted-foreground shadow-raised"
+            aria-hidden="true"
+          >
+            <BookIcon className="size-6" />
+          </div>
           <div className="space-y-2">
             <p className="text-sm tracking-[0.24em] text-muted-foreground/55 uppercase">
               Workspace
@@ -71,7 +77,7 @@ export function ProjectDashboard({
                 <Link
                   to="/app"
                   search={{ projectId: project.id }}
-                  className="flex h-full flex-col rounded-2xl border border-border bg-card p-5 transition-colors outline-none hover:bg-muted/50 focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                  className="flex h-full flex-col rounded-3xl border border-border bg-card p-5 shadow-raised transition-all duration-150 ease-friendly outline-none hover:-translate-y-0.5 hover:border-border/80 hover:bg-muted/40 hover:shadow-popover focus-visible:ring-[3px] focus-visible:ring-ring/50"
                 >
                   {/* Top row */}
                   <div className="flex items-start justify-between gap-3">
@@ -81,7 +87,7 @@ export function ProjectDashboard({
                           {project.name}
                         </h2>
                         {project.sharedWithOrgId ? (
-                          <span className="shrink-0 rounded-full border border-border px-2 py-0.5 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
+                          <span className="shrink-0 rounded-full border border-border bg-muted/50 px-2 py-0.5 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
                             Org
                           </span>
                         ) : null}
@@ -105,7 +111,7 @@ export function ProjectDashboard({
                   {hasRunning ? (
                     <div className="mt-4 space-y-1.5 border-t border-border/60 pt-4">
                       {runningTasks.slice(0, 2).map((task) => (
-                        <div key={task.id} className="rounded-lg bg-muted/50 px-3 py-2">
+                        <div key={task.id} className="rounded-2xl bg-muted/60 px-3.5 py-2.5">
                           <p className="truncate text-xs font-medium text-foreground/80">
                             {task.promptPreview}
                           </p>

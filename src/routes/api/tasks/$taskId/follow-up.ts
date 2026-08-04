@@ -29,10 +29,6 @@ export const Route = createFileRoute("/api/tasks/$taskId/follow-up")({
           const formData = await request.formData();
           const prompt = getFormString(formData, "prompt");
 
-          if (prompt.length < 10) {
-            return badRequest("Prompt must be at least 10 characters.");
-          }
-
           const draft = await unwrap(
             Project.prepareTaskFollowUpForUser(
               params.taskId,

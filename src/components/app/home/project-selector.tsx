@@ -6,7 +6,6 @@ import {
   DropdownMenuContent,
   DropdownMenuGroup,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -25,7 +24,7 @@ export function ProjectSelector({
 }) {
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger className="flex cursor-pointer items-center gap-1 rounded-lg px-2 py-1 text-sm text-muted-foreground/60 transition-colors hover:bg-accent hover:text-muted-foreground">
+      <DropdownMenuTrigger className="flex cursor-pointer items-center gap-1.5 rounded-full border border-transparent px-2.5 py-1.5 text-sm text-muted-foreground/70 transition-colors hover:border-border hover:bg-accent hover:text-foreground aria-expanded:border-border aria-expanded:bg-accent aria-expanded:text-foreground">
         <BookMarkedIcon className="size-3.5 shrink-0" aria-hidden="true" />
         <span className="max-w-40 truncate">{projectLabel}</span>
         <ChevronDownIcon className="size-3 shrink-0 opacity-50" aria-hidden="true" />
@@ -49,9 +48,7 @@ export function ProjectSelector({
           </>
         ) : (
           <DropdownMenuGroup>
-            <DropdownMenuLabel className="font-normal text-muted-foreground">
-              No projects yet
-            </DropdownMenuLabel>
+            <p className="px-3 py-2 text-sm text-muted-foreground">No projects yet</p>
             <DropdownMenuSeparator />
           </DropdownMenuGroup>
         )}

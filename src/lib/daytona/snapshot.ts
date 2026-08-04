@@ -1,12 +1,14 @@
 import "@tanstack/react-start/server-only";
-import { DaytonaNotFoundError, Image, type Daytona } from "@daytonaio/sdk";
+import { DaytonaNotFoundError, Image, type Daytona } from "@daytona/sdk";
 
 import { env } from "@/env/server";
 import { Log } from "@/lib/log";
+import { OPENCODE_VERSION } from "@/lib/opencode/constants";
 
 const log = Log.create({ ns: "daytona.snapshot" });
 
-const SNAPSHOT_VERSION = "v1";
+// Must match `scripts/daytona-snapshot.mjs`, which is what actually builds it.
+const SNAPSHOT_VERSION = "v3";
 const DEFAULT_BASE_IMAGE = "node:22-bookworm";
 const DEFAULT_SNAPSHOT_NAME = `diabolo-opencode-browser-${SNAPSHOT_VERSION}`;
 
@@ -28,7 +30,7 @@ export const createBrowserSnapshotImage = () =>
       "rm -rf /var/lib/apt/lists/*",
       "corepack enable",
       "corepack prepare pnpm@10.33.0 --activate",
-      "npm install -g opencode-ai @opencode-ai/plugin agent-browser zod",
+      `npm install -g opencode-ai@${OPENCODE_VERSION} @opencode-ai/plugin@${OPENCODE_VERSION} agent-browser zod`,
       [
         "bash",
         "-lc",

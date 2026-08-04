@@ -39,7 +39,7 @@
   --chart-3: #12c905;
   --chart-4: #fcd53a;
   --chart-5: #fc533a;
-  --radius: 0.625rem;
+  --radius: 0.875rem;
   --sidebar: #101010;
   --sidebar-foreground: rgba(255, 255, 255, 0.936);
   --sidebar-primary: #091f52;
@@ -48,6 +48,25 @@
   --sidebar-accent-foreground: rgba(255, 255, 255, 0.936);
   --sidebar-border: #282828;
   --sidebar-ring: #9dbefe;
+
+  /* Elevation — soft, layered shadows so popups read as floating rather than stamped */
+  --elevation-raised: 0 1px 2px -1px rgb(0 0 0 / 0.12), 0 2px 6px -2px rgb(0 0 0 / 0.1);
+  --elevation-popover:
+    0 2px 4px -2px rgb(0 0 0 / 0.14), 0 8px 20px -6px rgb(0 0 0 / 0.22),
+    0 20px 40px -12px rgb(0 0 0 / 0.24);
+  --elevation-modal:
+    0 4px 8px -4px rgb(0 0 0 / 0.18), 0 16px 32px -12px rgb(0 0 0 / 0.28),
+    0 40px 72px -24px rgb(0 0 0 / 0.36);
+}
+
+.dark {
+  --elevation-raised: 0 1px 2px -1px rgb(0 0 0 / 0.5), 0 2px 6px -2px rgb(0 0 0 / 0.4);
+  --elevation-popover:
+    0 2px 4px -2px rgb(0 0 0 / 0.5), 0 8px 20px -6px rgb(0 0 0 / 0.55),
+    0 20px 40px -12px rgb(0 0 0 / 0.6);
+  --elevation-modal:
+    0 4px 8px -4px rgb(0 0 0 / 0.5), 0 16px 32px -12px rgb(0 0 0 / 0.6),
+    0 40px 72px -24px rgb(0 0 0 / 0.7);
 }
 
 @theme inline {
@@ -98,6 +117,11 @@
   --radius-2xl: calc(var(--radius) + 8px);
   --radius-3xl: calc(var(--radius) + 12px);
   --radius-4xl: calc(var(--radius) + 16px);
+  --radius-5xl: calc(var(--radius) + 20px);
+  --shadow-popover: var(--elevation-popover);
+  --shadow-modal: var(--elevation-modal);
+  --shadow-raised: var(--elevation-raised);
+  --ease-friendly: cubic-bezier(0.32, 0.72, 0, 1);
 }
 
 @layer base {
@@ -113,6 +137,27 @@
   button:not(:disabled),
   [role="button"]:not(:disabled) {
     cursor: pointer;
+  }
+  /* Slim, unobtrusive scrollbars — long menus and panels shouldn't grow a heavy grey bar */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background-color: var(--border);
+    border: 3px solid transparent;
+    border-radius: 9999px;
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: var(--accent);
   }
 }
 
@@ -141,6 +186,77 @@
 
 .dark .dock-tray {
   background-color: #101010;
+}
+
+/* Agent status — light sweeping across the line the agent is working on now */
+@keyframes status-shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+.status-shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--muted-foreground) 0%,
+    var(--foreground) 40%,
+    var(--foreground) 60%,
+    var(--muted-foreground) 100%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: status-shimmer 3.5s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .status-shimmer {
+    animation: none;
+    background: none;
+    color: var(--foreground);
+  }
+}
+
+/* Running task glint — light sweeping across a sidebar row while the task runs */
+@keyframes task-glint {
+  0% {
+    transform: translateX(-100%);
+  }
+  60%,
+  100% {
+    transform: translateX(200%);
+  }
+}
+
+.task-glint {
+  position: relative;
+  overflow: hidden;
+}
+
+.task-glint::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  width: 50%;
+  pointer-events: none;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    color-mix(in oklch, var(--sidebar-foreground) 12%, transparent) 50%,
+    transparent 100%
+  );
+  animation: task-glint 2.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .task-glint::after {
+    animation: none;
+    background: none;
+  }
 }
 
 /* Thinking wave — opacity ripple across letters */

@@ -52,7 +52,7 @@ export function CreateProjectForm({
 
       <div className="grid gap-2">
         <Label>Repository</Label>
-        <div className="max-h-72 overflow-auto rounded-2xl border border-border bg-background p-1">
+        <div className="max-h-72 overflow-auto rounded-3xl border border-border bg-muted/30 p-1.5">
           {isPending ? (
             <div className="flex items-center justify-center py-10">
               <LoaderIcon className="size-5 animate-spin text-muted-foreground" />
@@ -75,9 +75,9 @@ export function CreateProjectForm({
                     key={repo.id}
                     type="button"
                     onClick={() => onSelectRepo(repo.id, repo.fullName)}
-                    className={`flex flex-col items-start gap-1 rounded-xl px-3 py-2 text-left transition-colors ${isSelected ? "bg-accent text-accent-foreground" : "hover:bg-muted"}`}
+                    className={`flex flex-col items-start gap-0.5 rounded-2xl px-3.5 py-2.5 text-left transition-colors ${isSelected ? "bg-accent text-accent-foreground ring-1 ring-ring/40" : "hover:bg-accent/50"}`}
                   >
-                    <span className="font-medium">{repo.fullName}</span>
+                    <span className="text-sm font-medium">{repo.fullName}</span>
                     <span className="text-xs text-muted-foreground/70">
                       {repo.ownerLogin} · {repo.visibility}
                     </span>

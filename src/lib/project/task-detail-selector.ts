@@ -104,21 +104,6 @@ const selectParsedTaskDetail = (task: Project.TaskDetailRecord) => {
     url: artifact.url,
   }));
 
-  const textEventsByMessageId = new Map<string, ParsedAgentMessage[]>();
-
-  for (const event of events) {
-    if (event.type !== "text" || !event.messageId || typeof event.payload.text !== "string") {
-      continue;
-    }
-
-    const bucket = textEventsByMessageId.get(event.messageId) ?? [];
-    bucket.push({
-      text: event.payload.text,
-      timestamp: Number(event.payload.timestamp ?? new Date(event.createdAt).getTime()),
-    });
-    textEventsByMessageId.set(event.messageId, bucket);
-  }
-
   const conversation: ParsedConversationMessage[] =
     task.messages.length > 0
       ? task.messages.map((message) => ({
@@ -130,8 +115,9 @@ const selectParsedTaskDetail = (task: Project.TaskDetailRecord) => {
           kind: message.kind,
           logs: message.logs,
           prompt: message.prompt,
-          responseMessages:
-            textEventsByMessageId.get(message.id) ?? parseAgentMessages(message.responseMessages),
+          // The agent's text is streamed into the message record itself rather
+          // than into event rows, so this is its single source of truth.
+          responseMessages: parseAgentMessages(message.responseMessages),
           runtimeEvents: events.filter((event) => event.messageId === message.id),
           sequence: message.sequence,
           stage: message.stage,
@@ -185,10 +171,6 @@ const selectParsedTaskDetail = (task: Project.TaskDetailRecord) => {
   return {
     ...task,
     branchName: derivedBranchName,
-    combinedAgentText: parsedAgentMessages
-      .map((message) => message.text)
-      .join("\n\n")
-      .trim(),
     events,
     artifacts,
     logs: initialMessage?.logs ?? task.logs ?? null,
@@ -202,4 +184,4 @@ const selectParsedTaskDetail = (task: Project.TaskDetailRecord) => {
 
 export type TaskDetailResult = ReturnType<typeof selectParsedTaskDetail>;
 export { selectParsedTaskDetail };
-export type { ParsedTaskArtifact, ParsedTaskEvent };
+export type { ParsedAgentMessage, ParsedTaskArtifact, ParsedTaskEvent };

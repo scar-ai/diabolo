@@ -8,6 +8,7 @@ export default {
     "./src/lib/db/schema/schema.ts",
     "./src/lib/project/project.sql.ts",
     "./src/lib/org/org.sql.ts",
+    "./src/lib/billing/billing.sql.ts",
   ],
   breakpoints: true,
   verbose: true,

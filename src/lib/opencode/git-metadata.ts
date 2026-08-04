@@ -1,5 +1,4 @@
 import "@tanstack/react-start/server-only";
-import { runCodexChatCompletion } from "./codex";
 import {
   getOpenCodeChatCompletionsEndpoint,
   getProviderScopedModelId,
@@ -110,6 +109,11 @@ export const generateGitMetadata = async (
   config: OpenCodeConfig,
 ): Promise<GeneratedGitMetadata> => {
   const fallback = getFallbackGitMetadata(context.userPrompt);
+
+  if (config.providerKind === "codex") {
+    return fallback;
+  }
+
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), GIT_METADATA_TIMEOUT_MS);
 
@@ -150,35 +154,27 @@ export const generateGitMetadata = async (
       model: getProviderScopedModelId(config.model, config.providerId),
       temperature: 0.4,
     };
-    const data = (
-      config.providerKind === "codex"
-        ? await runCodexChatCompletion({
-            accessToken: config.apiKey,
-            model: getProviderScopedModelId(config.model, config.providerId),
-            payload,
-          })
-        : await fetch(getOpenCodeChatCompletionsEndpoint(config), {
-            method: "POST",
-            signal: controller.signal,
-            headers: {
-              Authorization: `Bearer ${config.apiKey}`,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify(payload),
-          }).then(async (response) => {
-            if (!response.ok) {
-              return null;
-            }
+    const data = (await fetch(getOpenCodeChatCompletionsEndpoint(config), {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        Authorization: `Bearer ${config.apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    }).then(async (response) => {
+      if (!response.ok) {
+        return null;
+      }
 
-            return (await response.json()) as {
-              choices?: Array<{
-                message?: {
-                  content?: string;
-                };
-              }>;
-            };
-          })
-    ) as {
+      return (await response.json()) as {
+        choices?: Array<{
+          message?: {
+            content?: string;
+          };
+        }>;
+      };
+    })) as {
       choices?: Array<{
         message?: {
           content?: string;

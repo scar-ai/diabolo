@@ -90,7 +90,7 @@ export function TaskFollowUpComposer({
                 <button
                   type="button"
                   disabled
-                  className="flex cursor-not-allowed items-center gap-1 rounded-lg px-2 py-1 text-sm text-muted-foreground/40 transition-colors"
+                  className="flex cursor-not-allowed items-center gap-1.5 rounded-full px-2.5 py-1.5 text-sm text-muted-foreground/40 transition-colors"
                 >
                   <BookMarkedIcon className="size-3.5 shrink-0" aria-hidden="true" />
                   <span className="max-w-40 truncate">{task.repoName ?? "Project"}</span>
@@ -99,7 +99,7 @@ export function TaskFollowUpComposer({
                 <button
                   type="button"
                   disabled
-                  className="flex cursor-not-allowed items-center gap-1 rounded-lg px-2 py-1 text-sm text-muted-foreground/40 transition-colors"
+                  className="flex cursor-not-allowed items-center gap-1.5 rounded-full px-2.5 py-1.5 text-sm text-muted-foreground/40 transition-colors"
                 >
                   <GitBranchIcon className="size-3.5 shrink-0" aria-hidden="true" />
                   <span className="max-w-40 truncate">{task.branchName ?? "Unknown branch"}</span>

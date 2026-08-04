@@ -30,7 +30,7 @@ export function UserBubble({
         </div>
       ) : null}
       <div className="w-fit max-w-[min(82%,64ch)]">
-        <div className="rounded-lg border border-border/60 bg-muted/30 px-3 py-2 text-sm break-words whitespace-pre-wrap text-foreground">
+        <div className="rounded-2xl border border-border/60 bg-muted/30 px-3 py-2 text-sm break-words whitespace-pre-wrap text-foreground">
           {text}
         </div>
       </div>

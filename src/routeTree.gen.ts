@@ -9,39 +9,44 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as PricingRouteImport } from './routes/pricing'
-import { Route as BetaRouteImport } from './routes/beta'
-import { Route as AlphaRouteImport } from './routes/alpha'
-import { Route as GuestRouteRouteImport } from './routes/_guest/route'
-import { Route as AuthRouteRouteImport } from './routes/_auth/route'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as GuestSignupRouteImport } from './routes/_guest/signup'
-import { Route as GuestLoginRouteImport } from './routes/_guest/login'
+import { Route as AuthRouteRouteImport } from './routes/_auth/route'
+import { Route as GuestRouteRouteImport } from './routes/_guest/route'
+import { Route as AlphaRouteImport } from './routes/alpha'
+import { Route as BetaRouteImport } from './routes/beta'
+import { Route as PricingRouteImport } from './routes/pricing'
 import { Route as AuthAppRouteRouteImport } from './routes/_auth/app/route'
+import { Route as GuestLoginRouteImport } from './routes/_guest/login'
+import { Route as GuestSignupRouteImport } from './routes/_guest/signup'
 import { Route as AuthAppIndexRouteImport } from './routes/_auth/app/index'
-import { Route as ApiTasksCreateRouteImport } from './routes/api/tasks/create'
-import { Route as ApiOpencodeSpawnTaskRouteImport } from './routes/api/opencode/spawn-task'
-import { Route as ApiOpencodeRuntimeEventsRouteImport } from './routes/api/opencode/runtime-events'
-import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
-import { Route as AuthAppSettingsRouteImport } from './routes/_auth/app/settings'
-import { Route as AuthAppSessionsRouteImport } from './routes/_auth/app/sessions'
-import { Route as AuthAppProjectsRouteImport } from './routes/_auth/app/projects'
-import { Route as AuthAppProjectSettingsRouteImport } from './routes/_auth/app/project-settings'
 import { Route as AuthAppOrganisationRouteImport } from './routes/_auth/app/organisation'
-import { Route as ApiTasksTaskIdFollowUpRouteImport } from './routes/api/tasks/$taskId/follow-up'
-import { Route as ApiTasksTaskIdAttachmentsRouteImport } from './routes/api/tasks/$taskId/attachments'
+import { Route as AuthAppProjectSettingsRouteImport } from './routes/_auth/app/project-settings'
+import { Route as AuthAppProjectsRouteImport } from './routes/_auth/app/projects'
+import { Route as AuthAppSessionsRouteImport } from './routes/_auth/app/sessions'
+import { Route as AuthAppSettingsRouteImport } from './routes/_auth/app/settings'
+import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
+import { Route as ApiBillingCheckoutRouteImport } from './routes/api/billing/checkout'
+import { Route as ApiBillingPortalRouteImport } from './routes/api/billing/portal'
+import { Route as ApiBillingWebhookRouteImport } from './routes/api/billing/webhook'
+import { Route as ApiOpencodeRuntimeEventsRouteImport } from './routes/api/opencode/runtime-events'
+import { Route as ApiOpencodeSpawnTaskRouteImport } from './routes/api/opencode/spawn-task'
+import { Route as ApiTasksCreateRouteImport } from './routes/api/tasks/create'
 import { Route as AuthAppTasksTaskIdRouteImport } from './routes/_auth/app/tasks/$taskId'
+import { Route as ApiTasksTaskIdAttachmentsRouteImport } from './routes/api/tasks/$taskId/attachments'
+import { Route as ApiTasksTaskIdFollowUpRouteImport } from './routes/api/tasks/$taskId/follow-up'
 import { Route as ApiTasksTaskIdArtifactsArtifactIdRouteImport } from './routes/api/tasks/$taskId/artifacts/$artifactId'
-import { Route as ApiOpencodeCodexProviderIdChatCompletionsRouteImport } from './routes/api/opencode/codex/$providerId/chat/completions'
 
-const PricingRoute = PricingRouteImport.update({
-  id: '/pricing',
-  path: '/pricing',
+const IndexRoute = IndexRouteImport.update({
+  id: '/',
+  path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const BetaRoute = BetaRouteImport.update({
-  id: '/beta',
-  path: '/beta',
+const AuthRouteRoute = AuthRouteRouteImport.update({
+  id: '/_auth',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const GuestRouteRoute = GuestRouteRouteImport.update({
+  id: '/_guest',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AlphaRoute = AlphaRouteImport.update({
@@ -49,47 +54,79 @@ const AlphaRoute = AlphaRouteImport.update({
   path: '/alpha',
   getParentRoute: () => rootRouteImport,
 } as any)
-const GuestRouteRoute = GuestRouteRouteImport.update({
-  id: '/_guest',
+const BetaRoute = BetaRouteImport.update({
+  id: '/beta',
+  path: '/beta',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AuthRouteRoute = AuthRouteRouteImport.update({
-  id: '/_auth',
+const PricingRoute = PricingRouteImport.update({
+  id: '/pricing',
+  path: '/pricing',
   getParentRoute: () => rootRouteImport,
-} as any)
-const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const GuestSignupRoute = GuestSignupRouteImport.update({
-  id: '/signup',
-  path: '/signup',
-  getParentRoute: () => GuestRouteRoute,
-} as any)
-const GuestLoginRoute = GuestLoginRouteImport.update({
-  id: '/login',
-  path: '/login',
-  getParentRoute: () => GuestRouteRoute,
 } as any)
 const AuthAppRouteRoute = AuthAppRouteRouteImport.update({
   id: '/app',
   path: '/app',
   getParentRoute: () => AuthRouteRoute,
 } as any)
+const GuestLoginRoute = GuestLoginRouteImport.update({
+  id: '/login',
+  path: '/login',
+  getParentRoute: () => GuestRouteRoute,
+} as any)
+const GuestSignupRoute = GuestSignupRouteImport.update({
+  id: '/signup',
+  path: '/signup',
+  getParentRoute: () => GuestRouteRoute,
+} as any)
 const AuthAppIndexRoute = AuthAppIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => AuthAppRouteRoute,
 } as any)
-const ApiTasksCreateRoute = ApiTasksCreateRouteImport.update({
-  id: '/api/tasks/create',
-  path: '/api/tasks/create',
+const AuthAppOrganisationRoute = AuthAppOrganisationRouteImport.update({
+  id: '/organisation',
+  path: '/organisation',
+  getParentRoute: () => AuthAppRouteRoute,
+} as any)
+const AuthAppProjectSettingsRoute = AuthAppProjectSettingsRouteImport.update({
+  id: '/project-settings',
+  path: '/project-settings',
+  getParentRoute: () => AuthAppRouteRoute,
+} as any)
+const AuthAppProjectsRoute = AuthAppProjectsRouteImport.update({
+  id: '/projects',
+  path: '/projects',
+  getParentRoute: () => AuthAppRouteRoute,
+} as any)
+const AuthAppSessionsRoute = AuthAppSessionsRouteImport.update({
+  id: '/sessions',
+  path: '/sessions',
+  getParentRoute: () => AuthAppRouteRoute,
+} as any)
+const AuthAppSettingsRoute = AuthAppSettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => AuthAppRouteRoute,
+} as any)
+const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
+  id: '/api/auth/$',
+  path: '/api/auth/$',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiOpencodeSpawnTaskRoute = ApiOpencodeSpawnTaskRouteImport.update({
-  id: '/api/opencode/spawn-task',
-  path: '/api/opencode/spawn-task',
+const ApiBillingCheckoutRoute = ApiBillingCheckoutRouteImport.update({
+  id: '/api/billing/checkout',
+  path: '/api/billing/checkout',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiBillingPortalRoute = ApiBillingPortalRouteImport.update({
+  id: '/api/billing/portal',
+  path: '/api/billing/portal',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiBillingWebhookRoute = ApiBillingWebhookRouteImport.update({
+  id: '/api/billing/webhook',
+  path: '/api/billing/webhook',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiOpencodeRuntimeEventsRoute =
@@ -98,40 +135,20 @@ const ApiOpencodeRuntimeEventsRoute =
     path: '/api/opencode/runtime-events',
     getParentRoute: () => rootRouteImport,
   } as any)
-const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
-  id: '/api/auth/$',
-  path: '/api/auth/$',
+const ApiOpencodeSpawnTaskRoute = ApiOpencodeSpawnTaskRouteImport.update({
+  id: '/api/opencode/spawn-task',
+  path: '/api/opencode/spawn-task',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AuthAppSettingsRoute = AuthAppSettingsRouteImport.update({
-  id: '/settings',
-  path: '/settings',
-  getParentRoute: () => AuthAppRouteRoute,
-} as any)
-const AuthAppSessionsRoute = AuthAppSessionsRouteImport.update({
-  id: '/sessions',
-  path: '/sessions',
-  getParentRoute: () => AuthAppRouteRoute,
-} as any)
-const AuthAppProjectsRoute = AuthAppProjectsRouteImport.update({
-  id: '/projects',
-  path: '/projects',
-  getParentRoute: () => AuthAppRouteRoute,
-} as any)
-const AuthAppProjectSettingsRoute = AuthAppProjectSettingsRouteImport.update({
-  id: '/project-settings',
-  path: '/project-settings',
-  getParentRoute: () => AuthAppRouteRoute,
-} as any)
-const AuthAppOrganisationRoute = AuthAppOrganisationRouteImport.update({
-  id: '/organisation',
-  path: '/organisation',
-  getParentRoute: () => AuthAppRouteRoute,
-} as any)
-const ApiTasksTaskIdFollowUpRoute = ApiTasksTaskIdFollowUpRouteImport.update({
-  id: '/api/tasks/$taskId/follow-up',
-  path: '/api/tasks/$taskId/follow-up',
+const ApiTasksCreateRoute = ApiTasksCreateRouteImport.update({
+  id: '/api/tasks/create',
+  path: '/api/tasks/create',
   getParentRoute: () => rootRouteImport,
+} as any)
+const AuthAppTasksTaskIdRoute = AuthAppTasksTaskIdRouteImport.update({
+  id: '/tasks/$taskId',
+  path: '/tasks/$taskId',
+  getParentRoute: () => AuthAppRouteRoute,
 } as any)
 const ApiTasksTaskIdAttachmentsRoute =
   ApiTasksTaskIdAttachmentsRouteImport.update({
@@ -139,21 +156,15 @@ const ApiTasksTaskIdAttachmentsRoute =
     path: '/api/tasks/$taskId/attachments',
     getParentRoute: () => rootRouteImport,
   } as any)
-const AuthAppTasksTaskIdRoute = AuthAppTasksTaskIdRouteImport.update({
-  id: '/tasks/$taskId',
-  path: '/tasks/$taskId',
-  getParentRoute: () => AuthAppRouteRoute,
+const ApiTasksTaskIdFollowUpRoute = ApiTasksTaskIdFollowUpRouteImport.update({
+  id: '/api/tasks/$taskId/follow-up',
+  path: '/api/tasks/$taskId/follow-up',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const ApiTasksTaskIdArtifactsArtifactIdRoute =
   ApiTasksTaskIdArtifactsArtifactIdRouteImport.update({
     id: '/api/tasks/$taskId/artifacts/$artifactId',
     path: '/api/tasks/$taskId/artifacts/$artifactId',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const ApiOpencodeCodexProviderIdChatCompletionsRoute =
-  ApiOpencodeCodexProviderIdChatCompletionsRouteImport.update({
-    id: '/api/opencode/codex/$providerId/chat/completions',
-    path: '/api/opencode/codex/$providerId/chat/completions',
     getParentRoute: () => rootRouteImport,
   } as any)
 
@@ -171,6 +182,9 @@ export interface FileRoutesByFullPath {
   '/app/sessions': typeof AuthAppSessionsRoute
   '/app/settings': typeof AuthAppSettingsRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/billing/checkout': typeof ApiBillingCheckoutRoute
+  '/api/billing/portal': typeof ApiBillingPortalRoute
+  '/api/billing/webhook': typeof ApiBillingWebhookRoute
   '/api/opencode/runtime-events': typeof ApiOpencodeRuntimeEventsRoute
   '/api/opencode/spawn-task': typeof ApiOpencodeSpawnTaskRoute
   '/api/tasks/create': typeof ApiTasksCreateRoute
@@ -179,7 +193,6 @@ export interface FileRoutesByFullPath {
   '/api/tasks/$taskId/attachments': typeof ApiTasksTaskIdAttachmentsRoute
   '/api/tasks/$taskId/follow-up': typeof ApiTasksTaskIdFollowUpRoute
   '/api/tasks/$taskId/artifacts/$artifactId': typeof ApiTasksTaskIdArtifactsArtifactIdRoute
-  '/api/opencode/codex/$providerId/chat/completions': typeof ApiOpencodeCodexProviderIdChatCompletionsRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -194,6 +207,9 @@ export interface FileRoutesByTo {
   '/app/sessions': typeof AuthAppSessionsRoute
   '/app/settings': typeof AuthAppSettingsRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/billing/checkout': typeof ApiBillingCheckoutRoute
+  '/api/billing/portal': typeof ApiBillingPortalRoute
+  '/api/billing/webhook': typeof ApiBillingWebhookRoute
   '/api/opencode/runtime-events': typeof ApiOpencodeRuntimeEventsRoute
   '/api/opencode/spawn-task': typeof ApiOpencodeSpawnTaskRoute
   '/api/tasks/create': typeof ApiTasksCreateRoute
@@ -202,7 +218,6 @@ export interface FileRoutesByTo {
   '/api/tasks/$taskId/attachments': typeof ApiTasksTaskIdAttachmentsRoute
   '/api/tasks/$taskId/follow-up': typeof ApiTasksTaskIdFollowUpRoute
   '/api/tasks/$taskId/artifacts/$artifactId': typeof ApiTasksTaskIdArtifactsArtifactIdRoute
-  '/api/opencode/codex/$providerId/chat/completions': typeof ApiOpencodeCodexProviderIdChatCompletionsRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -221,6 +236,9 @@ export interface FileRoutesById {
   '/_auth/app/sessions': typeof AuthAppSessionsRoute
   '/_auth/app/settings': typeof AuthAppSettingsRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/billing/checkout': typeof ApiBillingCheckoutRoute
+  '/api/billing/portal': typeof ApiBillingPortalRoute
+  '/api/billing/webhook': typeof ApiBillingWebhookRoute
   '/api/opencode/runtime-events': typeof ApiOpencodeRuntimeEventsRoute
   '/api/opencode/spawn-task': typeof ApiOpencodeSpawnTaskRoute
   '/api/tasks/create': typeof ApiTasksCreateRoute
@@ -229,7 +247,6 @@ export interface FileRoutesById {
   '/api/tasks/$taskId/attachments': typeof ApiTasksTaskIdAttachmentsRoute
   '/api/tasks/$taskId/follow-up': typeof ApiTasksTaskIdFollowUpRoute
   '/api/tasks/$taskId/artifacts/$artifactId': typeof ApiTasksTaskIdArtifactsArtifactIdRoute
-  '/api/opencode/codex/$providerId/chat/completions': typeof ApiOpencodeCodexProviderIdChatCompletionsRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -247,6 +264,9 @@ export interface FileRouteTypes {
     | '/app/sessions'
     | '/app/settings'
     | '/api/auth/$'
+    | '/api/billing/checkout'
+    | '/api/billing/portal'
+    | '/api/billing/webhook'
     | '/api/opencode/runtime-events'
     | '/api/opencode/spawn-task'
     | '/api/tasks/create'
@@ -255,7 +275,6 @@ export interface FileRouteTypes {
     | '/api/tasks/$taskId/attachments'
     | '/api/tasks/$taskId/follow-up'
     | '/api/tasks/$taskId/artifacts/$artifactId'
-    | '/api/opencode/codex/$providerId/chat/completions'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -270,6 +289,9 @@ export interface FileRouteTypes {
     | '/app/sessions'
     | '/app/settings'
     | '/api/auth/$'
+    | '/api/billing/checkout'
+    | '/api/billing/portal'
+    | '/api/billing/webhook'
     | '/api/opencode/runtime-events'
     | '/api/opencode/spawn-task'
     | '/api/tasks/create'
@@ -278,7 +300,6 @@ export interface FileRouteTypes {
     | '/api/tasks/$taskId/attachments'
     | '/api/tasks/$taskId/follow-up'
     | '/api/tasks/$taskId/artifacts/$artifactId'
-    | '/api/opencode/codex/$providerId/chat/completions'
   id:
     | '__root__'
     | '/'
@@ -296,6 +317,9 @@ export interface FileRouteTypes {
     | '/_auth/app/sessions'
     | '/_auth/app/settings'
     | '/api/auth/$'
+    | '/api/billing/checkout'
+    | '/api/billing/portal'
+    | '/api/billing/webhook'
     | '/api/opencode/runtime-events'
     | '/api/opencode/spawn-task'
     | '/api/tasks/create'
@@ -304,7 +328,6 @@ export interface FileRouteTypes {
     | '/api/tasks/$taskId/attachments'
     | '/api/tasks/$taskId/follow-up'
     | '/api/tasks/$taskId/artifacts/$artifactId'
-    | '/api/opencode/codex/$providerId/chat/completions'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -315,43 +338,24 @@ export interface RootRouteChildren {
   BetaRoute: typeof BetaRoute
   PricingRoute: typeof PricingRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
+  ApiBillingCheckoutRoute: typeof ApiBillingCheckoutRoute
+  ApiBillingPortalRoute: typeof ApiBillingPortalRoute
+  ApiBillingWebhookRoute: typeof ApiBillingWebhookRoute
   ApiOpencodeRuntimeEventsRoute: typeof ApiOpencodeRuntimeEventsRoute
   ApiOpencodeSpawnTaskRoute: typeof ApiOpencodeSpawnTaskRoute
   ApiTasksCreateRoute: typeof ApiTasksCreateRoute
   ApiTasksTaskIdAttachmentsRoute: typeof ApiTasksTaskIdAttachmentsRoute
   ApiTasksTaskIdFollowUpRoute: typeof ApiTasksTaskIdFollowUpRoute
   ApiTasksTaskIdArtifactsArtifactIdRoute: typeof ApiTasksTaskIdArtifactsArtifactIdRoute
-  ApiOpencodeCodexProviderIdChatCompletionsRoute: typeof ApiOpencodeCodexProviderIdChatCompletionsRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/pricing': {
-      id: '/pricing'
-      path: '/pricing'
-      fullPath: '/pricing'
-      preLoaderRoute: typeof PricingRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/beta': {
-      id: '/beta'
-      path: '/beta'
-      fullPath: '/beta'
-      preLoaderRoute: typeof BetaRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/alpha': {
-      id: '/alpha'
-      path: '/alpha'
-      fullPath: '/alpha'
-      preLoaderRoute: typeof AlphaRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/_guest': {
-      id: '/_guest'
-      path: ''
+    '/': {
+      id: '/'
+      path: '/'
       fullPath: '/'
-      preLoaderRoute: typeof GuestRouteRouteImport
+      preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_auth': {
@@ -361,26 +365,33 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/': {
-      id: '/'
-      path: '/'
+    '/_guest': {
+      id: '/_guest'
+      path: ''
       fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
+      preLoaderRoute: typeof GuestRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/_guest/signup': {
-      id: '/_guest/signup'
-      path: '/signup'
-      fullPath: '/signup'
-      preLoaderRoute: typeof GuestSignupRouteImport
-      parentRoute: typeof GuestRouteRoute
+    '/alpha': {
+      id: '/alpha'
+      path: '/alpha'
+      fullPath: '/alpha'
+      preLoaderRoute: typeof AlphaRouteImport
+      parentRoute: typeof rootRouteImport
     }
-    '/_guest/login': {
-      id: '/_guest/login'
-      path: '/login'
-      fullPath: '/login'
-      preLoaderRoute: typeof GuestLoginRouteImport
-      parentRoute: typeof GuestRouteRoute
+    '/beta': {
+      id: '/beta'
+      path: '/beta'
+      fullPath: '/beta'
+      preLoaderRoute: typeof BetaRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/pricing': {
+      id: '/pricing'
+      path: '/pricing'
+      fullPath: '/pricing'
+      preLoaderRoute: typeof PricingRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/_auth/app': {
       id: '/_auth/app'
@@ -389,67 +400,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthAppRouteRouteImport
       parentRoute: typeof AuthRouteRoute
     }
+    '/_guest/login': {
+      id: '/_guest/login'
+      path: '/login'
+      fullPath: '/login'
+      preLoaderRoute: typeof GuestLoginRouteImport
+      parentRoute: typeof GuestRouteRoute
+    }
+    '/_guest/signup': {
+      id: '/_guest/signup'
+      path: '/signup'
+      fullPath: '/signup'
+      preLoaderRoute: typeof GuestSignupRouteImport
+      parentRoute: typeof GuestRouteRoute
+    }
     '/_auth/app/': {
       id: '/_auth/app/'
       path: '/'
       fullPath: '/app/'
       preLoaderRoute: typeof AuthAppIndexRouteImport
-      parentRoute: typeof AuthAppRouteRoute
-    }
-    '/api/tasks/create': {
-      id: '/api/tasks/create'
-      path: '/api/tasks/create'
-      fullPath: '/api/tasks/create'
-      preLoaderRoute: typeof ApiTasksCreateRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/opencode/spawn-task': {
-      id: '/api/opencode/spawn-task'
-      path: '/api/opencode/spawn-task'
-      fullPath: '/api/opencode/spawn-task'
-      preLoaderRoute: typeof ApiOpencodeSpawnTaskRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/opencode/runtime-events': {
-      id: '/api/opencode/runtime-events'
-      path: '/api/opencode/runtime-events'
-      fullPath: '/api/opencode/runtime-events'
-      preLoaderRoute: typeof ApiOpencodeRuntimeEventsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/auth/$': {
-      id: '/api/auth/$'
-      path: '/api/auth/$'
-      fullPath: '/api/auth/$'
-      preLoaderRoute: typeof ApiAuthSplatRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/_auth/app/settings': {
-      id: '/_auth/app/settings'
-      path: '/settings'
-      fullPath: '/app/settings'
-      preLoaderRoute: typeof AuthAppSettingsRouteImport
-      parentRoute: typeof AuthAppRouteRoute
-    }
-    '/_auth/app/sessions': {
-      id: '/_auth/app/sessions'
-      path: '/sessions'
-      fullPath: '/app/sessions'
-      preLoaderRoute: typeof AuthAppSessionsRouteImport
-      parentRoute: typeof AuthAppRouteRoute
-    }
-    '/_auth/app/projects': {
-      id: '/_auth/app/projects'
-      path: '/projects'
-      fullPath: '/app/projects'
-      preLoaderRoute: typeof AuthAppProjectsRouteImport
-      parentRoute: typeof AuthAppRouteRoute
-    }
-    '/_auth/app/project-settings': {
-      id: '/_auth/app/project-settings'
-      path: '/project-settings'
-      fullPath: '/app/project-settings'
-      preLoaderRoute: typeof AuthAppProjectSettingsRouteImport
       parentRoute: typeof AuthAppRouteRoute
     }
     '/_auth/app/organisation': {
@@ -459,18 +428,81 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthAppOrganisationRouteImport
       parentRoute: typeof AuthAppRouteRoute
     }
-    '/api/tasks/$taskId/follow-up': {
-      id: '/api/tasks/$taskId/follow-up'
-      path: '/api/tasks/$taskId/follow-up'
-      fullPath: '/api/tasks/$taskId/follow-up'
-      preLoaderRoute: typeof ApiTasksTaskIdFollowUpRouteImport
+    '/_auth/app/project-settings': {
+      id: '/_auth/app/project-settings'
+      path: '/project-settings'
+      fullPath: '/app/project-settings'
+      preLoaderRoute: typeof AuthAppProjectSettingsRouteImport
+      parentRoute: typeof AuthAppRouteRoute
+    }
+    '/_auth/app/projects': {
+      id: '/_auth/app/projects'
+      path: '/projects'
+      fullPath: '/app/projects'
+      preLoaderRoute: typeof AuthAppProjectsRouteImport
+      parentRoute: typeof AuthAppRouteRoute
+    }
+    '/_auth/app/sessions': {
+      id: '/_auth/app/sessions'
+      path: '/sessions'
+      fullPath: '/app/sessions'
+      preLoaderRoute: typeof AuthAppSessionsRouteImport
+      parentRoute: typeof AuthAppRouteRoute
+    }
+    '/_auth/app/settings': {
+      id: '/_auth/app/settings'
+      path: '/settings'
+      fullPath: '/app/settings'
+      preLoaderRoute: typeof AuthAppSettingsRouteImport
+      parentRoute: typeof AuthAppRouteRoute
+    }
+    '/api/auth/$': {
+      id: '/api/auth/$'
+      path: '/api/auth/$'
+      fullPath: '/api/auth/$'
+      preLoaderRoute: typeof ApiAuthSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/tasks/$taskId/attachments': {
-      id: '/api/tasks/$taskId/attachments'
-      path: '/api/tasks/$taskId/attachments'
-      fullPath: '/api/tasks/$taskId/attachments'
-      preLoaderRoute: typeof ApiTasksTaskIdAttachmentsRouteImport
+    '/api/billing/checkout': {
+      id: '/api/billing/checkout'
+      path: '/api/billing/checkout'
+      fullPath: '/api/billing/checkout'
+      preLoaderRoute: typeof ApiBillingCheckoutRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/billing/portal': {
+      id: '/api/billing/portal'
+      path: '/api/billing/portal'
+      fullPath: '/api/billing/portal'
+      preLoaderRoute: typeof ApiBillingPortalRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/billing/webhook': {
+      id: '/api/billing/webhook'
+      path: '/api/billing/webhook'
+      fullPath: '/api/billing/webhook'
+      preLoaderRoute: typeof ApiBillingWebhookRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/opencode/runtime-events': {
+      id: '/api/opencode/runtime-events'
+      path: '/api/opencode/runtime-events'
+      fullPath: '/api/opencode/runtime-events'
+      preLoaderRoute: typeof ApiOpencodeRuntimeEventsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/opencode/spawn-task': {
+      id: '/api/opencode/spawn-task'
+      path: '/api/opencode/spawn-task'
+      fullPath: '/api/opencode/spawn-task'
+      preLoaderRoute: typeof ApiOpencodeSpawnTaskRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/tasks/create': {
+      id: '/api/tasks/create'
+      path: '/api/tasks/create'
+      fullPath: '/api/tasks/create'
+      preLoaderRoute: typeof ApiTasksCreateRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_auth/app/tasks/$taskId': {
@@ -480,18 +512,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthAppTasksTaskIdRouteImport
       parentRoute: typeof AuthAppRouteRoute
     }
+    '/api/tasks/$taskId/attachments': {
+      id: '/api/tasks/$taskId/attachments'
+      path: '/api/tasks/$taskId/attachments'
+      fullPath: '/api/tasks/$taskId/attachments'
+      preLoaderRoute: typeof ApiTasksTaskIdAttachmentsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/tasks/$taskId/follow-up': {
+      id: '/api/tasks/$taskId/follow-up'
+      path: '/api/tasks/$taskId/follow-up'
+      fullPath: '/api/tasks/$taskId/follow-up'
+      preLoaderRoute: typeof ApiTasksTaskIdFollowUpRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/tasks/$taskId/artifacts/$artifactId': {
       id: '/api/tasks/$taskId/artifacts/$artifactId'
       path: '/api/tasks/$taskId/artifacts/$artifactId'
       fullPath: '/api/tasks/$taskId/artifacts/$artifactId'
       preLoaderRoute: typeof ApiTasksTaskIdArtifactsArtifactIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/opencode/codex/$providerId/chat/completions': {
-      id: '/api/opencode/codex/$providerId/chat/completions'
-      path: '/api/opencode/codex/$providerId/chat/completions'
-      fullPath: '/api/opencode/codex/$providerId/chat/completions'
-      preLoaderRoute: typeof ApiOpencodeCodexProviderIdChatCompletionsRouteImport
       parentRoute: typeof rootRouteImport
     }
   }
@@ -555,6 +594,9 @@ const rootRouteChildren: RootRouteChildren = {
   BetaRoute: BetaRoute,
   PricingRoute: PricingRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
+  ApiBillingCheckoutRoute: ApiBillingCheckoutRoute,
+  ApiBillingPortalRoute: ApiBillingPortalRoute,
+  ApiBillingWebhookRoute: ApiBillingWebhookRoute,
   ApiOpencodeRuntimeEventsRoute: ApiOpencodeRuntimeEventsRoute,
   ApiOpencodeSpawnTaskRoute: ApiOpencodeSpawnTaskRoute,
   ApiTasksCreateRoute: ApiTasksCreateRoute,
@@ -562,8 +604,6 @@ const rootRouteChildren: RootRouteChildren = {
   ApiTasksTaskIdFollowUpRoute: ApiTasksTaskIdFollowUpRoute,
   ApiTasksTaskIdArtifactsArtifactIdRoute:
     ApiTasksTaskIdArtifactsArtifactIdRoute,
-  ApiOpencodeCodexProviderIdChatCompletionsRoute:
-    ApiOpencodeCodexProviderIdChatCompletionsRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

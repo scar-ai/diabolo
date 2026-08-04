@@ -2,6 +2,7 @@ import { Buffer } from "node:buffer";
 
 import type { Github } from "@/lib/github";
 import { Log } from "@/lib/log";
+import { buildReportProgressOpenCodeSetupCommand } from "@/lib/opencode/spawn-task";
 import { formatProjectEnvVarsForDotEnv } from "@/lib/project/env";
 import type { ProjectSkillEntry } from "@/lib/project/skills";
 import type { Sandbox } from "@/lib/sandbox";
@@ -32,10 +33,12 @@ const log = Log.create({ ns: "sandbox.workspace" });
 
 const updateStage = async (
   taskId: string,
+  messageId: string,
   stage: string,
   status: "queued" | "running" = "running",
 ) =>
   SandboxRuntimeState.setTaskStage({
+    messageId,
     stage,
     status,
     taskId,
@@ -223,7 +226,7 @@ export namespace SandboxWorkspace {
     const prepareStartedAt = Date.now();
 
     try {
-      await updateStage(input.taskId, "Getting your sandbox ready");
+      await updateStage(input.taskId, input.messageId, "Creating sandbox");
       await SandboxRuntimeState.setSandboxStatus(input.taskId, "spawning");
 
       const createWorkspaceStartedAt = Date.now();
@@ -241,6 +244,8 @@ export namespace SandboxWorkspace {
         status: "running",
       });
 
+      await updateStage(input.taskId, input.messageId, "Resolving sandbox workspace");
+
       const resolveWorkspaceStartedAt = Date.now();
       const root = await sandbox.getWorkspaceRoot();
       const sandboxPath = `${root.replace(/\/$/, "")}/${input.repoName}`;
@@ -250,10 +255,8 @@ export namespace SandboxWorkspace {
         sandboxPath,
       });
 
-      await updateTaskRecord(input.taskId, {
-        sandboxPath,
-        stage: "Cloning repository into sandbox",
-      });
+      await updateTaskRecord(input.taskId, { sandboxPath });
+      await updateStage(input.taskId, input.messageId, "Cloning repository into sandbox");
 
       const cloneStartedAt = Date.now();
       await sandbox.cloneRepository({
@@ -282,6 +285,8 @@ export namespace SandboxWorkspace {
         stage: "Preparing git branch and agent runtime",
       });
 
+      await updateStage(input.taskId, input.messageId, "Preparing git branch and agent runtime");
+
       await input.run(
         sandbox,
         input.taskId,
@@ -295,6 +300,8 @@ export namespace SandboxWorkspace {
       op.info("sandbox bootstrap completed", {
         sandboxId: sandbox.id,
       });
+
+      await updateStage(input.taskId, input.messageId, "Syncing project configuration");
 
       await syncProjectEnvFile({
         envVars: input.envVars,
@@ -366,6 +373,17 @@ export namespace SandboxWorkspace {
           sandboxPath: input.taskRecord.sandboxPath,
         });
 
+        await input.run(
+          sandbox,
+          input.taskId,
+          input.messageId,
+          buildReportProgressOpenCodeSetupCommand(),
+          input.taskRecord.sandboxPath,
+          undefined,
+          60,
+          "sync progress reporting tool",
+        );
+
         await syncProjectEnvFile({
           envVars: input.envVars,
           messageId: input.messageId,
@@ -397,7 +415,7 @@ export namespace SandboxWorkspace {
       }
     }
 
-    await updateStage(input.taskId, "Recreating sandbox for follow-up");
+    await updateStage(input.taskId, input.messageId, "Recreating sandbox for follow-up");
 
     return prepare({
       authenticatedRemoteUrl: input.authenticatedRemoteUrl,

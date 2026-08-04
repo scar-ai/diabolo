@@ -255,12 +255,13 @@ export const createTaskEvent = async (input: {
   sandboxId?: string;
 }) =>
   db.transaction(async (tx) => {
-    await tx
-      .insert(taskEventSequence)
-      .values({
-        taskId: input.taskId,
-      })
-      .onConflictDoNothing();
+    await tx.execute(sql`
+      INSERT INTO ${taskEventSequence} (${sql.identifier(taskEventSequence.taskId.name)})
+      SELECT ${task.id}
+      FROM ${task}
+      WHERE ${task.id} = ${input.taskId}
+      ON CONFLICT DO NOTHING
+    `);
 
     const allocated = await tx
       .update(taskEventSequence)
@@ -270,7 +271,11 @@ export const createTaskEvent = async (input: {
       .where(eq(taskEventSequence.taskId, input.taskId))
       .returning({ nextSequence: taskEventSequence.nextSequence });
 
-    const sequence = (allocated[0]?.nextSequence ?? 1) - 1;
+    if (!allocated[0]) {
+      return null;
+    }
+
+    const sequence = allocated[0].nextSequence - 1;
     const inserted = await tx
       .insert(taskEvent)
       .values({
@@ -358,12 +363,16 @@ export const claimNextTaskMessage = (taskId: string) =>
         stage: "Dispatching prompt",
         status: "processing",
       })
-      .where(eq(taskMessage.id, next.id))
+      .where(and(eq(taskMessage.id, next.id), eq(taskMessage.status, "pending")))
       .returning();
+
+    if (!updated[0]) {
+      return null;
+    }
 
     await syncPendingQueuePositions(tx, taskId, next.id);
 
-    return updated[0] ?? null;
+    return updated[0];
   });
 
 export const appendTaskMessageLog = async (messageId: string, chunk: string) => {
@@ -382,75 +391,25 @@ export const appendTaskMessageLog = async (messageId: string, chunk: string) => 
   });
 };
 
-export const appendTaskMessageAgentMessage = async (
+// The agent's text is stored as the ordered blocks it produced: every block but
+// the last is intermediate narration, the last one is the final answer. Keeping
+// them separate is what lets the UI render the answer apart from the reasoning.
+export const setTaskMessageAgentResponse = (
   messageId: string,
-  text: string,
+  blocks: string[],
   timestamp: number,
 ) => {
-  const trimmed = text.trim();
+  const kept = blocks
+    .map((block) => block.trim())
+    .filter(Boolean)
+    .slice(-MAX_AGENT_MESSAGES);
 
-  if (!trimmed) {
-    return null;
-  }
-
-  const current = await findTaskMessage(messageId);
-
-  if (!current) {
-    return null;
-  }
-
-  const responseMessages = [
-    ...parseAgentMessages(current.responseMessages),
-    { text: trimmed, timestamp },
-  ].slice(-MAX_AGENT_MESSAGES);
-
-  return updateTaskMessageRecord(messageId, {
-    responseMessages: serializeAgentMessages(responseMessages),
-  });
-};
-
-export const setTaskMessageAgentResponse = async (
-  messageId: string,
-  text: string,
-  timestamp: number,
-) => {
-  const trimmed = text.trim();
-
-  if (!trimmed) {
-    return null;
-  }
-
-  const current = await findTaskMessage(messageId);
-
-  if (!current) {
-    return null;
+  if (kept.length === 0) {
+    return Promise.resolve(null);
   }
 
   return updateTaskMessageRecord(messageId, {
-    responseMessages: serializeAgentMessages([{ text: trimmed, timestamp }]),
-  });
-};
-
-export const appendTaskAgentMessage = async (taskId: string, text: string, timestamp: number) => {
-  const trimmed = text.trim();
-
-  if (!trimmed) {
-    return null;
-  }
-
-  const current = await findTaskRecord(taskId);
-
-  if (!current) {
-    return null;
-  }
-
-  const agentMessages = [
-    ...parseAgentMessages(current.agentMessages),
-    { text: trimmed, timestamp },
-  ].slice(-MAX_AGENT_MESSAGES);
-
-  return updateTaskRecord(taskId, {
-    agentMessages: serializeAgentMessages(agentMessages),
+    responseMessages: serializeAgentMessages(kept.map((text) => ({ text, timestamp }))),
   });
 };
 

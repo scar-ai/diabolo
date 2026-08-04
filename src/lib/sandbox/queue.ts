@@ -65,6 +65,9 @@ const hasWorkRemaining = async (taskId: string) => {
   return Boolean(pending || processing);
 };
 
+const hasPendingWorkRemaining = async (taskId: string) =>
+  Boolean(await findNextPendingTaskMessage(taskId));
+
 const recoverStaleProcessing = async (taskId: string) => {
   if (activeProcessors.has(taskId)) {
     return;
@@ -286,7 +289,7 @@ const drainTaskQueue = async (taskId: string) => {
       taskId,
     });
 
-    if (await hasWorkRemaining(taskId)) {
+    if (await hasPendingWorkRemaining(taskId)) {
       log.debug("task queue still has work; scheduling another drain", { taskId });
       queueMicrotask(() => {
         void drainTaskQueue(taskId);

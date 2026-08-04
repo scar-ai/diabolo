@@ -508,7 +508,9 @@ export function ScheduledTaskDialog({
               />
               <datalist id={timezoneListId}>
                 {supportedTimezones.map((timezone) => (
-                  <option key={timezone} value={timezone} />
+                  <option key={timezone} value={timezone}>
+                    {timezone}
+                  </option>
                 ))}
               </datalist>
               {!timezoneIsValid ? (

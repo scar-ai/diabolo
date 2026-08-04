@@ -6,7 +6,7 @@ export function Markdown({ content }: { content: string }) {
       components={{
         p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
         pre: ({ children }) => (
-          <pre className="my-2 overflow-auto rounded-lg bg-muted/50 p-3 text-xs">{children}</pre>
+          <pre className="my-2 overflow-auto rounded-2xl bg-muted/50 p-3 text-xs">{children}</pre>
         ),
         code: ({ children, className }) => {
           const isInline = !className;

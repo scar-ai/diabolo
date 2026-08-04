@@ -2,6 +2,7 @@ import path from "node:path";
 
 import { Github } from "@/lib/github";
 import { Log } from "@/lib/log";
+import { saveCodexOpenCodeAuth } from "@/lib/opencode/codex";
 import { type OpenCodeConfig } from "@/lib/opencode/config";
 import { findTaskWithProject } from "@/lib/project/data";
 import { parseStoredProjectSkills } from "@/lib/project/skills";
@@ -11,13 +12,12 @@ import {
   buildOpenCodeRuntimeEnvironment,
   ensureOpenCodeServer,
   getOpenCodeRuntimeFingerprint,
-  type OpenCodePromptResult,
   parseOpenCodeSessionMetadataResult,
-  parseOpenCodePromptResult,
   readOpenCodeSessionMetadata,
   readOpenCodeUsageLog,
   runOpenCodePrompt,
 } from "@/lib/sandbox/opencode-host";
+import { OPENCODE_AUTH_FILE_PATH } from "@/lib/sandbox/opencode-runtime";
 import {
   findTaskMessage,
   findTaskRecord,
@@ -41,7 +41,7 @@ import {
   assertTaskNotCancelled,
   completeMessageExecution,
   getTaskProjectEnvVars,
-  recordRuntimeAgentEvent,
+  runSandboxBackgroundCommand,
   runSandboxCommand,
   syncGitHandoffState,
   unwrapResult,
@@ -50,6 +50,30 @@ import {
 
 type Viewer = { email: string; login: string; name: string };
 const log = Log.create({ ns: "sandbox.run_execution" });
+
+const isTransientOpenCodeTransportError = (error: unknown) => {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const message = error.message.trim().toLowerCase();
+
+  return (
+    message === "terminated" ||
+    message === "fetch failed" ||
+    message === "connection reset by server" ||
+    message.includes("response stream failed")
+  );
+};
+
+const buildOpenCodeTransportRetryPrompt = (originalPrompt: string) =>
+  [
+    "The previous attempt was interrupted by a transient provider connection failure.",
+    "Continue the same task from the repository's current state. Preserve completed work and finish the request.",
+    "",
+    "Original user task:",
+    originalPrompt.trim(),
+  ].join("\n");
 
 const buildReplayMessageText = (input: {
   prompt: string;
@@ -224,12 +248,16 @@ const runOpenCodeMessage = async (input: {
   const buildRuntimeEnvironment = (
     sessionId?: string | null,
     replayMessagesForRun = replayMessages,
+    forceNewSession = false,
+    userPrompt = input.messagePrompt,
   ) =>
     buildOpenCodeRuntimeEnvironment({
       apiKey: openCode.runtimeApiKey ?? openCode.apiKey,
       apiKeyEnvVar: openCode.apiKeyEnvVar,
+      authJson: openCode.authJson,
       attachments,
       defaultBranch: input.repo.defaultBranch,
+      forceNewSession,
       githubToken: input.githubAccessToken,
       messageId: input.messageId,
       model,
@@ -246,14 +274,19 @@ const runOpenCodeMessage = async (input: {
       sessionId,
       taskId: input.taskId,
       upstreamBaseUrl: openCode.baseUrl,
-      userPrompt: input.messagePrompt,
+      userPrompt,
       viewer: input.viewer,
     });
   const persistedSessionId =
     shouldRecoverSession || input.taskRecord?.opencodeRuntimeFingerprint !== runtimeFingerprint
       ? null
       : (input.taskRecord?.opencodeSessionId ?? null);
-  const openCodeEnvironment = buildRuntimeEnvironment(persistedSessionId);
+  const openCodeEnvironment = buildRuntimeEnvironment(
+    persistedSessionId,
+    replayMessages,
+    shouldRecoverSession,
+  );
+  await updateMessageStage(input.taskId, input.messageId, "Starting agent");
   await runSandboxCommand(
     input.prepared.sandbox,
     input.taskId,
@@ -279,20 +312,41 @@ const runOpenCodeMessage = async (input: {
   });
   const openCodeStartedAt = Date.now();
   let response: Awaited<ReturnType<typeof runOpenCodePrompt>>;
-  let runtimeResult: OpenCodePromptResult | null = null;
 
   try {
+    await updateMessageStage(input.taskId, input.messageId, "Agent is working");
     response = await runOpenCodePrompt({
       environment: openCodeEnvironment,
       messageId: input.messageId,
-      run: runSandboxCommand,
+      runBackground: runSandboxBackgroundCommand,
       sandbox: input.prepared.sandbox,
       sandboxPath: input.prepared.sandboxPath,
       taskId: input.taskId,
     });
-    runtimeResult = parseOpenCodePromptResult(response.output);
   } catch (error) {
-    if (
+    if (isTransientOpenCodeTransportError(error)) {
+      op.warn("transient opencode transport failure; retrying prompt", { error });
+      await updateMessageStage(
+        input.taskId,
+        input.messageId,
+        "Agent connection interrupted; retrying",
+      );
+      const retryEnvironment = buildRuntimeEnvironment(
+        null,
+        [],
+        false,
+        buildOpenCodeTransportRetryPrompt(input.messagePrompt),
+      );
+
+      response = await runOpenCodePrompt({
+        environment: retryEnvironment,
+        messageId: input.messageId,
+        runBackground: runSandboxBackgroundCommand,
+        sandbox: input.prepared.sandbox,
+        sandboxPath: input.prepared.sandboxPath,
+        taskId: input.taskId,
+      });
+    } else if (
       input.messageRecord.sequence > 0 &&
       !shouldRecoverSession &&
       input.taskRecord?.opencodeSessionId
@@ -305,17 +359,16 @@ const runOpenCodeMessage = async (input: {
         input.taskId,
         input.messageRecord.sequence,
       );
-      const recoveredEnvironment = buildRuntimeEnvironment(null, recoveredReplayMessages);
+      const recoveredEnvironment = buildRuntimeEnvironment(null, recoveredReplayMessages, true);
 
       response = await runOpenCodePrompt({
         environment: recoveredEnvironment,
         messageId: input.messageId,
-        run: runSandboxCommand,
+        runBackground: runSandboxBackgroundCommand,
         sandbox: input.prepared.sandbox,
         sandboxPath: input.prepared.sandboxPath,
         taskId: input.taskId,
       });
-      runtimeResult = parseOpenCodePromptResult(response.output);
       await updateTaskMessageRecord(input.messageId, {
         replayStrategy: "replayed_history",
         replayedAt: new Date(),
@@ -324,20 +377,41 @@ const runOpenCodeMessage = async (input: {
       throw error;
     }
   }
+
+  const runtimeResult = response.runResult;
+
   op.info("OpenCode run completed", {
+    blockCount: runtimeResult?.blocks.length ?? 0,
     durationMs: Date.now() - openCodeStartedAt,
     outputChars: response.output.length,
   });
+
+  // The runtime exits non-zero on failure, so reaching here without a result
+  // means its completion event never made it back — the run's outcome is
+  // unknown and must not be reported as success.
   if (!runtimeResult) {
-    throw new Error("OpenCode prompt completed without a parseable runtime result.");
+    throw new Error("The agent run finished without reporting a result.");
   }
+
+  if (openCode.providerKind === "codex") {
+    try {
+      const refreshedAuth = await input.prepared.sandbox.downloadFile(
+        `${input.prepared.sandboxPath}/${OPENCODE_AUTH_FILE_PATH}`,
+      );
+      await saveCodexOpenCodeAuth(openCode.selectedProviderId, refreshedAuth.toString("utf8"));
+    } catch (error) {
+      op.warn("failed to persist refreshed OpenCode auth", { error });
+    }
+  }
+
+  await updateMessageStage(input.taskId, input.messageId, "Reviewing agent results");
 
   await updateTaskRecord(input.taskId, {
     opencodeRuntimeFingerprint: runtimeFingerprint,
-    opencodeSessionId: runtimeResult.sessionId?.trim() || null,
+    opencodeSessionId: runtimeResult.sessionId.trim() || null,
   });
 
-  const sessionMetadataEnvironment = buildRuntimeEnvironment(runtimeResult.sessionId ?? null, []);
+  const sessionMetadataEnvironment = buildRuntimeEnvironment(runtimeResult.sessionId, []);
   const sessionMetadata = parseOpenCodeSessionMetadataResult(
     (
       await readOpenCodeSessionMetadata({
@@ -358,22 +432,10 @@ const runOpenCodeMessage = async (input: {
 
   await updateTaskMessageRecord(input.messageId, {
     opencodeAssistantMessageId: runtimeResult.assistantMessageId?.trim() || null,
-    opencodeUserMessageId: runtimeResult.userMessageId?.trim() || null,
+    opencodeUserMessageId: runtimeResult.userMessageId.trim() || null,
     replayStrategy: replayMessages.length > 0 ? "replayed_history" : null,
     replayedAt: replayMessages.length > 0 ? new Date() : null,
   });
-
-  if (runtimeResult?.text?.trim()) {
-    await recordRuntimeAgentEvent({
-      messageId: input.messageId,
-      payload: {
-        text: runtimeResult.text.trim(),
-        timestamp: Date.now(),
-      },
-      taskId: input.taskId,
-      type: "token",
-    });
-  }
 
   const usageLog = await readOpenCodeUsageLog({
     messageId: input.messageId,
@@ -398,6 +460,8 @@ const runOpenCodeMessage = async (input: {
     usageEvents,
   });
   await assertTaskNotCancelled(input.taskId);
+
+  await updateMessageStage(input.taskId, input.messageId, "Preparing task handoff");
 
   const changes = await runSandboxCommand(
     input.prepared.sandbox,
@@ -472,8 +536,6 @@ export const runInitialMessage = async (taskId: string, messageId: string) => {
     viewer: context.viewer,
   });
 
-  await updateMessageStage(taskId, messageId, "Running task");
-
   await runOpenCodeMessage({
     defaultCompletionStage: "Task completed",
     githubAccessToken: context.githubAccessToken,
@@ -515,8 +577,6 @@ export const runFollowUpMessage = async (taskId: string, messageId: string) => {
   if (!prepared.sandboxPath) {
     throw new Error("No sandbox workspace available for follow-up.");
   }
-
-  await updateMessageStage(taskId, messageId, "Running OpenCode task");
 
   await runOpenCodeMessage({
     defaultCompletionStage: "Follow-up completed",

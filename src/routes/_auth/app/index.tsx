@@ -14,8 +14,8 @@ import { ScheduledTasksSection } from "@/components/app/home/scheduled-tasks-sec
 import { PromptComposer } from "@/components/app/prompt-composer";
 import { ReasoningEffortSelector } from "@/components/app/reasoning-effort-selector";
 import { Button } from "@/components/ui/button";
-import { githubReposQueryOptions } from "@/lib/github/queries";
-import { githubBranchesQueryOptions } from "@/lib/github/queries";
+import { $createGithubBranch } from "@/lib/github/functions";
+import { githubBranchesQueryOptions, githubReposQueryOptions } from "@/lib/github/queries";
 import { modelSupportsReasoningEffort, type ReasoningEffort } from "@/lib/models/reasoning-effort";
 import { $createProject } from "@/lib/project/functions";
 import {
@@ -68,6 +68,7 @@ function AppHome() {
   const navigate = useNavigate({ from: Route.fullPath });
   const queryClient = useQueryClient();
   const createProject = useServerFn($createProject);
+  const createGithubBranch = useServerFn($createGithubBranch);
 
   const [inputValue, setInputValue] = useState("");
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
@@ -223,6 +224,32 @@ function AppHome() {
     navigate({ search: (prev) => ({ ...prev, branch }) });
   };
 
+  const createBranchMutation = useMutation({
+    mutationFn: async (branchName: string) => {
+      if (!currentProjectRepoFullName) {
+        throw new Error("Select a project first.");
+      }
+
+      return createGithubBranch({
+        data: {
+          branchName,
+          fromBranch: currentBranch,
+          repoFullName: currentProjectRepoFullName,
+        },
+      });
+    },
+    onSuccess: async (branch) => {
+      await queryClient.invalidateQueries({
+        queryKey: ["github-branches", user.id, currentProjectRepoFullName],
+      });
+      handleSelectBranch(branch.name);
+      toast.success(`Created branch ${branch.name}.`);
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Failed to create branch.");
+    },
+  });
+
   const handleSubmit = () => {
     if (!canSubmit || !currentProject || !effectiveProviderId) return;
 
@@ -372,7 +399,11 @@ function AppHome() {
                   branches={branchesQuery.data ?? []}
                   currentBranch={currentBranch}
                   disabled={!currentProject}
+                  isCreating={createBranchMutation.isPending}
                   isPending={branchesQuery.isPending}
+                  onCreateBranch={async (branchName) => {
+                    await createBranchMutation.mutateAsync(branchName);
+                  }}
                   onSelectBranch={handleSelectBranch}
                 />
                 <ProviderSelector
@@ -467,7 +498,7 @@ function ScheduledTasksSectionSkeleton() {
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-3">
         <div className="h-4 w-28 animate-pulse rounded bg-muted" />
-        <div className="h-8 w-32 animate-pulse rounded-md bg-muted" />
+        <div className="h-8 w-32 animate-pulse rounded-full bg-muted" />
       </div>
       <div className="rounded-xl border border-border/60 bg-card p-4">
         <div className="h-4 w-48 animate-pulse rounded bg-muted" />
