@@ -97,6 +97,7 @@ export const task = pgTable(
     sandboxId: text(),
     sandboxName: text(),
     sandboxStatus: text("sandbox_status").notNull().default("pending"),
+    sandboxTier: text("sandbox_tier"),
     branchName: text(),
     spawnSource: text().notNull().default("user"),
     scheduledTaskId: text("scheduled_task_id"),

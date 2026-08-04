@@ -93,7 +93,10 @@ pnpm daytona:snapshot
 ```
 
 This creates the versioned browser image with OpenCode 1.18.11 and the agent tools used by both
-Codex login and task sandboxes.
+Codex login and task sandboxes. One snapshot is built per sandbox size (`diabolobox-v1`,
+`diabolobox-v2`, `diabolobox-v3`, `diabolobox-max`) because Daytona bakes the CPU/RAM/disk
+allocation into the snapshot. Pass tier IDs to build a subset, e.g.
+`pnpm daytona:snapshot diabolobox-v3`.
 
 **6. Start dev server**
 
@@ -120,18 +123,18 @@ and Customer Subscription events.
 
 ## Scripts
 
-| Command                 | Description                                 |
-| ----------------------- | ------------------------------------------- |
-| `pnpm dev`              | Start dev server                            |
-| `pnpm build`            | Production build                            |
-| `pnpm start`            | Run production server                       |
-| `pnpm daytona:snapshot` | Build the OpenCode 1.18.11 Daytona snapshot |
-| `pnpm db:studio`        | Open Drizzle Studio (DB browser)            |
-| `pnpm auth:migrate`     | Sync Better Auth schema                     |
-| `pnpm check`            | Format + lint                               |
-| `pnpm lint`             | Run Oxlint                                  |
-| `pnpm format`           | Run Oxfmt                                   |
-| `pnpm deps`             | Check for dependency updates                |
+| Command                 | Description                                  |
+| ----------------------- | -------------------------------------------- |
+| `pnpm dev`              | Start dev server                             |
+| `pnpm build`            | Production build                             |
+| `pnpm start`            | Run production server                        |
+| `pnpm daytona:snapshot` | Build the OpenCode 1.18.11 Daytona snapshots |
+| `pnpm db:studio`        | Open Drizzle Studio (DB browser)             |
+| `pnpm auth:migrate`     | Sync Better Auth schema                      |
+| `pnpm check`            | Format + lint                                |
+| `pnpm lint`             | Run Oxlint                                   |
+| `pnpm format`           | Run Oxfmt                                    |
+| `pnpm deps`             | Check for dependency updates                 |
 
 ## Project Structure
 

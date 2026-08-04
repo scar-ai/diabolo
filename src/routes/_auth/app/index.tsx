@@ -10,6 +10,7 @@ import { BranchSelector } from "@/components/app/home/branch-selector";
 import { CreateProjectDialog } from "@/components/app/home/create-project-dialog";
 import { ProviderSelector } from "@/components/app/home/provider-selector";
 import { RunningTasksPanel } from "@/components/app/home/running-tasks-panel";
+import { SandboxSelector, useSandboxTier } from "@/components/app/home/sandbox-selector";
 import { ScheduledTasksSection } from "@/components/app/home/scheduled-tasks-section";
 import { PromptComposer } from "@/components/app/prompt-composer";
 import { ReasoningEffortSelector } from "@/components/app/reasoning-effort-selector";
@@ -27,6 +28,7 @@ import {
   type TaskSummaryResult,
   taskKeys,
 } from "@/lib/project/queries";
+import type { SandboxTierId } from "@/lib/sandbox/tiers";
 import { userLlmProvidersQueryOptions } from "@/lib/user/queries";
 
 type PendingAttachment = {
@@ -78,6 +80,7 @@ function AppHome() {
   const [createProjectName, setCreateProjectName] = useState("");
   const [selectedProviderId, setSelectedProviderId] = useState<string | null>(null);
   const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort | null>(null);
+  const [sandboxTier, setSandboxTier] = useSandboxTier();
 
   const currentProjectId = search.projectId ?? "";
   const projectsQuery = useQuery(projectsQueryOptions(user.id));
@@ -169,6 +172,7 @@ function AppHome() {
       prompt: string;
       providerId: string;
       reasoningEffort: ReasoningEffort | null;
+      sandboxTier: SandboxTierId;
       sourceBranch: string;
     }) => {
       if (!currentProject)
@@ -181,6 +185,7 @@ function AppHome() {
       if (data.reasoningEffort) {
         formData.set("reasoningEffort", data.reasoningEffort);
       }
+      formData.set("sandboxTier", data.sandboxTier);
       formData.set("sourceBranch", data.sourceBranch);
 
       for (const file of data.attachments) {
@@ -258,6 +263,7 @@ function AppHome() {
       prompt: inputValue.trim(),
       providerId: effectiveProviderId,
       reasoningEffort: supportsReasoningEffort ? reasoningEffort : null,
+      sandboxTier,
       sourceBranch: currentBranch,
     });
   };
@@ -412,6 +418,11 @@ function AppHome() {
                   isPending={isProvidersLoading}
                   onSelectProvider={setSelectedProviderId}
                   providers={providers}
+                />
+                <SandboxSelector
+                  disabled={taskMutation.isPending}
+                  onSelectTier={setSandboxTier}
+                  tierId={sandboxTier}
                 />
               </>
             }

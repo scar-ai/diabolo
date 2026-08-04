@@ -9,6 +9,7 @@ import type { Sandbox } from "@/lib/sandbox";
 import { SandboxRuntimeState } from "@/lib/sandbox/runtime-state";
 import type { TaskRecord } from "@/lib/sandbox/store";
 import { findTaskRecord, updateTaskRecord } from "@/lib/sandbox/store";
+import { normalizeSandboxTierId } from "@/lib/sandbox/tiers";
 
 import { opencodeInstallCommand } from "./opencode";
 
@@ -220,6 +221,7 @@ export namespace SandboxWorkspace {
     run: Run;
     skills: ProjectSkillEntry[];
     taskId: string;
+    tierId?: string | null;
     viewer: Viewer;
   }) => {
     const op = log.child({ taskId: input.taskId });
@@ -230,11 +232,13 @@ export namespace SandboxWorkspace {
       await SandboxRuntimeState.setSandboxStatus(input.taskId, "spawning");
 
       const createWorkspaceStartedAt = Date.now();
-      const sandbox = await input.provider.createWorkspace(input.repoName);
+      const tierId = normalizeSandboxTierId(input.tierId);
+      const sandbox = await input.provider.createWorkspace(input.repoName, { tierId });
       op.info("sandbox workspace created", {
         durationMs: Date.now() - createWorkspaceStartedAt,
         sandboxId: sandbox.id,
         sandboxName: sandbox.name,
+        tierId,
       });
 
       await SandboxRuntimeState.setSandboxStatus(input.taskId, "ready", {
@@ -430,6 +434,7 @@ export namespace SandboxWorkspace {
       run: input.run,
       skills: input.skills,
       taskId: input.taskId,
+      tierId: input.taskRecord.sandboxTier,
       viewer: input.viewer,
     });
   };

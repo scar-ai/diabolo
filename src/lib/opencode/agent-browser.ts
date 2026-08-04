@@ -1,4 +1,5 @@
 import "@tanstack/react-start/server-only";
+import { AGENT_BROWSER_VERSION } from "./constants";
 
 const doubleQuoteForShell = (value: string) =>
   `"${value.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
@@ -18,7 +19,7 @@ const AGENT_BROWSER_PACKAGE_JSON = JSON.stringify(
     type: "module",
     dependencies: {
       "@opencode-ai/plugin": "latest",
-      "agent-browser": "^0.21.2",
+      "agent-browser": AGENT_BROWSER_VERSION,
       zod: "^4.3.6",
     },
   },
@@ -43,7 +44,15 @@ const LOCAL_AGENT_BROWSER_BIN = path.join(
   process.platform === "win32" ? "agent-browser.cmd" : "agent-browser",
 );
 
-const toErrorMessage = (error) => (error instanceof Error ? error.message : String(error));
+const toErrorMessage = (error) => {
+  const message = error instanceof Error ? error.message : String(error);
+  const stdout = typeof error?.stdout === "string" ? error.stdout.trim() : "";
+  const stderr = typeof error?.stderr === "string" ? error.stderr.trim() : "";
+
+  return [message, stdout, stderr]
+    .filter((value, index, values) => value && values.indexOf(value) === index)
+    .join("\n");
+};
 const resolveAgentBrowserBin = () => {
   if (process.env.AGENT_BROWSER_BIN?.trim()) {
     return process.env.AGENT_BROWSER_BIN.trim();
@@ -129,13 +138,14 @@ const runAgentBrowser = async (args, options = {}) => {
       maxBuffer: 10 * 1024 * 1024,
       timeout: options.timeoutMs ?? 30000,
     });
-    const rawOutput = [result.stdout, result.stderr].filter(Boolean).join("\n").trim();
+    const stdout = result.stdout.trim();
+    const rawOutput = [stdout, result.stderr].filter(Boolean).join("\n").trim();
 
     if (!options.json) {
       return rawOutput || "ok";
     }
 
-    const payload = parseJsonOutput(rawOutput);
+    const payload = parseJsonOutput(stdout);
 
     if (!payload) {
       throw new Error(rawOutput || "agent-browser returned invalid JSON output");
@@ -159,6 +169,32 @@ const runAgentBrowser = async (args, options = {}) => {
   }
 };
 
+const openBrowserUrl = async (url) => {
+  const open = () =>
+    runAgentBrowser(["open", url], {
+      json: true,
+      timeoutMs: 45000,
+    });
+
+  try {
+    return await open();
+  } catch (initialError) {
+    await runAgentBrowser(["close"], { json: true, timeoutMs: 10000 }).catch(() => {});
+
+    try {
+      return await open();
+    } catch (retryError) {
+      await runAgentBrowser(["close"], { json: true, timeoutMs: 10000 }).catch(() => {});
+      throw new Error(
+        "Browser navigation failed after restarting the agent-browser session: " +
+          toErrorMessage(retryError) +
+          "\nInitial failure: " +
+          toErrorMessage(initialError),
+      );
+    }
+  }
+};
+
 const getPageState = async () => {
   const [url, title] = await Promise.all([
     runAgentBrowser(["get", "url"], { json: true }),
@@ -166,8 +202,8 @@ const getPageState = async () => {
   ]);
 
   return {
-    title: typeof title === "string" ? title : title?.value || "",
-    url: typeof url === "string" ? url : url?.value || "",
+    title: typeof title === "string" ? title : title?.title || title?.value || "",
+    url: typeof url === "string" ? url : url?.url || url?.value || "",
   };
 };
 
@@ -194,10 +230,7 @@ export const open_url = tool({
     url: tool.schema.string().min(1).describe("URL to open. http:// is assumed for localhost."),
   },
   async execute(args) {
-    await runAgentBrowser(["open", resolveUrl(args.url)], {
-      json: true,
-      timeoutMs: 45000,
-    });
+    await openBrowserUrl(resolveUrl(args.url));
     return JSON.stringify(await getPageState(), null, 2);
   },
 });

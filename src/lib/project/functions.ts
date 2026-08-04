@@ -13,6 +13,7 @@ import {
 } from "@/lib/project/scheduled-tasks";
 import type { ProjectSkillEntry } from "@/lib/project/skills";
 import { unwrap } from "@/lib/result";
+import { SANDBOX_TIER_IDS } from "@/lib/sandbox/tiers";
 import { searchSkills } from "@/lib/skills/search";
 
 const createProjectInputSchema = z.object({
@@ -56,6 +57,7 @@ const createTaskInputSchema = z.object({
   projectId: z.string().min(1),
   prompt: z.string().min(10),
   reasoningEffort: z.string().trim().min(1).nullable().optional(),
+  sandboxTier: z.enum(SANDBOX_TIER_IDS).nullable().optional(),
   sourceBranch: z.string().min(1),
 });
 

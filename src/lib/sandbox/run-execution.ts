@@ -533,6 +533,7 @@ export const runInitialMessage = async (taskId: string, messageId: string) => {
     run: runSandboxCommand,
     skills: context.taskProjectSkills,
     taskId,
+    tierId: context.taskRecord.sandboxTier,
     viewer: context.viewer,
   });
 

@@ -1,19 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useServerFn } from "@tanstack/react-start";
 import { LoaderIcon } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
-import {
-  TaskConversation,
-  TaskFollowUpComposer,
-  TaskHeaderActions,
-} from "@/components/app/task-detail";
+import { TaskConversation, TaskFollowUpComposer } from "@/components/app/task-detail";
 import type { CollaboratorMap } from "@/components/app/task-detail/types";
 import { Button } from "@/components/ui/button";
 import { type ReasoningEffort } from "@/lib/models/reasoning-effort";
-import { $deleteTaskById, $terminateTaskById } from "@/lib/project/functions";
 import {
   projectCollaboratorsQueryOptions,
   projectDetailQueryOptions,
@@ -55,8 +49,6 @@ export const Route = createFileRoute("/_auth/app/tasks/$taskId")({
 function TaskDetailPage() {
   const { taskId } = Route.useParams();
   const queryClient = useQueryClient();
-  const terminateTask = useServerFn($terminateTaskById);
-  const deleteTask = useServerFn($deleteTaskById);
 
   const [followUpInput, setFollowUpInput] = useState("");
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
@@ -69,29 +61,6 @@ function TaskDetailPage() {
       const data = query.state.data as TaskDetailResult | undefined;
       if (!data || TERMINAL_STATUSES.has(data.status)) return false;
       return 2_000;
-    },
-  });
-
-  const terminateMutation = useMutation({
-    mutationFn: () => terminateTask({ data: { taskId } }),
-    onSuccess: () => {
-      toast.success("Task terminated.");
-      queryClient.invalidateQueries({ queryKey: taskKeys.detail(taskId) });
-      queryClient.invalidateQueries({ queryKey: taskKeys.all });
-    },
-    onError: (error) => {
-      toast.error(error instanceof Error ? error.message : "Failed to terminate task.");
-    },
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: () => deleteTask({ data: { taskId } }),
-    onSuccess: () => {
-      toast.success("Task removed from history.");
-      queryClient.invalidateQueries({ queryKey: taskKeys.all });
-    },
-    onError: (error) => {
-      toast.error(error instanceof Error ? error.message : "Failed to delete task.");
     },
   });
 
@@ -227,19 +196,12 @@ function TaskDetailPage() {
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
       {/* Page header */}
-      <div className="flex h-14 shrink-0 items-center justify-between border-b border-border/60 px-6">
+      <div className="flex h-14 shrink-0 items-center border-b border-border/60 px-6">
         <div className="flex min-w-0 items-center gap-2">
           <span className="max-w-xs truncate text-base font-medium text-foreground">
             {taskTitle}
           </span>
         </div>
-        <TaskHeaderActions
-          deletePending={deleteMutation.isPending}
-          onDelete={() => deleteMutation.mutate()}
-          onTerminate={() => terminateMutation.mutate()}
-          taskIsRunning={!!isRunning}
-          terminatePending={terminateMutation.isPending}
-        />
       </div>
 
       <main className="flex flex-1 flex-col overflow-hidden">

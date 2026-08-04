@@ -24,6 +24,7 @@ import {
 import { fromPromise } from "@/lib/result";
 import { Sandbox } from "@/lib/sandbox";
 import { findNextPendingTaskMessage, findProcessingTaskMessage } from "@/lib/sandbox/store";
+import { normalizeSandboxTierId } from "@/lib/sandbox/tiers";
 import { detectRepoSkills, type DetectedRepoSkillEntry } from "@/lib/skills/repository";
 import { resolveUserProvider } from "@/lib/user/provider-resolution";
 
@@ -360,6 +361,7 @@ export namespace Project {
     projectId: string;
     prompt: string;
     reasoningEffort?: string | null;
+    sandboxTier?: string | null;
     sourceBranch: string;
     userId: string;
   }): ResultAsync<TaskRecord, Error> => {
@@ -385,6 +387,7 @@ export namespace Project {
           draft,
           openCodeConfig,
           projectId: input.projectId,
+          values: { sandboxTier: normalizeSandboxTierId(input.sandboxTier) },
         }).andThen((createdTask) =>
           Sandbox.enqueueTaskMessage(createdTask.id, draft.prompt, "initial", {
             createdByUserId: input.userId,
@@ -555,6 +558,7 @@ export namespace Project {
     projectId: string;
     prompt: string;
     reasoningEffort?: string | null;
+    sandboxTier?: string | null;
     sourceBranch: string;
     userId: string;
   }): ResultAsync<{ messageId: string; task: TaskRecord }, Error> =>
@@ -574,6 +578,7 @@ export namespace Project {
           draft,
           openCodeConfig,
           projectId: input.projectId,
+          values: { sandboxTier: normalizeSandboxTierId(input.sandboxTier) },
         }).andThen((task) => {
           const messageOverrides = resolveTaskMessageOverrides(openCodeConfig, {
             reasoningEffort: input.reasoningEffort ?? null,

@@ -36,7 +36,7 @@ Use this file first. It maps Daytona and OpenCode concepts onto the diabolo code
 
 ## Existing repo assumptions
 
-- The browser-ready snapshot is named `diabolo-opencode-browser-v2` unless overridden by `DAYTONA_BROWSER_SNAPSHOT`.
+- Browser-ready snapshot names use the `diabolo-opencode-browser-v5` prefix unless overridden by `DAYTONA_BROWSER_SNAPSHOT`, followed by the sandbox tier ID. Daytona snapshots bake in each tier's resource allocation, which sandboxes inherit.
 - The default base image is `node:22-bookworm` unless overridden by `DAYTONA_DEFAULT_IMAGE` or `DAYTONA_BROWSER_BASE_IMAGE`.
 - Sandbox creation depends on an active Daytona snapshot, not an ad-hoc image build during task startup.
 - OpenCode is executed non-interactively with a generated config file and model selection passed in at runtime.

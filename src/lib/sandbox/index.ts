@@ -11,6 +11,7 @@ import { SandboxEvents } from "@/lib/sandbox/events";
 import { SandboxQueue } from "@/lib/sandbox/queue";
 import { createTaskMessage, findTaskRecord } from "@/lib/sandbox/store";
 import type { TaskMessageRecord } from "@/lib/sandbox/store";
+import type { SandboxTierId } from "@/lib/sandbox/tiers";
 import { SandboxWorkspace } from "@/lib/sandbox/workspace";
 
 const log = Log.create({ ns: "sandbox" });
@@ -96,7 +97,11 @@ export namespace Sandbox {
   export interface Provider {
     createWorkspace(
       repoName: string,
-      options?: { autoDeleteInterval?: number; autoStopInterval?: number },
+      options?: {
+        autoDeleteInterval?: number;
+        autoStopInterval?: number;
+        tierId?: SandboxTierId | null;
+      },
     ): Promise<Session>;
     destroyWorkspace(id: string): Promise<void>;
     formatError(error: unknown): string;

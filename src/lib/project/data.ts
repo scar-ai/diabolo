@@ -161,6 +161,7 @@ export const insertTask = (input: {
   repoId: string;
   scheduledTaskId?: string | null;
   sandboxStatus?: string;
+  sandboxTier?: string | null;
   spawnDepth?: number;
   spawnSource?: string;
   stage: string;

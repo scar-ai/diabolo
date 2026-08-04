@@ -1,0 +1,1 @@
+ALTER TABLE "task" ADD COLUMN "sandbox_tier" text;

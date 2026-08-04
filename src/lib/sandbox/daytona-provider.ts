@@ -12,6 +12,7 @@ import {
 import { formatDaytonaError, getDaytonaClient } from "@/lib/daytona/client";
 import { getRequiredBrowserSnapshot } from "@/lib/daytona/snapshot";
 import { Log } from "@/lib/log";
+import { normalizeSandboxTierId } from "@/lib/sandbox/tiers";
 
 import type { Sandbox } from "./index";
 
@@ -230,9 +231,10 @@ export const getSandboxProvider = (): Sandbox.Provider => {
         language: CodeLanguage.TYPESCRIPT,
         name,
       };
-      const snapshot = await getRequiredBrowserSnapshot(daytona);
+      const tierId = normalizeSandboxTierId(options?.tierId);
+      const snapshot = await getRequiredBrowserSnapshot(daytona, tierId);
 
-      log.debug("creating sandbox", { name, snapshot });
+      log.debug("creating sandbox", { name, snapshot, tierId });
 
       const snapshotParams: CreateSandboxFromSnapshotParams = {
         ...baseParams,

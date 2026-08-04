@@ -1,4 +1,5 @@
 export const OPENCODE_VERSION = "1.18.11";
+export const AGENT_BROWSER_VERSION = "0.33.2";
 export const OPENAI_CODEX_RESPONSES_PROVIDER_ID = "openai";
 
 export const CODEX_MODEL_OPTIONS = ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"] as const;

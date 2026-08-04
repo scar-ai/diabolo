@@ -75,6 +75,11 @@ const buildOpenCodeUserPrompt = (
     "Keep each update under 180 characters, specific to the task, and suitable for the end user. Report intent and observable progress, never private reasoning or chain-of-thought.",
     "Do not send updates for every individual tool call.",
     "",
+    "Sandbox workflow:",
+    "Repository dependencies are not preinstalled after cloning. Before running a package script, check whether its dependencies are present and install them with the repository's package manager when needed.",
+    "Keep temporary logs and generated artifacts inside the repository, preferably under .opencode/artifacts, so they remain accessible to tools and the task UI.",
+    "When a task needs a long-running development server, launch it detached with its output redirected to an artifact log, then verify the process or listening port before opening it in the browser.",
+    "",
     "User task:",
     userPrompt.trim(),
   ].join("\n");

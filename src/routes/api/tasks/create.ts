@@ -25,6 +25,7 @@ export const Route = createFileRoute("/api/tasks/create")({
           const prompt = getFormString(formData, "prompt");
           const providerId = getFormString(formData, "providerId");
           const reasoningEffort = optionalFormString(formData, "reasoningEffort");
+          const sandboxTier = optionalFormString(formData, "sandboxTier");
           const sourceBranch = getFormString(formData, "sourceBranch");
 
           if (projectId.length < 1) {
@@ -45,6 +46,7 @@ export const Route = createFileRoute("/api/tasks/create")({
               projectId,
               prompt,
               reasoningEffort,
+              sandboxTier,
               sourceBranch,
               userId: user.id,
             }),

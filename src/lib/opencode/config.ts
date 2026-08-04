@@ -168,7 +168,9 @@ export const buildOpenCodeConfigContent = (config: OpenCodeConfig) => {
       bash: {
         "*": "allow",
       },
+      doom_loop: "deny",
       edit: "allow",
+      external_directory: "allow",
       question: "deny",
       skill: "allow",
       webfetch: "allow",

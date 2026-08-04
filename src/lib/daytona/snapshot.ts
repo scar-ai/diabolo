@@ -3,17 +3,23 @@ import { DaytonaNotFoundError, Image, type Daytona } from "@daytona/sdk";
 
 import { env } from "@/env/server";
 import { Log } from "@/lib/log";
-import { OPENCODE_VERSION } from "@/lib/opencode/constants";
+import { AGENT_BROWSER_VERSION, OPENCODE_VERSION } from "@/lib/opencode/constants";
+import { DEFAULT_SANDBOX_TIER_ID, normalizeSandboxTierId } from "@/lib/sandbox/tiers";
 
 const log = Log.create({ ns: "daytona.snapshot" });
 
 // Must match `scripts/daytona-snapshot.mjs`, which is what actually builds it.
-const SNAPSHOT_VERSION = "v3";
+const SNAPSHOT_VERSION = "v5";
 const DEFAULT_BASE_IMAGE = "node:22-bookworm";
-const DEFAULT_SNAPSHOT_NAME = `diabolo-opencode-browser-${SNAPSHOT_VERSION}`;
+const SNAPSHOT_NAME_PREFIX = `diabolo-opencode-browser-${SNAPSHOT_VERSION}`;
 
-export const getBrowserSnapshotName = () =>
-  env.DAYTONA_BROWSER_SNAPSHOT?.trim() || DEFAULT_SNAPSHOT_NAME;
+/**
+ * One snapshot per sandbox tier: Daytona bakes the resource allocation into the
+ * snapshot, so the tier is what picks the snapshot. `DAYTONA_BROWSER_SNAPSHOT`
+ * overrides the shared prefix, not the full name.
+ */
+export const getBrowserSnapshotName = (tierId: unknown = DEFAULT_SANDBOX_TIER_ID) =>
+  `${env.DAYTONA_BROWSER_SNAPSHOT?.trim() || SNAPSHOT_NAME_PREFIX}-${normalizeSandboxTierId(tierId)}`;
 
 export const getBrowserSnapshotBaseImage = () =>
   env.DAYTONA_DEFAULT_IMAGE?.trim() || env.DAYTONA_BROWSER_BASE_IMAGE?.trim() || DEFAULT_BASE_IMAGE;
@@ -30,7 +36,7 @@ export const createBrowserSnapshotImage = () =>
       "rm -rf /var/lib/apt/lists/*",
       "corepack enable",
       "corepack prepare pnpm@10.33.0 --activate",
-      `npm install -g opencode-ai@${OPENCODE_VERSION} @opencode-ai/plugin@${OPENCODE_VERSION} agent-browser zod`,
+      `npm install -g opencode-ai@${OPENCODE_VERSION} @opencode-ai/plugin@${OPENCODE_VERSION} agent-browser@${AGENT_BROWSER_VERSION} zod`,
       [
         "bash",
         "-lc",
@@ -41,6 +47,11 @@ export const createBrowserSnapshotImage = () =>
       "pnpm --version",
       "opencode --version",
       "agent-browser --version",
+      [
+        "bash",
+        "-lc",
+        "agent-browser open about:blank --json && agent-browser get url --json && agent-browser close --json",
+      ],
       "mkdir -p /home/daytona/.config/opencode/tools /root/.config/opencode/tools",
     )
     .env({
@@ -57,8 +68,8 @@ const isBuildingState = (state: string | null | undefined) => {
   );
 };
 
-export const getRequiredBrowserSnapshot = async (daytona: Daytona) => {
-  const snapshotName = getBrowserSnapshotName();
+export const getRequiredBrowserSnapshot = async (daytona: Daytona, tierId?: unknown) => {
+  const snapshotName = getBrowserSnapshotName(tierId);
   let snapshot = await daytona.snapshot.get(snapshotName);
 
   if (isBuildingState(snapshot.state)) {
@@ -81,9 +92,9 @@ export const getRequiredBrowserSnapshot = async (daytona: Daytona) => {
   return snapshotName;
 };
 
-export const formatMissingBrowserSnapshotError = (error: unknown) => {
+export const formatMissingBrowserSnapshotError = (error: unknown, tierId?: unknown) => {
   if (error instanceof DaytonaNotFoundError) {
-    return `Daytona browser snapshot "${getBrowserSnapshotName()}" does not exist. Build it first with \`pnpm daytona:snapshot\`.`;
+    return `Daytona browser snapshot "${getBrowserSnapshotName(tierId)}" does not exist. Build it first with \`pnpm daytona:snapshot\`.`;
   }
 
   return error instanceof Error ? error.message : String(error);
