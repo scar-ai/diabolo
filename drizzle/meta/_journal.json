@@ -225,6 +225,13 @@
       "when": 1785843963022,
       "tag": "0032_yielding_kingpin",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1785849295299,
+      "tag": "0033_stiff_swarm",
+      "breakpoints": true
     }
   ]
 }

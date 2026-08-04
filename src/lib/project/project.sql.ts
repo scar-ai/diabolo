@@ -19,6 +19,8 @@ export const project = pgTable(
     agentSkills: text("agent_skills"),
     name: text().notNull(),
     envVars: text("env_vars"),
+    sshPrivateKey: text("ssh_private_key"),
+    sshPublicKey: text("ssh_public_key"),
     repoId: text().notNull(),
     sharedWithOrgId: text("shared_with_org_id").references(() => organisation.id, {
       onDelete: "set null",

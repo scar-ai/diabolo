@@ -21,6 +21,11 @@ import {
   parseStoredProjectSkills,
   type ProjectSkillEntry,
 } from "@/lib/project/skills";
+import {
+  generateProjectSshKeyPair,
+  normalizeSshPrivateKey,
+  normalizeSshPublicKey,
+} from "@/lib/project/ssh";
 import { fromPromise } from "@/lib/result";
 import { Sandbox } from "@/lib/sandbox";
 import { findNextPendingTaskMessage, findProcessingTaskMessage } from "@/lib/sandbox/store";
@@ -278,7 +283,13 @@ export namespace Project {
     });
 
   export const listProjectsForUser = (userId: string): ResultAsync<ProjectRecord[], Error> =>
-    fromPromise(listProjects(userId));
+    fromPromise(listProjects(userId)).map((projects) =>
+      projects.map((project) => ({
+        ...project,
+        sshPrivateKey: null,
+        sshPublicKey: null,
+      })),
+    );
 
   export const getProjectForUser = (
     projectId: string,
@@ -286,6 +297,7 @@ export namespace Project {
   ): ResultAsync<
     ProjectRecord & {
       envEntries: ProjectEnvEntry[];
+      hasSshPrivateKey: boolean;
       repoSkills: DetectedRepoSkillEntry[];
       skills: ProjectSkillEntry[];
       repoDefaultBranch: string | null;
@@ -311,6 +323,8 @@ export namespace Project {
           repoDescription: repo?.description ?? null,
           repoFullName: repo?.fullName ?? null,
           repoHtmlUrl: repo?.htmlUrl ?? null,
+          hasSshPrivateKey: Boolean(value.sshPrivateKey),
+          sshPrivateKey: null,
         })),
       ),
     );
@@ -338,12 +352,28 @@ export namespace Project {
     projectId: string;
     shareWithOrganisation: boolean;
     skills: ProjectSkillEntry[];
+    sshPrivateKey?: string | null;
+    sshPublicKey: string | null;
     userId: string;
   }): ResultAsync<ProjectRecord, Error> =>
-    requireOwnedProject(input.projectId, input.userId).andThen(() =>
+    requireOwnedProject(input.projectId, input.userId).andThen((project) =>
       Org.getMembershipForUser(input.userId).andThen((membership) => {
         if (input.shareWithOrganisation && !membership) {
           return errAsync(new Error("Join an organisation before sharing projects with it."));
+        }
+
+        const normalizedSshPrivateKey =
+          input.sshPrivateKey === undefined
+            ? undefined
+            : normalizeSshPrivateKey(input.sshPrivateKey);
+        const sshPrivateKeyUpdate =
+          normalizedSshPrivateKey === undefined ? {} : { sshPrivateKey: normalizedSshPrivateKey };
+        const sshPublicKey = normalizeSshPublicKey(input.sshPublicKey);
+        const effectiveSshPrivateKey =
+          normalizedSshPrivateKey === undefined ? project.sshPrivateKey : normalizedSshPrivateKey;
+
+        if (sshPublicKey && !effectiveSshPrivateKey) {
+          return errAsync(new Error("A public key requires its matching private key."));
         }
 
         return fromPromise(
@@ -351,9 +381,32 @@ export namespace Project {
             agentSkills: JSON.stringify(normalizeProjectSkills(input.skills)),
             envVars: JSON.stringify(normalizeProjectEnvEntries(input.envEntries)),
             sharedWithOrgId: input.shareWithOrganisation ? (membership?.orgId ?? null) : null,
+            ...sshPrivateKeyUpdate,
+            sshPublicKey,
           }),
-        ).andThen((value) => (value ? okAsync(value) : errAsync(new Error("Project not found."))));
+        )
+          .andThen((value) => (value ? okAsync(value) : errAsync(new Error("Project not found."))))
+          .map((value) => ({ ...value, sshPrivateKey: null }));
       }),
+    );
+
+  export const generateSshKeyForProject = (
+    projectId: string,
+    userId: string,
+  ): ResultAsync<{ publicKey: string }, Error> =>
+    requireOwnedProject(projectId, userId).andThen(() =>
+      fromPromise(generateProjectSshKeyPair()).andThen((keyPair) =>
+        fromPromise(
+          updateProject(projectId, {
+            sshPrivateKey: keyPair.privateKey,
+            sshPublicKey: keyPair.publicKey,
+          }),
+        ).andThen((value) =>
+          value
+            ? okAsync({ publicKey: keyPair.publicKey })
+            : errAsync(new Error("Project not found.")),
+        ),
+      ),
     );
 
   export const createTaskForUser = (input: {

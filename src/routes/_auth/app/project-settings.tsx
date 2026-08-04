@@ -3,8 +3,10 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import {
   AlertTriangleIcon,
+  CopyIcon,
   FileIcon,
   LoaderIcon,
+  KeyRoundIcon,
   SearchIcon,
   Trash2Icon,
   UploadCloudIcon,
@@ -47,6 +49,7 @@ import {
   $cancelProjectInvite,
   $deleteProject,
   $inviteProjectMember,
+  $generateProjectSshKey,
   $kickProjectMember,
   $searchSkills,
   $updateProjectSettings,
@@ -63,7 +66,7 @@ import type { DetectedRepoSkillEntry } from "@/lib/skills/repository";
 
 type ProjectEnvDraftEntry = ProjectEnvEntry & { id: string };
 type SkillSearchResult = ProjectSkillEntry & { installsLabel: string };
-type Tab = "environment" | "skills" | "collaborators" | "danger";
+type Tab = "environment" | "ssh" | "skills" | "collaborators" | "danger";
 
 type ProjectSettingsSearch = { projectId?: string };
 
@@ -99,6 +102,7 @@ function ProjectSettingsPage() {
   const cancelInvite = useServerFn($cancelProjectInvite);
   const kickMember = useServerFn($kickProjectMember);
   const searchSkills = useServerFn($searchSkills);
+  const generateProjectSshKey = useServerFn($generateProjectSshKey);
 
   const fileInputId = useId();
   const orgShareCheckboxId = useId();
@@ -107,6 +111,9 @@ function ProjectSettingsPage() {
   const [activeTab, setActiveTab] = useState<Tab>("environment");
   const [manualEntries, setManualEntries] = useState<ProjectEnvDraftEntry[]>([createDraftEntry()]);
   const [selectedSkills, setSelectedSkills] = useState<ProjectSkillEntry[]>([]);
+  const [sshPrivateKey, setSshPrivateKey] = useState("");
+  const [sshPublicKey, setSshPublicKey] = useState("");
+  const [removeSshPrivateKey, setRemoveSshPrivateKey] = useState(false);
   const [skillSearch, setSkillSearch] = useState("");
   const [hasSearchedSkills, setHasSearchedSkills] = useState(false);
   const [shareWithOrganisation, setShareWithOrganisation] = useState(false);
@@ -162,6 +169,9 @@ function ProjectSettingsPage() {
           : [createDraftEntry()],
       );
       setSelectedSkills(projectQuery.data.skills ?? []);
+      setSshPrivateKey("");
+      setSshPublicKey(projectQuery.data.sshPublicKey ?? "");
+      setRemoveSshPrivateKey(false);
       setShareWithOrganisation(Boolean(projectQuery.data.sharedWithOrgId));
       setDeleteDialogOpen(false);
       setDeleteConfirmationStep("confirm");
@@ -195,7 +205,18 @@ function ProjectSettingsPage() {
     mutationFn: (envEntries: ProjectEnvEntry[]) => {
       if (!projectId) throw new Error("Project not found.");
       return updateProjectSettings({
-        data: { envEntries, projectId, shareWithOrganisation, skills: selectedSkills },
+        data: {
+          envEntries,
+          projectId,
+          shareWithOrganisation,
+          skills: selectedSkills,
+          sshPrivateKey: removeSshPrivateKey
+            ? null
+            : sshPrivateKey.trim()
+              ? sshPrivateKey
+              : undefined,
+          sshPublicKey: sshPublicKey.trim() || null,
+        },
       });
     },
     onSuccess: async () => {
@@ -206,6 +227,23 @@ function ProjectSettingsPage() {
     },
     onError: (error) => {
       toast.error(error instanceof Error ? error.message : "Failed to save project settings.");
+    },
+  });
+
+  const generateSshKeyMutation = useMutation({
+    mutationFn: () => {
+      if (!projectId) throw new Error("Project not found.");
+      return generateProjectSshKey({ data: { projectId } });
+    },
+    onSuccess: async ({ publicKey }) => {
+      setSshPrivateKey("");
+      setSshPublicKey(publicKey);
+      setRemoveSshPrivateKey(false);
+      await queryClient.invalidateQueries({ queryKey: projectKeys.detail(projectId ?? "") });
+      toast.success("Project SSH key generated.");
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Failed to generate SSH key.");
     },
   });
 
@@ -328,6 +366,11 @@ function ProjectSettingsPage() {
     saveMutation.mutate(manualEntries.map(({ key, value }) => ({ key, value })));
   };
 
+  const copySshPublicKey = async () => {
+    await navigator.clipboard.writeText(sshPublicKey);
+    toast.success("Public key copied.");
+  };
+
   const handleSkillSearch = () => {
     if (skillSearch.trim().length < 2) {
       setHasSearchedSkills(false);
@@ -373,6 +416,7 @@ function ProjectSettingsPage() {
 
   const tabs: { id: Tab; label: string }[] = [
     { id: "environment", label: "Environment" },
+    { id: "ssh", label: "SSH keys" },
     { id: "skills", label: "Skills" },
     { id: "collaborators", label: "Collaborators" },
     { id: "danger", label: "Danger" },
@@ -396,7 +440,7 @@ function ProjectSettingsPage() {
       </div>
 
       {/* Tab bar */}
-      <div className="mt-2 flex gap-1 border-b border-border/60 px-6">
+      <div className="mt-2 flex shrink-0 gap-1 overflow-x-auto border-b border-border/60 px-6">
         {tabs.map((tab) => (
           <button
             key={tab.id}
@@ -546,6 +590,115 @@ function ProjectSettingsPage() {
                   Only the project owner can edit environment variables.
                 </p>
               ) : null}
+            </>
+          ) : null}
+
+          {activeTab === "ssh" ? (
+            <>
+              <p className="text-sm text-muted-foreground">
+                Give agents access to SSH hosts using a dedicated project key or an existing key
+                pair. Add the public key to the remote host&apos;s `authorized_keys` file.
+              </p>
+
+              <div className="space-y-3 rounded-xl border border-border p-4">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="space-y-1">
+                    <p className="text-sm font-medium">Dedicated project key</p>
+                    <p className="text-sm text-muted-foreground">
+                      Generate a key pair managed by Diabolo, then copy its public key to the SSH
+                      host.
+                    </p>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={!isOwner || generateSshKeyMutation.isPending}
+                    onClick={() => generateSshKeyMutation.mutate()}
+                  >
+                    <KeyRoundIcon className="size-4" aria-hidden="true" />
+                    {generateSshKeyMutation.isPending
+                      ? "Generating…"
+                      : projectQuery.data?.hasSshPrivateKey
+                        ? "Regenerate"
+                        : "Generate"}
+                  </Button>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="project-ssh-public-key">Public key</Label>
+                  <div className="flex items-start gap-2">
+                    <Textarea
+                      id="project-ssh-public-key"
+                      value={sshPublicKey}
+                      readOnly
+                      className="min-h-24 font-mono text-xs"
+                      spellCheck={false}
+                    />
+                    <Button
+                      variant="outline"
+                      size="icon-sm"
+                      disabled={!sshPublicKey}
+                      onClick={copySshPublicKey}
+                      aria-label="Copy SSH public key"
+                    >
+                      <CopyIcon className="size-4" aria-hidden="true" />
+                    </Button>
+                  </div>
+                </div>
+              </div>
+
+              {isOwner ? (
+                <div className="space-y-4 rounded-xl border border-border p-4">
+                  <div className="space-y-1">
+                    <p className="text-sm font-medium">Use an existing key</p>
+                    <p className="text-sm text-muted-foreground">
+                      Paste the private key used by the agent and its matching public key. Saving a
+                      new private key replaces the generated or previously supplied key.
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="project-ssh-private-key">Private key</Label>
+                    <Textarea
+                      id="project-ssh-private-key"
+                      value={sshPrivateKey}
+                      onChange={(event) => {
+                        setSshPrivateKey(event.target.value);
+                        setRemoveSshPrivateKey(false);
+                      }}
+                      placeholder={
+                        projectQuery.data?.hasSshPrivateKey
+                          ? "A private key is configured. Paste a new key to replace it."
+                          : "-----BEGIN OPENSSH PRIVATE KEY-----"
+                      }
+                      className="min-h-36 font-mono text-xs"
+                      spellCheck={false}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      The saved private key is not shown again and is installed in project sandboxes
+                      with restricted permissions. Use an unencrypted key because agents cannot
+                      answer passphrase prompts.
+                    </p>
+                  </div>
+                  <div className="flex justify-end">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={!projectQuery.data?.hasSshPrivateKey && !sshPrivateKey}
+                      onClick={() => {
+                        setSshPrivateKey("");
+                        setSshPublicKey("");
+                        setRemoveSshPrivateKey(true);
+                      }}
+                    >
+                      Remove SSH key
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  Only the project owner can manage SSH credentials.
+                </p>
+              )}
             </>
           ) : null}
 

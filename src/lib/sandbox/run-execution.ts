@@ -201,6 +201,8 @@ const loadTaskExecutionContext = async (taskId: string, messageId: string) => {
     openCodeConfig: resolvedProvider.openCodeConfig,
     repo,
     taskProjectSkills: parseStoredProjectSkills(taskWithProject.project.agentSkills),
+    taskProjectSshPrivateKey: taskWithProject.project.sshPrivateKey,
+    taskProjectSshPublicKey: taskWithProject.project.sshPublicKey,
     taskProjectEnvVars: getTaskProjectEnvVars(taskRecord.envVars),
     taskRecord,
     viewer,
@@ -532,6 +534,8 @@ export const runInitialMessage = async (taskId: string, messageId: string) => {
     repoUrl: context.repo.cloneUrl,
     run: runSandboxCommand,
     skills: context.taskProjectSkills,
+    sshPrivateKey: context.taskProjectSshPrivateKey,
+    sshPublicKey: context.taskProjectSshPublicKey,
     taskId,
     tierId: context.taskRecord.sandboxTier,
     viewer: context.viewer,
@@ -572,6 +576,8 @@ export const runFollowUpMessage = async (taskId: string, messageId: string) => {
     taskId,
     taskRecord: context.taskRecord,
     skills: context.taskProjectSkills,
+    sshPrivateKey: context.taskProjectSshPrivateKey,
+    sshPublicKey: context.taskProjectSshPublicKey,
     viewer: context.viewer,
   });
 

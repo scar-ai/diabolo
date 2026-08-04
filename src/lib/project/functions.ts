@@ -46,6 +46,12 @@ const updateProjectSettingsInputSchema = z.object({
   projectId: z.string().min(1),
   shareWithOrganisation: z.boolean(),
   skills: z.array(projectSkillEntrySchema),
+  sshPrivateKey: z.string().max(64_000).nullable().optional(),
+  sshPublicKey: z.string().max(16_000).nullable(),
+});
+
+const generateProjectSshKeyInputSchema = z.object({
+  projectId: z.string().min(1),
 });
 
 const searchSkillsInputSchema = z.object({
@@ -190,6 +196,13 @@ export const $updateProjectSettings = createServerFn({ method: "POST" })
         userId: context.user.id,
       }),
     ),
+  );
+
+export const $generateProjectSshKey = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((data) => generateProjectSshKeyInputSchema.parse(data))
+  .handler(async ({ context, data }) =>
+    unwrap(Project.generateSshKeyForProject(data.projectId, context.user.id)),
   );
 
 export const $searchSkills = createServerFn({ method: "GET" })

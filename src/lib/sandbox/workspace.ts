@@ -182,6 +182,66 @@ const syncProjectSkills = async (input: {
     "sync project skills",
   );
 
+const buildProjectSshSyncCommand = () =>
+  [
+    "node - <<'JS'",
+    "const fs = require('fs');",
+    "const os = require('os');",
+    "const path = require('path');",
+    "const sshDir = path.join(os.homedir(), '.ssh');",
+    "const privateKeyPath = path.join(sshDir, 'id_diabolo');",
+    "const publicKeyPath = privateKeyPath + '.pub';",
+    "const configPath = path.join(sshDir, 'config');",
+    "const startMarker = '# >>> diabolo project key >>>';",
+    "const endMarker = '# <<< diabolo project key <<<';",
+    "const privateKey = Buffer.from(process.env.DIABOLO_SSH_PRIVATE_KEY_B64 || '', 'base64').toString('utf8');",
+    "const publicKey = Buffer.from(process.env.DIABOLO_SSH_PUBLIC_KEY_B64 || '', 'base64').toString('utf8');",
+    "fs.mkdirSync(sshDir, { recursive: true, mode: 0o700 });",
+    "fs.chmodSync(sshDir, 0o700);",
+    "if (privateKey) {",
+    "  fs.writeFileSync(privateKeyPath, privateKey.replace(/\\s+$/, '') + '\\n', { mode: 0o600 });",
+    "  if (publicKey) fs.writeFileSync(publicKeyPath, publicKey.replace(/\\s+$/, '') + '\\n', { mode: 0o644 });",
+    "} else {",
+    "  fs.rmSync(privateKeyPath, { force: true });",
+    "  fs.rmSync(publicKeyPath, { force: true });",
+    "}",
+    "let config = fs.existsSync(configPath) ? fs.readFileSync(configPath, 'utf8') : '';",
+    "const start = config.indexOf(startMarker);",
+    "const end = config.indexOf(endMarker);",
+    "if (start !== -1 && end !== -1 && end >= start) config = config.slice(0, start) + config.slice(end + endMarker.length);",
+    "config = config.trim();",
+    "if (privateKey) {",
+    "  const block = [startMarker, 'Host *', '  IdentityFile ~/.ssh/id_diabolo', '  IdentitiesOnly yes', '  StrictHostKeyChecking accept-new', endMarker].join('\\n');",
+    "  config = config ? config + '\\n\\n' + block : block;",
+    "}",
+    "if (config) fs.writeFileSync(configPath, config + '\\n', { mode: 0o600 });",
+    "else fs.rmSync(configPath, { force: true });",
+    "JS",
+  ].join("\n");
+
+const syncProjectSshKey = async (input: {
+  messageId: string;
+  privateKey?: string | null;
+  publicKey?: string | null;
+  run: Run;
+  sandbox: Sandbox.Session;
+  sandboxPath: string;
+  taskId: string;
+}) =>
+  input.run(
+    input.sandbox,
+    input.taskId,
+    input.messageId,
+    buildProjectSshSyncCommand(),
+    input.sandboxPath,
+    {
+      DIABOLO_SSH_PRIVATE_KEY_B64: Buffer.from(input.privateKey ?? "", "utf8").toString("base64"),
+      DIABOLO_SSH_PUBLIC_KEY_B64: Buffer.from(input.publicKey ?? "", "utf8").toString("base64"),
+    },
+    120,
+    "sync project ssh key",
+  );
+
 export namespace SandboxWorkspace {
   export const destroy = async (
     provider: Sandbox.Provider,
@@ -220,6 +280,8 @@ export namespace SandboxWorkspace {
     repoUrl: string;
     run: Run;
     skills: ProjectSkillEntry[];
+    sshPrivateKey?: string | null;
+    sshPublicKey?: string | null;
     taskId: string;
     tierId?: string | null;
     viewer: Viewer;
@@ -325,6 +387,16 @@ export namespace SandboxWorkspace {
         taskId: input.taskId,
       });
 
+      await syncProjectSshKey({
+        messageId: input.messageId,
+        privateKey: input.sshPrivateKey,
+        publicKey: input.sshPublicKey,
+        run: input.run,
+        sandbox,
+        sandboxPath,
+        taskId: input.taskId,
+      });
+
       op.info("sandbox prepared", {
         durationMs: Date.now() - prepareStartedAt,
         sandboxId: sandbox.id,
@@ -361,6 +433,8 @@ export namespace SandboxWorkspace {
     taskRecord: TaskRecord;
     envVars?: Record<string, string>;
     skills: ProjectSkillEntry[];
+    sshPrivateKey?: string | null;
+    sshPublicKey?: string | null;
     viewer: Viewer;
   }) => {
     if (input.taskRecord.sandboxId && input.taskRecord.sandboxPath) {
@@ -406,6 +480,16 @@ export namespace SandboxWorkspace {
           taskId: input.taskId,
         });
 
+        await syncProjectSshKey({
+          messageId: input.messageId,
+          privateKey: input.sshPrivateKey,
+          publicKey: input.sshPublicKey,
+          run: input.run,
+          sandbox,
+          sandboxPath: input.taskRecord.sandboxPath,
+          taskId: input.taskId,
+        });
+
         return {
           reused: true,
           sandbox,
@@ -433,6 +517,8 @@ export namespace SandboxWorkspace {
       repoUrl: input.repo.cloneUrl,
       run: input.run,
       skills: input.skills,
+      sshPrivateKey: input.sshPrivateKey,
+      sshPublicKey: input.sshPublicKey,
       taskId: input.taskId,
       tierId: input.taskRecord.sandboxTier,
       viewer: input.viewer,
