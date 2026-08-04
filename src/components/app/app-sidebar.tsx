@@ -40,12 +40,15 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import authClient from "@/lib/auth/auth-client";
 import { authQueryOptions } from "@/lib/auth/queries";
 import { githubReposQueryOptions } from "@/lib/github/queries";
 import {
   $createProject,
+  $deleteProject,
   $deleteTask,
   $destroyTaskSandboxById,
   $terminateTaskById,
@@ -86,6 +89,7 @@ export function AppSidebar({ user }: { user: AppUser }) {
   const router = useRouter();
   const navigate = useNavigate();
   const createProject = useServerFn($createProject);
+  const deleteProject = useServerFn($deleteProject);
   const deleteTask = useServerFn($deleteTask);
   const terminateTask = useServerFn($terminateTaskById);
   const destroyTaskSandbox = useServerFn($destroyTaskSandboxById);
@@ -95,6 +99,8 @@ export function AppSidebar({ user }: { user: AppUser }) {
   const [createProjectRepoId, setCreateProjectRepoId] = useState("");
   const [createProjectName, setCreateProjectName] = useState("");
   const [projectPickerOpen, setProjectPickerOpen] = useState(false);
+  const [projectToDelete, setProjectToDelete] = useState<ProjectsResult[number] | null>(null);
+  const [deleteProjectNameConfirmation, setDeleteProjectNameConfirmation] = useState("");
   const [taskToDelete, setTaskToDelete] = useState<TaskSummaryResult | null>(null);
 
   const pathname = useRouterState({ select: (s) => s.location.pathname });
@@ -238,6 +244,38 @@ export function AppSidebar({ user }: { user: AppUser }) {
     },
   });
 
+  const deleteProjectMutation = useMutation({
+    mutationFn: (project: ProjectsResult[number]) =>
+      deleteProject({
+        data: {
+          projectId: project.id,
+          projectName: deleteProjectNameConfirmation,
+        },
+      }),
+    onSuccess: async (_, deletedProject) => {
+      const nextProject = projects.find((project) => project.id !== deletedProject.id);
+
+      setProjectToDelete(null);
+      setDeleteProjectNameConfirmation("");
+      toast.success("Project deleted.");
+
+      if (selectedProject?.id === deletedProject.id) {
+        await navigate({
+          to: "/app",
+          search: nextProject ? { projectId: nextProject.id } : {},
+        });
+      }
+
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: projectKeys.all }),
+        queryClient.invalidateQueries({ queryKey: taskKeys.all }),
+      ]);
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Failed to delete project.");
+    },
+  });
+
   const initials = (user.name ?? user.email ?? "?").slice(0, 1).toUpperCase();
 
   const isOrgActive = pathname === "/app/organisation";
@@ -301,23 +339,38 @@ export function AppSidebar({ user }: { user: AppUser }) {
                 <DropdownMenuGroup>
                   <DropdownMenuLabel>Projects</DropdownMenuLabel>
                   {projects.map((project) => (
-                    <DropdownMenuItem
-                      key={project.id}
-                      onClick={() => {
-                        navigate({ to: "/app", search: { projectId: project.id } });
-                        setProjectPickerOpen(false);
-                      }}
-                    >
-                      <CheckIcon
-                        className={cn(
-                          "size-3.5 shrink-0",
-                          project.id === selectedProject?.id
-                            ? "text-foreground"
-                            : "text-transparent",
-                        )}
-                      />
-                      <span className="truncate">{project.name}</span>
-                    </DropdownMenuItem>
+                    <div key={project.id} className="flex items-center gap-0.5">
+                      <DropdownMenuItem
+                        className="min-w-0 flex-1"
+                        onClick={() => {
+                          navigate({ to: "/app", search: { projectId: project.id } });
+                          setProjectPickerOpen(false);
+                        }}
+                      >
+                        <CheckIcon
+                          className={cn(
+                            "size-3.5 shrink-0",
+                            project.id === selectedProject?.id
+                              ? "text-foreground"
+                              : "text-transparent",
+                          )}
+                        />
+                        <span className="truncate">{project.name}</span>
+                      </DropdownMenuItem>
+                      <button
+                        type="button"
+                        className="flex size-8 shrink-0 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                        aria-label={`Delete ${project.name}`}
+                        title={`Delete ${project.name}`}
+                        onClick={() => {
+                          setProjectPickerOpen(false);
+                          setDeleteProjectNameConfirmation("");
+                          setProjectToDelete(project);
+                        }}
+                      >
+                        <Trash2Icon className="size-3.5" aria-hidden="true" />
+                      </button>
+                    </div>
                   ))}
                   {projects.length === 0 && (
                     <DropdownMenuItem disabled>No projects yet</DropdownMenuItem>
@@ -562,6 +615,59 @@ export function AppSidebar({ user }: { user: AppUser }) {
         selectedRepoId={createProjectRepoId}
         selectedRepoName={createProjectRepo?.fullName ?? null}
       />
+
+      <AlertDialog
+        open={projectToDelete !== null}
+        onOpenChange={(open) => {
+          if (!open && !deleteProjectMutation.isPending) {
+            setProjectToDelete(null);
+            setDeleteProjectNameConfirmation("");
+          }
+        }}
+      >
+        <AlertDialogContent size="sm">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete “{projectToDelete?.name}”?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This permanently deletes the project and all of its chats. Type the project name to
+              confirm.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="delete-project-name-confirmation">Project name</Label>
+            <Input
+              id="delete-project-name-confirmation"
+              value={deleteProjectNameConfirmation}
+              onChange={(event) => setDeleteProjectNameConfirmation(event.target.value)}
+              placeholder={projectToDelete?.name ?? ""}
+              autoComplete="off"
+            />
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteProjectMutation.isPending}>Cancel</AlertDialogCancel>
+            <Button
+              variant="destructive"
+              disabled={
+                !projectToDelete ||
+                deleteProjectMutation.isPending ||
+                deleteProjectNameConfirmation !== projectToDelete.name
+              }
+              onClick={() => {
+                if (projectToDelete) deleteProjectMutation.mutate(projectToDelete);
+              }}
+            >
+              {deleteProjectMutation.isPending ? (
+                <>
+                  <LoaderIcon className="size-4 animate-spin" aria-hidden="true" />
+                  Deleting...
+                </>
+              ) : (
+                "Delete project"
+              )}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog
         open={taskToDelete !== null}
