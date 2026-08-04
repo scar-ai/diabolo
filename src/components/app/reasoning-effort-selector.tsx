@@ -33,7 +33,7 @@ export function ReasoningEffortSelector({
         size="sm"
         disabled={disabled}
         aria-label="Reasoning effort"
-        className="h-8 rounded-lg border-0 bg-transparent px-2 text-sm text-muted-foreground shadow-none hover:bg-accent hover:text-foreground"
+        className="h-8 rounded-full border border-transparent bg-transparent px-2.5 text-sm text-muted-foreground/70 shadow-none hover:border-border hover:bg-accent hover:text-foreground"
       >
         <BrainIcon className="size-3.5 shrink-0" aria-hidden="true" />
         <SelectValue placeholder="Reasoning" className="capitalize" />

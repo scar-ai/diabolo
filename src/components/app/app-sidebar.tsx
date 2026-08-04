@@ -11,6 +11,7 @@ import {
   LogOutIcon,
   PlusIcon,
   SettingsIcon,
+  SquareIcon,
   Trash2Icon,
   ZapIcon,
 } from "lucide-react";
@@ -33,14 +34,22 @@ import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Separator } from "@/components/ui/separator";
 import authClient from "@/lib/auth/auth-client";
 import { authQueryOptions } from "@/lib/auth/queries";
 import { githubReposQueryOptions } from "@/lib/github/queries";
-import { $createProject, $deleteTask } from "@/lib/project/functions";
+import {
+  $createProject,
+  $deleteTask,
+  $destroyTaskSandboxById,
+  $terminateTaskById,
+} from "@/lib/project/functions";
 import {
   allUserTaskSummariesQueryOptions,
   projectKeys,
@@ -61,12 +70,25 @@ type AppUser = {
 const EMPTY_PROJECTS: ProjectsResult = [];
 const EMPTY_TASKS: TaskSummaryResult[] = [];
 
+const isTaskActive = (task: TaskSummaryResult) =>
+  task.status === "queued" || task.status === "running" || task.hasActiveChildren;
+
+const navLinkClass = (isActive: boolean) =>
+  cn(
+    "flex items-center gap-2.5 rounded-2xl px-3 py-2 text-sm transition-colors outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring",
+    isActive
+      ? "bg-sidebar-accent font-medium text-sidebar-foreground"
+      : "text-sidebar-foreground/60 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground",
+  );
+
 export function AppSidebar({ user }: { user: AppUser }) {
   const queryClient = useQueryClient();
   const router = useRouter();
   const navigate = useNavigate();
   const createProject = useServerFn($createProject);
   const deleteTask = useServerFn($deleteTask);
+  const terminateTask = useServerFn($terminateTaskById);
+  const destroyTaskSandbox = useServerFn($destroyTaskSandboxById);
 
   const [createProjectOpen, setCreateProjectOpen] = useState(false);
   const [createProjectSearch, setCreateProjectSearch] = useState("");
@@ -88,11 +110,7 @@ export function AppSidebar({ user }: { user: AppUser }) {
     ...allUserTaskSummariesQueryOptions(user.id),
     refetchInterval: (query) => {
       const tasks = (query.state.data ?? []) as TaskSummaryResult[];
-      return tasks.some(
-        (t) => t.status === "queued" || t.status === "running" || t.hasActiveChildren,
-      )
-        ? 2_000
-        : 10_000;
+      return tasks.some(isTaskActive) ? 2_000 : 10_000;
     },
   });
   const createProjectRepoQuery = useQuery({
@@ -120,9 +138,7 @@ export function AppSidebar({ user }: { user: AppUser }) {
     .slice(0, 8);
 
   // Running task count for selected project
-  const selectedRunningCount = selectedProjectTasks.filter(
-    (t) => t.status === "queued" || t.status === "running" || t.hasActiveChildren,
-  ).length;
+  const selectedRunningCount = selectedProjectTasks.filter(isTaskActive).length;
 
   // Browser notifications when a task finishes
   const prevTaskStatusesRef = useRef<Map<string, string>>(new Map());
@@ -187,6 +203,22 @@ export function AppSidebar({ user }: { user: AppUser }) {
     },
   });
 
+  // Stop a running task: terminate the run, then tear down its sandbox.
+  const stopTaskMutation = useMutation({
+    mutationFn: async (task: TaskSummaryResult) => {
+      await terminateTask({ data: { taskId: task.id } });
+      await destroyTaskSandbox({ data: { taskId: task.id } });
+    },
+    onSuccess: async (_, task) => {
+      toast.success("Task stopped and sandbox destroyed.");
+      queryClient.invalidateQueries({ queryKey: taskKeys.detail(task.id) });
+      await queryClient.invalidateQueries({ queryKey: taskKeys.all });
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Failed to stop task.");
+    },
+  });
+
   const deleteTaskMutation = useMutation({
     mutationFn: (task: TaskSummaryResult) =>
       deleteTask({ data: { projectId: task.projectId, taskId: task.id } }),
@@ -220,9 +252,9 @@ export function AppSidebar({ user }: { user: AppUser }) {
 
   return (
     <>
-      <aside className="flex w-56 shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground">
+      <aside className="flex w-60 shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground">
         {/* Logo */}
-        <div className="flex h-14 shrink-0 items-center gap-2.5 border-b border-sidebar-border px-4">
+        <div className="flex h-14 shrink-0 items-center gap-2.5 px-4">
           <svg
             className="size-5 shrink-0 text-sidebar-foreground"
             viewBox="0 0 24 24"
@@ -237,16 +269,16 @@ export function AppSidebar({ user }: { user: AppUser }) {
         {/* Main scrollable nav */}
         <div className="flex flex-1 flex-col overflow-hidden">
           {/* Project selector */}
-          <div className="flex items-center gap-1 px-2 pt-3 pb-2">
+          <div className="flex items-center gap-1.5 px-3 pt-1 pb-2">
             <DropdownMenu open={projectPickerOpen} onOpenChange={setProjectPickerOpen}>
               <DropdownMenuTrigger
                 className={cn(
-                  "flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm transition-colors outline-none",
-                  "hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-sidebar-ring",
+                  "flex min-w-0 flex-1 items-center gap-2 rounded-2xl border border-sidebar-border/70 bg-sidebar-accent/30 px-3 py-2 text-sm transition-colors outline-none",
+                  "hover:border-sidebar-border hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-sidebar-ring",
                 )}
               >
                 {projectsQuery.isPending && !selectedProject ? (
-                  <span className="h-4 w-24 animate-pulse rounded bg-sidebar-accent/60" />
+                  <span className="h-4 w-24 animate-pulse rounded-full bg-sidebar-accent/60" />
                 ) : (
                   <>
                     <span className="min-w-0 flex-1 truncate text-left font-medium text-sidebar-foreground">
@@ -265,52 +297,64 @@ export function AppSidebar({ user }: { user: AppUser }) {
                   </>
                 )}
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" className="w-52">
-                {projects.map((project) => (
-                  <DropdownMenuItem
-                    key={project.id}
-                    onClick={() => {
-                      navigate({ to: "/app", search: { projectId: project.id } });
-                      setProjectPickerOpen(false);
-                    }}
-                  >
-                    <CheckIcon
-                      className={cn(
-                        "size-3.5 shrink-0",
-                        project.id === selectedProject?.id ? "text-foreground" : "text-transparent",
-                      )}
-                    />
-                    <span className="truncate">{project.name}</span>
-                  </DropdownMenuItem>
-                ))}
-                {projects.length === 0 && (
-                  <DropdownMenuItem disabled>No projects yet</DropdownMenuItem>
-                )}
+              <DropdownMenuContent align="start" className="w-56">
+                <DropdownMenuGroup>
+                  <DropdownMenuLabel>Projects</DropdownMenuLabel>
+                  {projects.map((project) => (
+                    <DropdownMenuItem
+                      key={project.id}
+                      onClick={() => {
+                        navigate({ to: "/app", search: { projectId: project.id } });
+                        setProjectPickerOpen(false);
+                      }}
+                    >
+                      <CheckIcon
+                        className={cn(
+                          "size-3.5 shrink-0",
+                          project.id === selectedProject?.id
+                            ? "text-foreground"
+                            : "text-transparent",
+                        )}
+                      />
+                      <span className="truncate">{project.name}</span>
+                    </DropdownMenuItem>
+                  ))}
+                  {projects.length === 0 && (
+                    <DropdownMenuItem disabled>No projects yet</DropdownMenuItem>
+                  )}
+                </DropdownMenuGroup>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  onClick={() => {
+                    setProjectPickerOpen(false);
+                    handleOpenCreateProject();
+                  }}
+                >
+                  <PlusIcon className="size-3.5 shrink-0" aria-hidden="true" />
+                  New project
+                </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
 
             <button
               type="button"
               onClick={handleOpenCreateProject}
-              className="flex size-7 shrink-0 items-center justify-center rounded-lg text-sidebar-foreground/40 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground"
+              className="flex size-9 shrink-0 items-center justify-center rounded-2xl border border-sidebar-border/70 text-sidebar-foreground/50 transition-colors hover:border-sidebar-border hover:bg-sidebar-accent hover:text-sidebar-foreground"
               aria-label="New project"
+              title="New project"
             >
-              <PlusIcon className="size-3.5" aria-hidden="true" />
+              <PlusIcon className="size-4" aria-hidden="true" />
             </button>
           </div>
 
           {/* Dashboard link */}
           {selectedProject ? (
-            <div className="space-y-0.5 px-2 pb-2">
+            <div className="space-y-0.5 px-3 pb-3">
               <Link
                 to="/app"
                 search={{ projectId: selectedProject.id }}
-                className={cn(
-                  "flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm transition-colors outline-none",
-                  "focus-visible:ring-2 focus-visible:ring-sidebar-ring",
-                  pathname === "/app" && currentProjectId === selectedProject.id
-                    ? "bg-sidebar-accent font-medium text-sidebar-foreground"
-                    : "text-sidebar-foreground/60 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground",
+                className={navLinkClass(
+                  pathname === "/app" && currentProjectId === selectedProject.id,
                 )}
               >
                 <LayoutDashboardIcon className="size-4 shrink-0" aria-hidden="true" />
@@ -319,12 +363,8 @@ export function AppSidebar({ user }: { user: AppUser }) {
               <Link
                 to="/app/project-settings"
                 search={{ projectId: selectedProject.id }}
-                className={cn(
-                  "flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm transition-colors outline-none",
-                  "focus-visible:ring-2 focus-visible:ring-sidebar-ring",
-                  pathname === "/app/project-settings" && currentProjectId === selectedProject.id
-                    ? "bg-sidebar-accent font-medium text-sidebar-foreground"
-                    : "text-sidebar-foreground/60 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground",
+                className={navLinkClass(
+                  pathname === "/app/project-settings" && currentProjectId === selectedProject.id,
                 )}
               >
                 <SettingsIcon className="size-4 shrink-0" aria-hidden="true" />
@@ -333,28 +373,34 @@ export function AppSidebar({ user }: { user: AppUser }) {
             </div>
           ) : null}
 
-          <Separator className="bg-sidebar-border" />
+          <Separator className="mx-3 w-auto bg-sidebar-border/70" />
 
           {/* Task list for selected project */}
-          <nav className="flex flex-1 flex-col overflow-y-auto px-2 py-2" aria-label="Sessions">
+          <nav className="flex flex-1 flex-col overflow-y-auto px-3 py-3" aria-label="Sessions">
+            <p className="px-3 pb-1.5 text-[0.6875rem] font-medium tracking-wider text-sidebar-foreground/40 uppercase">
+              Recent sessions
+            </p>
             {projectsQuery.isPending && projects.length === 0 ? (
-              <div className="space-y-1 px-1 pt-1">
+              <div className="space-y-1">
                 {[1, 2, 3].map((i) => (
                   <div
                     key={i}
-                    className="h-7 animate-pulse rounded-lg bg-sidebar-accent/60"
+                    className="h-9 animate-pulse rounded-2xl bg-sidebar-accent/60"
                     aria-hidden="true"
                   />
                 ))}
               </div>
             ) : !selectedProject ? (
-              <p className="px-2 py-2 text-xs text-sidebar-foreground/40">No projects yet.</p>
+              <p className="px-3 py-2 text-xs text-sidebar-foreground/40">No projects yet.</p>
             ) : selectedProjectTasks.length === 0 ? (
-              <p className="px-2 py-2 text-xs text-sidebar-foreground/40">No sessions yet.</p>
+              <p className="px-3 py-2 text-xs text-sidebar-foreground/40">No sessions yet.</p>
             ) : (
               <div className="space-y-0.5">
                 {selectedProjectTasks.map((task) => {
                   const isActiveTask = task.id === currentTaskId;
+                  const isRunning = isTaskActive(task);
+                  const isStopping =
+                    stopTaskMutation.isPending && stopTaskMutation.variables.id === task.id;
 
                   return (
                     <div key={task.id} className="group relative">
@@ -363,33 +409,60 @@ export function AppSidebar({ user }: { user: AppUser }) {
                         params={{ taskId: task.id }}
                         search={{ projectId: task.projectId }}
                         className={cn(
-                          "flex items-center gap-2 rounded-lg py-2 pr-8 pl-2.5 text-sm transition-colors outline-none",
+                          "flex items-center gap-2 rounded-2xl py-2 pr-9 pl-3 text-sm transition-colors outline-none",
                           "focus-visible:ring-2 focus-visible:ring-sidebar-ring",
                           isActiveTask
                             ? "bg-sidebar-accent font-medium text-sidebar-foreground"
-                            : "text-sidebar-foreground hover:bg-sidebar-accent/40",
+                            : "text-sidebar-foreground/80 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground",
+                          isRunning && "task-glint bg-sidebar-accent/40",
                         )}
                       >
+                        {isRunning ? (
+                          <span
+                            className="size-1.5 shrink-0 animate-pulse rounded-full bg-emerald-500"
+                            aria-hidden="true"
+                          />
+                        ) : null}
                         <span className="min-w-0 flex-1 truncate">
                           {task.promptPreview || "Untitled task"}
                         </span>
+                        {isRunning ? <span className="sr-only">(running)</span> : null}
                       </Link>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-xs"
-                        className="absolute top-1/2 right-1.5 -translate-y-1/2 text-sidebar-foreground/40 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100 hover:bg-destructive/15 hover:text-destructive focus-visible:opacity-100"
-                        disabled={deleteTaskMutation.isPending}
-                        onClick={() => setTaskToDelete(task)}
-                        aria-label={`Delete ${task.promptPreview || "untitled chat"}`}
-                      >
-                        {deleteTaskMutation.isPending &&
-                        deleteTaskMutation.variables.id === task.id ? (
-                          <LoaderIcon className="size-3 animate-spin" aria-hidden="true" />
-                        ) : (
-                          <Trash2Icon className="size-3" aria-hidden="true" />
-                        )}
-                      </Button>
+                      {isRunning ? (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-xs"
+                          className="absolute top-1/2 right-2 -translate-y-1/2 rounded-full text-sidebar-foreground/60 hover:bg-destructive/15 hover:text-destructive"
+                          disabled={isStopping}
+                          onClick={() => stopTaskMutation.mutate(task)}
+                          aria-label={`Stop ${task.promptPreview || "untitled task"} and destroy its sandbox`}
+                          title="Stop task and destroy sandbox"
+                        >
+                          {isStopping ? (
+                            <LoaderIcon className="size-3 animate-spin" aria-hidden="true" />
+                          ) : (
+                            <SquareIcon className="size-3 fill-current" aria-hidden="true" />
+                          )}
+                        </Button>
+                      ) : (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-xs"
+                          className="absolute top-1/2 right-2 -translate-y-1/2 rounded-full text-sidebar-foreground/40 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100 hover:bg-destructive/15 hover:text-destructive focus-visible:opacity-100"
+                          disabled={deleteTaskMutation.isPending}
+                          onClick={() => setTaskToDelete(task)}
+                          aria-label={`Delete ${task.promptPreview || "untitled chat"}`}
+                        >
+                          {deleteTaskMutation.isPending &&
+                          deleteTaskMutation.variables.id === task.id ? (
+                            <LoaderIcon className="size-3 animate-spin" aria-hidden="true" />
+                          ) : (
+                            <Trash2Icon className="size-3" aria-hidden="true" />
+                          )}
+                        </Button>
+                      )}
                     </div>
                   );
                 })}
@@ -402,7 +475,7 @@ export function AppSidebar({ user }: { user: AppUser }) {
                 <Link
                   to="/app/sessions"
                   search={{ projectId: selectedProject.id }}
-                  className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs text-sidebar-foreground/40 transition-colors outline-none hover:bg-sidebar-accent/40 hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring"
+                  className="flex items-center gap-2 rounded-2xl px-3 py-2 text-xs text-sidebar-foreground/45 transition-colors outline-none hover:bg-sidebar-accent/50 hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring"
                 >
                   <HistoryIcon className="size-3.5" aria-hidden="true" />
                   All sessions
@@ -412,31 +485,13 @@ export function AppSidebar({ user }: { user: AppUser }) {
           </nav>
 
           {/* Bottom nav */}
-          <div className="border-t border-sidebar-border px-2 py-3">
+          <div className="border-t border-sidebar-border/70 px-3 py-3">
             <nav className="space-y-0.5" aria-label="App navigation">
-              <Link
-                to="/app/organisation"
-                className={cn(
-                  "flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-sm transition-colors outline-none",
-                  "focus-visible:ring-2 focus-visible:ring-sidebar-ring",
-                  isOrgActive
-                    ? "bg-sidebar-accent font-medium text-sidebar-foreground"
-                    : "text-sidebar-foreground/60 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground",
-                )}
-              >
+              <Link to="/app/organisation" className={navLinkClass(isOrgActive)}>
                 <BuildingIcon className="size-4 shrink-0" aria-hidden="true" />
                 Organisation
               </Link>
-              <Link
-                to="/app/settings"
-                className={cn(
-                  "flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-sm transition-colors outline-none",
-                  "focus-visible:ring-2 focus-visible:ring-sidebar-ring",
-                  isSettingsActive
-                    ? "bg-sidebar-accent font-medium text-sidebar-foreground"
-                    : "text-sidebar-foreground/60 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground",
-                )}
-              >
+              <Link to="/app/settings" className={navLinkClass(isSettingsActive)}>
                 <SettingsIcon className="size-4 shrink-0" aria-hidden="true" />
                 Settings
               </Link>
@@ -444,10 +499,10 @@ export function AppSidebar({ user }: { user: AppUser }) {
           </div>
 
           {/* User section */}
-          <div className="border-t border-sidebar-border px-3 py-3">
+          <div className="border-t border-sidebar-border/70 px-3 py-3">
             <div className="flex items-center gap-1.5">
               <DropdownMenu>
-                <DropdownMenuTrigger className="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-1.5 py-1 text-sm transition-colors outline-none hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-sidebar-ring">
+                <DropdownMenuTrigger className="flex min-w-0 flex-1 items-center gap-2.5 rounded-2xl px-2 py-2 text-sm transition-colors outline-none hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-sidebar-ring">
                   <Avatar className="size-7 shrink-0 border border-sidebar-border">
                     {user.image ? <AvatarImage src={user.image} alt={user.name ?? ""} /> : null}
                     <AvatarFallback className="text-xs">{initials}</AvatarFallback>
@@ -455,8 +510,17 @@ export function AppSidebar({ user }: { user: AppUser }) {
                   <span className="min-w-0 flex-1 truncate text-left text-sm font-medium text-sidebar-foreground">
                     {user.name ?? user.email}
                   </span>
+                  <ChevronsUpDownIcon
+                    className="size-3.5 shrink-0 text-sidebar-foreground/40"
+                    aria-hidden="true"
+                  />
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" side="top">
+                <DropdownMenuContent align="start" side="top" className="w-56">
+                  <DropdownMenuGroup>
+                    <DropdownMenuLabel>Signed in as</DropdownMenuLabel>
+                    <p className="truncate px-3 pb-2 text-sm text-foreground">{user.email}</p>
+                  </DropdownMenuGroup>
+                  <DropdownMenuSeparator />
                   <DropdownMenuItem
                     variant="destructive"
                     onClick={async () => {

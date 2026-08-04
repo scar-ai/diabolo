@@ -498,7 +498,7 @@ function ScheduledTasksSectionSkeleton() {
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-3">
         <div className="h-4 w-28 animate-pulse rounded bg-muted" />
-        <div className="h-8 w-32 animate-pulse rounded-md bg-muted" />
+        <div className="h-8 w-32 animate-pulse rounded-full bg-muted" />
       </div>
       <div className="rounded-xl border border-border/60 bg-card p-4">
         <div className="h-4 w-48 animate-pulse rounded bg-muted" />

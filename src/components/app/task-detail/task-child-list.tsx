@@ -29,7 +29,7 @@ export function TaskChildList({ projectId, tasks }: { projectId: string; tasks: 
             to="/app/tasks/$taskId"
             params={{ taskId: child.id }}
             search={{ projectId }}
-            className="flex items-center justify-between gap-3 rounded-lg border border-border/60 bg-background/70 px-3 py-2 transition-colors hover:bg-background"
+            className="flex items-center justify-between gap-3 rounded-2xl border border-border/60 bg-background/70 px-3 py-2 transition-colors hover:bg-background"
           >
             <div className="min-w-0">
               <div className="truncate text-sm font-medium text-foreground">

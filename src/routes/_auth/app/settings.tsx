@@ -98,14 +98,14 @@ function ProviderTypeToggle({
   onChange: (v: "manual" | "codex") => void;
 }) {
   return (
-    <div className="inline-flex rounded-lg border border-border/60 bg-muted/40 p-0.5">
+    <div className="inline-flex rounded-full border border-border/60 bg-muted/40 p-1">
       {(["manual", "codex"] as const).map((kind) => (
         <button
           key={kind}
           type="button"
           onClick={() => onChange(kind)}
           className={cn(
-            "rounded-md px-3 py-1 text-xs font-medium transition-all",
+            "rounded-full px-3.5 py-1.5 text-xs font-medium transition-all",
             value === kind
               ? "bg-background text-foreground shadow-sm"
               : "text-muted-foreground hover:text-foreground",
@@ -492,7 +492,7 @@ function SettingsPage() {
                           Enter this one-time code in the OpenAI browser tab:
                         </p>
                         <div className="mt-2 flex items-center gap-2">
-                          <code className="rounded-lg border border-border/70 bg-background px-3 py-1.5 font-mono text-base font-semibold tracking-widest text-foreground">
+                          <code className="rounded-xl border border-border/70 bg-background px-3 py-1.5 font-mono text-base font-semibold tracking-widest text-foreground">
                             {activePendingDeviceAuth.userCode}
                           </code>
                           <Button
@@ -613,7 +613,7 @@ function SettingsPage() {
                     <div className="flex items-center gap-3 border-b border-border/50 px-5 py-3.5">
                       <div
                         className={cn(
-                          "flex size-7 shrink-0 items-center justify-center rounded-lg",
+                          "flex size-7 shrink-0 items-center justify-center rounded-xl",
                           isCodex
                             ? "bg-violet-500/10 text-violet-600 dark:text-violet-400"
                             : "bg-blue-500/10 text-blue-600 dark:text-blue-400",
@@ -769,7 +769,7 @@ function SettingsPage() {
 
                         {isCodex ? (
                           /* Codex auth note */
-                          <div className="flex items-center gap-2 rounded-lg bg-muted/50 px-3 py-2.5 sm:col-span-2">
+                          <div className="flex items-center gap-2 rounded-2xl bg-muted/50 px-3 py-2.5 sm:col-span-2">
                             <CheckCircle2Icon className="size-3.5 shrink-0 text-muted-foreground" />
                             <p className="text-xs text-muted-foreground">
                               Uses the shared Codex login above — no API key needed.

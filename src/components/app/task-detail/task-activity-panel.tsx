@@ -35,9 +35,12 @@ const buildActivityEntries = (
   stage: string | null | undefined,
   isRunning: boolean,
   hasError: boolean,
+  runStartedAtMs: number | null,
 ) => {
   const entries: ActivityEntry[] = [];
   const toolEntries = new Map<string, ActivityEntry>();
+  const firstEvent = runtimeEvents[0];
+  const firstEventAt = firstEvent ? getEventTime(firstEvent) : null;
 
   for (const event of runtimeEvents) {
     if (event.type === "task_stage" && typeof event.payload.stage === "string") {
@@ -96,7 +99,10 @@ const buildActivityEntries = (
         endedAt: null,
         label: currentStage,
         sequence: (lastEntry?.sequence ?? 0) + 1,
-        startedAt: lastEntry?.endedAt ?? Date.now(),
+        // Every value here has to be derived from the run itself: this is
+        // rebuilt on each poll, and a `Date.now()` fallback would restart the
+        // live step's timer every couple of seconds instead of counting up.
+        startedAt: lastEntry?.endedAt ?? runStartedAtMs ?? firstEventAt ?? Date.now(),
         status: "running",
       });
     }
@@ -173,6 +179,7 @@ function StatusDot({ tone }: { tone: "error" | "running" | "success" }) {
 }
 
 export function TaskActivityPanel({
+  completedAt,
   error,
   isRunning,
   logs,
@@ -182,6 +189,7 @@ export function TaskActivityPanel({
   startedAt,
   taskId,
 }: {
+  completedAt?: Date | string | null;
   error?: string | null;
   isRunning: boolean;
   logs?: string | null;
@@ -210,9 +218,28 @@ export function TaskActivityPanel({
       ).size,
     [runtimeEvents],
   );
+  const firstEventAtMs = useMemo(
+    () =>
+      runtimeEvents.reduce<number | null>((earliest, event) => {
+        const eventTime = getEventTime(event);
+        return earliest === null || eventTime < earliest ? eventTime : earliest;
+      }, null),
+    [runtimeEvents],
+  );
+  const rowStartedAtMs = startedAt ? new Date(startedAt).getTime() : null;
+  // Event payloads carry epoch milliseconds straight from the runtime, while a
+  // message row carries a database timestamp. Nothing can be logged before the
+  // run starts, so a row claiming a later start than its own first event is a
+  // clock skew, and the events are the ones worth believing.
+  const startedAtMs =
+    rowStartedAtMs === null
+      ? firstEventAtMs
+      : firstEventAtMs === null
+        ? rowStartedAtMs
+        : Math.min(rowStartedAtMs, firstEventAtMs);
   const entries = useMemo(
-    () => buildActivityEntries(runtimeEvents, stage, isRunning, Boolean(error)),
-    [error, isRunning, runtimeEvents, stage],
+    () => buildActivityEntries(runtimeEvents, stage, isRunning, Boolean(error), startedAtMs),
+    [error, isRunning, runtimeEvents, stage, startedAtMs],
   );
   const currentSummary = useMemo(
     () => (isRunning ? readCurrentFocus(runtimeEvents) : null),
@@ -226,14 +253,10 @@ export function TaskActivityPanel({
     ? timelineEntries
     : timelineEntries.slice(-COLLAPSED_ENTRY_COUNT);
   const hiddenEntryCount = timelineEntries.length - visibleEntries.length;
-  const latestEventAt = runtimeEvents.reduce<number | null>(
-    (latest, event) => {
-      const eventTime = getEventTime(event);
-      return latest === null || eventTime > latest ? eventTime : latest;
-    },
-    startedAt ? new Date(startedAt).getTime() : null,
-  );
-  const startedAtMs = startedAt ? new Date(startedAt).getTime() : null;
+  const latestEventAt = runtimeEvents.reduce<number | null>((latest, event) => {
+    const eventTime = getEventTime(event);
+    return latest === null || eventTime > latest ? eventTime : latest;
+  }, startedAtMs);
   const hasTechnicalDetails = toolCallCount > 0 || Boolean(logs);
   const reasoningBlocks =
     isRunning &&
@@ -249,10 +272,16 @@ export function TaskActivityPanel({
     isRunning && now !== null && latestEventAt !== null ? now - latestEventAt : 0;
   const isStalled = stalledForMs > STALL_THRESHOLD_MS;
   const tone = isRunning ? "running" : error ? "error" : "success";
+  // A live run counts against the ticking clock; a finished one is pinned to
+  // when it actually ended, so reloading the page still shows how long it took.
+  const completedAtMs = completedAt ? new Date(completedAt).getTime() : null;
+  const elapsedEndMs = isRunning ? now : (completedAtMs ?? now);
+  const elapsedMs =
+    startedAtMs === null || elapsedEndMs === null ? null : elapsedEndMs - startedAtMs;
   // Assembled as a list so the thin dividers between them stay even, however
   // many of these the run actually has to report.
   const metaItems = [
-    now !== null && startedAtMs !== null ? formatDuration(now - startedAtMs) : null,
+    elapsedMs !== null ? formatDuration(elapsedMs) : null,
     usage ? `${formatTokens(usage.totalTokens)} tokens` : null,
     toolCallCount > 0 ? `${toolCallCount} ${toolCallCount === 1 ? "step" : "steps"}` : null,
   ].filter((item): item is string => item !== null);

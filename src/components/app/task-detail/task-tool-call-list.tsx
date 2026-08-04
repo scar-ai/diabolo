@@ -162,7 +162,7 @@ export function TaskToolCallList({ runtimeEvents }: { runtimeEvents: ParsedTaskE
                 <span className="text-[11px] font-medium tracking-[0.16em] text-muted-foreground/60 uppercase">
                   Arguments
                 </span>
-                <pre className="max-h-44 overflow-auto rounded-lg bg-background/80 px-3 py-2 font-mono text-[11px] leading-relaxed break-all whitespace-pre-wrap text-foreground/80">
+                <pre className="max-h-44 overflow-auto rounded-2xl bg-background/80 px-3 py-2 font-mono text-[11px] leading-relaxed break-all whitespace-pre-wrap text-foreground/80">
                   {argsText}
                 </pre>
               </div>
@@ -173,7 +173,7 @@ export function TaskToolCallList({ runtimeEvents }: { runtimeEvents: ParsedTaskE
                 <span className="text-[11px] font-medium tracking-[0.16em] text-muted-foreground/60 uppercase">
                   Result
                 </span>
-                <pre className="max-h-52 overflow-auto rounded-lg bg-background/80 px-3 py-2 font-mono text-[11px] leading-relaxed break-all whitespace-pre-wrap text-foreground/80">
+                <pre className="max-h-52 overflow-auto rounded-2xl bg-background/80 px-3 py-2 font-mono text-[11px] leading-relaxed break-all whitespace-pre-wrap text-foreground/80">
                   {outputText}
                 </pre>
               </div>
@@ -184,7 +184,7 @@ export function TaskToolCallList({ runtimeEvents }: { runtimeEvents: ParsedTaskE
                 <span className="text-[11px] font-medium tracking-[0.16em] text-destructive/80 uppercase">
                   Error
                 </span>
-                <pre className="max-h-44 overflow-auto rounded-lg border border-destructive/20 bg-destructive/6 px-3 py-2 font-mono text-[11px] leading-relaxed break-all whitespace-pre-wrap text-destructive/90">
+                <pre className="max-h-44 overflow-auto rounded-2xl border border-destructive/20 bg-destructive/6 px-3 py-2 font-mono text-[11px] leading-relaxed break-all whitespace-pre-wrap text-destructive/90">
                   {errorText}
                 </pre>
               </div>

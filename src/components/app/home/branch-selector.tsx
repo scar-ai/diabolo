@@ -65,7 +65,7 @@ export function BranchSelector({
       <DropdownMenu>
         <DropdownMenuTrigger
           disabled={disabled}
-          className="flex cursor-pointer items-center gap-1 rounded-lg px-2 py-1 text-sm text-muted-foreground/60 transition-colors hover:bg-accent hover:text-muted-foreground disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-muted-foreground/60"
+          className="flex cursor-pointer items-center gap-1.5 rounded-full border border-transparent px-2.5 py-1.5 text-sm text-muted-foreground/70 transition-colors hover:border-border hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:hover:border-transparent disabled:hover:bg-transparent disabled:hover:text-muted-foreground/70 aria-expanded:border-border aria-expanded:bg-accent aria-expanded:text-foreground"
         >
           <GitBranchIcon className="size-3.5 shrink-0" aria-hidden="true" />
           <span className="max-w-40 truncate">{currentBranch}</span>

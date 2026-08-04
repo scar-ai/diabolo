@@ -44,6 +44,7 @@ export function AgentMessageContent({
   return (
     <div className="flex w-full flex-col gap-3">
       <TaskActivityPanel
+        completedAt={completedAt}
         error={error}
         isRunning={isRunning}
         logs={logs}
@@ -63,7 +64,7 @@ export function AgentMessageContent({
       ) : null}
 
       {error ? (
-        <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2">
+        <div className="rounded-2xl border border-destructive/30 bg-destructive/5 px-3 py-2">
           <p className="text-xs font-medium text-destructive">Error</p>
           <p className="mt-0.5 text-xs text-destructive/80">{error}</p>
         </div>

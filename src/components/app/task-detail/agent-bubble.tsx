@@ -29,7 +29,7 @@ export function AgentBubble({ task, isRunning }: { task: TaskData; isRunning: bo
   return (
     <AgentMessageContent
       artifacts={initialMessage?.artifacts ?? []}
-      completedAt={task.completedAt}
+      completedAt={initialMessage?.completedAt ?? task.completedAt}
       error={task.error}
       isRunning={isRunning}
       logs={task.logs}

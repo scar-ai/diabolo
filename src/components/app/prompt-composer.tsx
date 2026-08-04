@@ -45,7 +45,7 @@ function PromptComposer({
   return (
     <div className={cn("flex w-full max-w-3xl flex-col", className)}>
       {headerContent ? (
-        <div className="relative z-0 -mb-3.5 overflow-hidden rounded-xl rounded-b-none border border-emerald-500/30 bg-emerald-50 px-3 pt-2 pb-5 dark:bg-emerald-950">
+        <div className="relative z-0 -mb-4 overflow-hidden rounded-3xl rounded-b-none border border-emerald-500/30 bg-emerald-50 px-4 pt-2.5 pb-6 dark:bg-emerald-950">
           {headerContent}
         </div>
       ) : null}
@@ -85,7 +85,7 @@ function PromptComposer({
           event.preventDefault();
           onSubmit();
         }}
-        className="dock-shell relative z-10 overflow-hidden rounded-xl"
+        className="dock-shell relative z-10 overflow-hidden rounded-3xl"
       >
         <div className="max-h-[240px] overflow-y-auto">
           <Textarea
@@ -99,7 +99,7 @@ function PromptComposer({
             }}
             placeholder={placeholder}
             disabled={disabled}
-            className="min-h-12 resize-none border-0 bg-transparent px-4 py-3 text-sm text-foreground shadow-none ring-0 placeholder:text-muted-foreground/40 focus-visible:border-0 focus-visible:ring-0"
+            className="min-h-12 resize-none rounded-none border-0 bg-transparent px-5 py-3.5 text-sm text-foreground shadow-none ring-0 placeholder:text-muted-foreground/40 hover:border-0 focus-visible:border-0 focus-visible:ring-0"
           />
         </div>
         <div className="flex items-center justify-end px-3 pb-2">
@@ -124,27 +124,27 @@ function PromptComposer({
                 type="button"
                 disabled={disabled}
                 onClick={() => fileInputRef.current?.click()}
-                className="mr-auto flex size-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-30"
+                className="mr-auto flex size-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-30"
                 aria-label="Attach files"
               >
-                <PaperclipIcon className="size-3.5" aria-hidden="true" />
+                <PaperclipIcon className="size-4" aria-hidden="true" />
               </button>
             </>
           ) : null}
           <button
             type="submit"
             disabled={!canSubmit || disabled}
-            className="flex size-7 items-center justify-center rounded-lg bg-foreground text-background transition-opacity disabled:opacity-30"
+            className="flex size-8 items-center justify-center rounded-full bg-foreground text-background transition-all duration-150 ease-friendly hover:opacity-85 active:scale-95 disabled:opacity-30"
             aria-label={submitAriaLabel}
           >
-            <CornerDownLeftIcon className="size-3.5" aria-hidden="true" />
+            <CornerDownLeftIcon className="size-4" aria-hidden="true" />
           </button>
         </div>
       </form>
 
       {/* Tray — sits behind the shell with negative top margin */}
       {footerLeft || footerRight || note ? (
-        <div className="dock-tray relative z-0 -mt-3.5 overflow-hidden rounded-xl rounded-t-none border border-border px-3 pt-5 pb-2">
+        <div className="dock-tray relative z-0 -mt-4 overflow-hidden rounded-3xl rounded-t-none border border-border px-3 pt-6 pb-2.5">
           {footerLeft || footerRight ? (
             <div className="flex items-center justify-between gap-2">
               <div className="flex min-w-0 items-center gap-1.5">{footerLeft}</div>

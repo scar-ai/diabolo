@@ -51,7 +51,7 @@ export function TaskFileChanges({ runtimeEvents }: { runtimeEvents: ParsedTaskEv
         <span
           key={filePath}
           title={filePath}
-          className="max-w-45 truncate rounded-md bg-foreground/[0.06] px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground/70"
+          className="max-w-45 truncate rounded-full bg-foreground/[0.06] px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground/70"
         >
           {toDisplayName(filePath)}
         </span>
