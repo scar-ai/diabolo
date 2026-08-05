@@ -540,7 +540,11 @@ export function AppSidebar({ user }: { user: AppUser }) {
           {/* Bottom nav */}
           <div className="border-t border-sidebar-border/70 px-3 py-3">
             <nav className="space-y-0.5" aria-label="App navigation">
-              <Link to="/app/organisation" className={navLinkClass(isOrgActive)}>
+              <Link
+                to="/app/organisation"
+                search={selectedProject ? { projectId: selectedProject.id } : {}}
+                className={navLinkClass(isOrgActive)}
+              >
                 <BuildingIcon className="size-4 shrink-0" aria-hidden="true" />
                 Organisation
               </Link>
