@@ -14,6 +14,9 @@ export function FollowUpAgentBubble({
     <AgentMessageContent
       artifacts={followUp.artifacts}
       completedAt={followUp.completedAt}
+      diffAdditions={followUp.diffAdditions}
+      diffDeletions={followUp.diffDeletions}
+      diffFileCount={followUp.diffFileCount}
       error={followUp.error}
       isRunning={isRunning}
       logs={followUp.logs}

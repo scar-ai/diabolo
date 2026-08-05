@@ -8,10 +8,14 @@ import type {
 import { AgentTextStream } from "./agent-text-stream";
 import { TaskActivityPanel } from "./task-activity-panel";
 import { TaskArtifactList } from "./task-artifact-list";
+import { TaskDiffPanel } from "./task-diff-panel";
 
 type AgentMessageContentProps = {
   artifacts: ParsedTaskArtifact[];
   completedAt?: Date | string | null;
+  diffAdditions?: number | null;
+  diffDeletions?: number | null;
+  diffFileCount?: number | null;
   error?: string | null;
   isRunning: boolean;
   logs?: string | null;
@@ -26,6 +30,9 @@ type AgentMessageContentProps = {
 export function AgentMessageContent({
   artifacts,
   completedAt,
+  diffAdditions,
+  diffDeletions,
+  diffFileCount,
   error,
   isRunning,
   logs,
@@ -40,6 +47,8 @@ export function AgentMessageContent({
   // the bubble renders blank and looks like the UI dropped the response.
   const hasNoResponse =
     !isRunning && !error && !responseMessages.some((message) => message.text.trim());
+  // The diff describes a finished run, and is only recorded once the run ends.
+  const showDiff = !isRunning && Boolean(messageId) && (diffFileCount ?? 0) > 0;
 
   return (
     <div className="flex w-full flex-col gap-3">
@@ -68,6 +77,16 @@ export function AgentMessageContent({
           <p className="text-xs font-medium text-destructive">Error</p>
           <p className="mt-0.5 text-xs text-destructive/80">{error}</p>
         </div>
+      ) : null}
+
+      {showDiff && messageId ? (
+        <TaskDiffPanel
+          additions={diffAdditions ?? 0}
+          deletions={diffDeletions ?? 0}
+          fileCount={diffFileCount ?? 0}
+          messageId={messageId}
+          taskId={taskId}
+        />
       ) : null}
 
       <TaskArtifactList artifacts={artifacts} />

@@ -232,6 +232,13 @@
       "when": 1785849295299,
       "tag": "0033_stiff_swarm",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1785927994526,
+      "tag": "0034_workable_proudstar",
+      "breakpoints": true
     }
   ]
 }

@@ -97,6 +97,16 @@ const taskIdInputSchema = z.object({
   taskId: z.string().min(1),
 });
 
+const taskDiffFilesInputSchema = z.object({
+  messageId: z.string().min(1),
+  taskId: z.string().min(1),
+});
+
+const taskDiffPatchInputSchema = z.object({
+  diffFileId: z.string().min(1),
+  taskId: z.string().min(1),
+});
+
 const followUpInputSchema = z.object({
   model: z.string().trim().min(1).nullable().optional(),
   prompt: z.string().min(10),
@@ -237,6 +247,32 @@ export const $getTaskById = createServerFn({ method: "GET" })
   .handler(
     async ({ context, data }) =>
       unwrap(Project.getTaskForUser(data.taskId, context.user.id)) as Promise<any>,
+  );
+
+export const $listTaskDiffFiles = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .validator((data) => taskDiffFilesInputSchema.parse(data))
+  .handler(async ({ context, data }) =>
+    unwrap(
+      Project.listTaskDiffFilesForUser({
+        messageId: data.messageId,
+        taskId: data.taskId,
+        userId: context.user.id,
+      }),
+    ),
+  );
+
+export const $getTaskDiffFilePatch = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .validator((data) => taskDiffPatchInputSchema.parse(data))
+  .handler(async ({ context, data }) =>
+    unwrap(
+      Project.getTaskDiffFilePatchForUser({
+        diffFileId: data.diffFileId,
+        taskId: data.taskId,
+        userId: context.user.id,
+      }),
+    ),
   );
 
 export const $listChildTasksByParentId = createServerFn({ method: "GET" })

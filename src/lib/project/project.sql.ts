@@ -232,6 +232,11 @@ export const taskMessage = pgTable(
     status: text().notNull().default("pending"),
     queuePosition: integer("queue_position"),
     stage: text().notNull().default("Queued"),
+    // Summary of the workspace diff this exchange produced. Stored on the
+    // message so the conversation can offer the diff without loading patches.
+    diffFileCount: integer("diff_file_count"),
+    diffAdditions: integer("diff_additions"),
+    diffDeletions: integer("diff_deletions"),
     logs: text(),
     responseMessages: text(),
     error: text(),
@@ -297,6 +302,36 @@ export const taskArtifact = pgTable(
   ],
 );
 
+/**
+ * One row per file the agent changed during a message, patch included. Kept out
+ * of `task_artifact` because patches are large and are only ever read when a
+ * user opens a specific file, never as part of the task detail payload.
+ */
+export const taskDiffFile = pgTable(
+  "task_diff_file",
+  {
+    id: text().primaryKey(),
+    taskId: text("task_id")
+      .notNull()
+      .references(() => task.id, { onDelete: "cascade" }),
+    messageId: text("message_id").references(() => taskMessage.id, { onDelete: "cascade" }),
+    filePath: text("file_path").notNull(),
+    previousPath: text("previous_path"),
+    changeType: text("change_type").notNull().default("modified"),
+    additions: integer().notNull().default(0),
+    deletions: integer().notNull().default(0),
+    isBinary: integer("is_binary").notNull().default(0),
+    truncated: integer().notNull().default(0),
+    patch: text(),
+    position: integer().notNull().default(0),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("task_diff_file_taskId_idx").on(table.taskId),
+    index("task_diff_file_messageId_idx").on(table.messageId),
+  ],
+);
+
 export const taskEventSequence = pgTable(
   "task_event_sequence",
   {
@@ -337,6 +372,7 @@ export const projectInviteRelations = relations(projectInvite, ({ one }) => ({
 
 export const taskRelations = relations(task, ({ many, one }) => ({
   artifacts: many(taskArtifact),
+  diffFiles: many(taskDiffFile),
   children: many(task, { relationName: "task_children" }),
   events: many(taskEvent),
   messages: many(taskMessage),
@@ -399,6 +435,17 @@ export const taskEventRelations = relations(taskEvent, ({ one }) => ({
   }),
   task: one(task, {
     fields: [taskEvent.taskId],
+    references: [task.id],
+  }),
+}));
+
+export const taskDiffFileRelations = relations(taskDiffFile, ({ one }) => ({
+  message: one(taskMessage, {
+    fields: [taskDiffFile.messageId],
+    references: [taskMessage.id],
+  }),
+  task: one(task, {
+    fields: [taskDiffFile.taskId],
     references: [task.id],
   }),
 }));

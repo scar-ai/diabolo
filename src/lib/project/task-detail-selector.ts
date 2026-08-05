@@ -24,6 +24,9 @@ type ParsedConversationMessage = {
   artifacts: ParsedTaskArtifact[];
   completedAt?: Date | string | null;
   createdByUserId?: string | null;
+  diffAdditions?: number | null;
+  diffDeletions?: number | null;
+  diffFileCount?: number | null;
   error?: string | null;
   id: string;
   kind: string;
@@ -110,6 +113,9 @@ const selectParsedTaskDetail = (task: Project.TaskDetailRecord) => {
           artifacts: artifacts.filter((artifact) => artifact.messageId === message.id),
           completedAt: message.completedAt,
           createdByUserId: message.createdByUserId,
+          diffAdditions: message.diffAdditions,
+          diffDeletions: message.diffDeletions,
+          diffFileCount: message.diffFileCount,
           error: message.error,
           id: message.id,
           kind: message.kind,
@@ -155,6 +161,9 @@ const selectParsedTaskDetail = (task: Project.TaskDetailRecord) => {
           artifacts: [],
           completedAt: entry.completedAt,
           createdByUserId: null,
+          diffAdditions: null,
+          diffDeletions: null,
+          diffFileCount: null,
           error: entry.error,
           id: entry.id,
           kind: "follow_up",

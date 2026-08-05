@@ -8,6 +8,7 @@ import { findTaskWithProject } from "@/lib/project/data";
 import { parseStoredProjectSkills } from "@/lib/project/skills";
 import { resolveTaskTitle } from "@/lib/project/title";
 import { Sandbox } from "@/lib/sandbox";
+import { captureWorkspaceDiff, readWorkspaceBaseCommit } from "@/lib/sandbox/diff";
 import {
   buildOpenCodeRuntimeEnvironment,
   ensureOpenCodeServer,
@@ -23,6 +24,7 @@ import {
   findTaskRecord,
   listCompletedMessagesBeforeSequence,
   listTaskArtifactsByMessageId,
+  replaceTaskDiffFiles,
   updateTaskMessageRecord,
   updateTaskRecord,
 } from "@/lib/sandbox/store";
@@ -157,6 +159,51 @@ const prepareMessageAttachments = async (input: {
   }
 
   return attachments;
+};
+
+/**
+ * Records the run's file changes so the finished exchange can show a diff.
+ * Never fatal: a task that produced real work must not be reported as failed
+ * because its diff could not be read back out of the sandbox.
+ */
+const recordMessageDiff = async (input: {
+  baseCommit: string | null;
+  messageId: string;
+  prepared: { sandbox: Sandbox.Session; sandboxPath: string };
+  taskId: string;
+}) => {
+  if (!input.baseCommit) {
+    return;
+  }
+
+  const op = log.child({ messageId: input.messageId, taskId: input.taskId });
+
+  try {
+    const files = await captureWorkspaceDiff({
+      baseCommit: input.baseCommit,
+      messageId: input.messageId,
+      run: runSandboxCommand,
+      sandbox: input.prepared.sandbox,
+      sandboxPath: input.prepared.sandboxPath,
+      taskId: input.taskId,
+    });
+
+    await replaceTaskDiffFiles({
+      files,
+      messageId: input.messageId,
+      taskId: input.taskId,
+    });
+
+    await updateTaskMessageRecord(input.messageId, {
+      diffAdditions: files.reduce((total, file) => total + file.additions, 0),
+      diffDeletions: files.reduce((total, file) => total + file.deletions, 0),
+      diffFileCount: files.length,
+    });
+
+    op.info("workspace diff recorded", { fileCount: files.length });
+  } catch (error) {
+    op.warn("failed to record workspace diff", { error });
+  }
 };
 
 const loadTaskExecutionContext = async (taskId: string, messageId: string) => {
@@ -299,6 +346,13 @@ const runOpenCodeMessage = async (input: {
     60,
     "refresh git exclude",
   );
+  const diffBaseCommit = await readWorkspaceBaseCommit({
+    messageId: input.messageId,
+    run: runSandboxCommand,
+    sandbox: input.prepared.sandbox,
+    sandboxPath: input.prepared.sandboxPath,
+    taskId: input.taskId,
+  });
   await ensureOpenCodeServer({
     environment: openCodeEnvironment,
     messageId: input.messageId,
@@ -475,6 +529,12 @@ const runOpenCodeMessage = async (input: {
     60,
     "inspect git status",
   );
+  await recordMessageDiff({
+    baseCommit: diffBaseCommit,
+    messageId: input.messageId,
+    prepared: input.prepared,
+    taskId: input.taskId,
+  });
   const handoffState = await syncGitHandoffState({
     messageId: input.messageId,
     repoDefaultBranch: input.repo.defaultBranch,

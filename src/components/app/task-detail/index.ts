@@ -3,6 +3,7 @@ export { FollowUpAgentBubble } from "./follow-up-agent-bubble";
 export { TaskArtifactList } from "./task-artifact-list";
 export { TaskChildList } from "./task-child-list";
 export { TaskConversation } from "./task-conversation";
+export { TaskDiffPanel } from "./task-diff-panel";
 export { TaskFollowUpComposer } from "./task-follow-up-composer";
 export { UserBubble } from "./user-bubble";
 export type { ParsedFollowUp, TaskData } from "./types";

@@ -6,10 +6,12 @@ import type { JsonObject } from "@/lib/json";
 import {
   task,
   taskArtifact,
+  taskDiffFile,
   taskEvent,
   taskEventSequence,
   taskMessage,
 } from "@/lib/project/project.sql";
+import type { ParsedDiffFile } from "@/lib/task-diff";
 import { findUserById } from "@/lib/user/data";
 
 import type { Sandbox } from "./index";
@@ -326,6 +328,64 @@ export const createTaskArtifact = async (input: {
     parsedMetadata: parseJson<JsonObject>(row.metadata),
   };
 };
+
+/**
+ * A message's diff is rewritten wholesale each time its run finishes, so a
+ * retried or resumed run never leaves stale files behind.
+ */
+export const replaceTaskDiffFiles = async (input: {
+  files: ParsedDiffFile[];
+  messageId: string;
+  taskId: string;
+}) =>
+  db.transaction(async (tx) => {
+    await tx.delete(taskDiffFile).where(eq(taskDiffFile.messageId, input.messageId));
+
+    if (input.files.length === 0) {
+      return;
+    }
+
+    await tx.insert(taskDiffFile).values(
+      input.files.map((file, index) => ({
+        additions: file.additions,
+        changeType: file.changeType,
+        deletions: file.deletions,
+        filePath: file.filePath,
+        id: crypto.randomUUID(),
+        isBinary: file.isBinary ? 1 : 0,
+        messageId: input.messageId,
+        patch: file.patch,
+        position: index,
+        previousPath: file.previousPath,
+        taskId: input.taskId,
+        truncated: file.truncated ? 1 : 0,
+      })),
+    );
+  });
+
+/** File list for a message's diff, without the patches themselves. */
+export const listTaskDiffFileSummaries = (taskId: string, messageId: string) =>
+  db
+    .select({
+      additions: taskDiffFile.additions,
+      changeType: taskDiffFile.changeType,
+      deletions: taskDiffFile.deletions,
+      filePath: taskDiffFile.filePath,
+      id: taskDiffFile.id,
+      isBinary: taskDiffFile.isBinary,
+      previousPath: taskDiffFile.previousPath,
+      truncated: taskDiffFile.truncated,
+    })
+    .from(taskDiffFile)
+    .where(and(eq(taskDiffFile.taskId, taskId), eq(taskDiffFile.messageId, messageId)))
+    .orderBy(asc(taskDiffFile.position), asc(taskDiffFile.filePath));
+
+export const findTaskDiffFile = (diffFileId: string) =>
+  db
+    .select()
+    .from(taskDiffFile)
+    .where(eq(taskDiffFile.id, diffFileId))
+    .then((rows) => rows[0]);
 
 export const claimNextTaskMessage = (taskId: string) =>
   db.transaction(async (tx) => {

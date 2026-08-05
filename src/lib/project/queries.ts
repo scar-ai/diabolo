@@ -8,7 +8,9 @@ import {
   $getProjectCollaborators,
   $getProjectInvites,
   $getServerTime,
+  $getTaskDiffFilePatch,
   $listScheduledTasks,
+  $listTaskDiffFiles,
   $getTaskById,
   $listAllUserTaskSummaries,
   $listAllUserTasks,
@@ -43,6 +45,10 @@ export const serverTimeKeys = {
 export const taskKeys = {
   all: ["tasks"] as const,
   detail: (taskId: string) => [...taskKeys.all, "detail", taskId] as const,
+  diffFiles: (taskId: string, messageId: string) =>
+    [...taskKeys.all, "diff-files", taskId, messageId] as const,
+  diffPatch: (taskId: string, diffFileId: string) =>
+    [...taskKeys.all, "diff-patch", taskId, diffFileId] as const,
   /**
    * Live-only state pushed by the websocket — reasoning and token totals that
    * are never fetched or persisted. It is a query key purely so components can
@@ -103,6 +109,24 @@ export const taskDetailQueryOptions = (taskId: string) =>
     queryKey: taskKeys.detail(taskId),
     select: (task) => (task ? selectParsedTaskDetail(task) : task),
     staleTime: 2_000,
+  });
+
+/**
+ * A finished run's diff never changes, so both of these are fetched once, on
+ * demand — the file list when the panel opens, a patch when a file is picked.
+ */
+export const taskDiffFilesQueryOptions = (taskId: string, messageId: string) =>
+  queryOptions({
+    queryFn: ({ signal }) => $listTaskDiffFiles({ data: { messageId, taskId }, signal }),
+    queryKey: taskKeys.diffFiles(taskId, messageId),
+    staleTime: Infinity,
+  });
+
+export const taskDiffPatchQueryOptions = (taskId: string, diffFileId: string) =>
+  queryOptions({
+    queryFn: ({ signal }) => $getTaskDiffFilePatch({ data: { diffFileId, taskId }, signal }),
+    queryKey: taskKeys.diffPatch(taskId, diffFileId),
+    staleTime: Infinity,
   });
 
 export const collaboratorKeys = {

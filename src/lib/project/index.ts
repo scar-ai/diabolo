@@ -28,7 +28,12 @@ import {
 } from "@/lib/project/ssh";
 import { fromPromise } from "@/lib/result";
 import { Sandbox } from "@/lib/sandbox";
-import { findNextPendingTaskMessage, findProcessingTaskMessage } from "@/lib/sandbox/store";
+import {
+  findNextPendingTaskMessage,
+  findProcessingTaskMessage,
+  findTaskDiffFile,
+  listTaskDiffFileSummaries,
+} from "@/lib/sandbox/store";
 import { normalizeSandboxTierId } from "@/lib/sandbox/tiers";
 import { detectRepoSkills, type DetectedRepoSkillEntry } from "@/lib/skills/repository";
 import { resolveUserProvider } from "@/lib/user/provider-resolution";
@@ -793,6 +798,33 @@ export namespace Project {
         fromPromise(buildTaskDetail(latest.id)),
       ),
     );
+
+  export const listTaskDiffFilesForUser = (input: {
+    messageId: string;
+    taskId: string;
+    userId: string;
+  }) =>
+    requireTaskForUser(input.taskId, input.userId).andThen(() =>
+      fromPromise(listTaskDiffFileSummaries(input.taskId, input.messageId)),
+    );
+
+  export const getTaskDiffFilePatchForUser = (input: {
+    diffFileId: string;
+    taskId: string;
+    userId: string;
+  }) =>
+    requireTaskForUser(input.taskId, input.userId)
+      .andThen(() => fromPromise(findTaskDiffFile(input.diffFileId)))
+      .andThen((file) =>
+        file && file.taskId === input.taskId
+          ? okAsync({
+              filePath: file.filePath,
+              isBinary: file.isBinary === 1,
+              patch: file.patch ?? "",
+              truncated: file.truncated === 1,
+            })
+          : errAsync(new Error("Diff file not found.")),
+      );
 
   export const getTaskRuntimeById = (taskId: string): ResultAsync<TaskRecord, Error> =>
     fromPromise(findTask(taskId)).andThen((task) =>
